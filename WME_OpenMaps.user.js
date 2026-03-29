@@ -3,6 +3,7 @@
 // @author      Horizon911
 // @namespace      https://github.com/horizon911/
 // @contributor  Glodenox
+// @contributor  petrjanik, d2-mac, MajkiiTelini (Czech WMS layers — ČÚZK definitions)
 // @description This userscript augments the Waze Map Editor by allowing editors to overlay external, open-data maps (such as local cadasters, high-resolution orthophotos, and administrative boundaries) directly onto the editing canvas.
 // @include     https://www.waze.com/editor*
 // @include     https://www.waze.com/*/editor*
@@ -58,13 +59,15 @@
 // @connect     financien.belgium.be
 // @connect     support.google.com
 // @connect     www.vlaanderen.be
+// @connect     geoportal.cuzk.gov.cz
+// @connect     ags.cuzk.gov.cz
 // @connect     *
 // @icon        https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Candy/3D/candy_3d.png
 // @downloadURL https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.03.21.2
+// @version     2026.03.29.01
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -113,13 +116,96 @@ async function onWmeReady() {
       layer_out_of_range: 'Map might not display at the current zoom level',
       satellite_imagery: 'Display satellite imagery',
       select_map: 'Select a map to add',
+      maps_to_add_title: 'Maps to add',
+      add_maps_filter_mode_aria: 'Filter maps to add by viewport',
+      add_maps_none_in_view: 'No maps cover this view. Choose All or pan the map.',
+      add_map_no_matches: 'No maps match your search',
+      add_map_all_added: 'All maps are already added',
       opacity_label: 'Opacity',
-      opacity_label_tooltip: 'Adjust how transparant the layer is',
+      opacity_label_tooltip: 'Adjust how transparent the layer is',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Make the map background transparent',
       map_improvement_label: 'Improve map display',
       map_improvement_label_tooltip: 'Apply several improvements to the received map tiles',
       map_layers_title: 'Map layers',
+      find_available_layers: 'Find available layers',
+      find_available_layers_loading: 'Querying server…',
+      find_available_layers_loaded: 'Available layers loaded',
+      find_available_layers_retry: 'Fetch failed (click to retry)',
+      terms_section_title: 'Terms of Use',
+      tou_section_status_accepted: 'Accepted',
+      tou_section_status_required: 'Action required',
+      tou_section_status_dismissed: 'Unverified (this session)',
+      favorite_add: 'Add to favorites',
+      favorite_remove: 'Remove from favorites',
+      layer_group_title: 'Open Maps',
+      meta_type: 'Type',
+      meta_region: 'Region',
+      meta_bbox: 'BBox',
+      draw_bbox_on_map: 'Draw boundary box on map',
+      visual_adjustments: 'Visual adjustments',
+      slider_brightness: 'Brightness',
+      slider_contrast: 'Contrast',
+      slider_saturation: 'Saturation',
+      slider_hue_rotate: 'Hue rotate',
+      slider_gamma: 'Gamma',
+      blend_mode_label: 'Blend mode',
+      invert_colors: 'Invert colors (dark mode)',
+      reset_visual_default: 'Reset to default',
+      map_options_toggle: 'Map details and layers',
+      zoom_to_map_area: 'Zoom to map area',
+      visibility_locked_tou: 'Accept Terms of Use first',
+      tou_config_error: 'Configuration error',
+      tou_link_accepted: 'Terms of Use (accepted)',
+      tou_link_dismissed: 'Terms of Use (dismissed — unverified)',
+      tou_link_required: 'Terms of Use (required)',
+      tou_invalid_title: 'Invalid map configuration',
+      tou_invalid_body: 'This map requires a Terms of Use entry (touId) in the script, but it is missing or invalid. The map stays locked for safety. Contact the script maintainer.',
+      tou_desc_accepted: 'You have accepted the terms. You can review them below:',
+      tou_desc_dismissed: 'The Terms of Use page could not be verified. You dismissed the warning for this session only; the layer is unlocked but this is not recorded acceptance.',
+      tou_desc_required: 'Before enabling this layer, review and accept the terms:',
+      tou_read_terms_in: 'Read terms in:',
+      tou_accept: 'I Accept',
+      tou_unreachable_title: 'Terms of Use page could not be loaded',
+      tou_unreachable_detail_suffix: ' The I Accept button stays off until the page can be verified; nothing is saved to storage.',
+      tou_unreachable_hint: 'Dismiss hides this notice and unlocks the layer for this session; nothing is recorded as acceptance. Reload clears this; contact the script author if it persists.',
+      tou_dismiss_session: 'Dismiss for this session',
+      tou_reachable_line: 'Terms of Use page reachable — verified {when}.',
+      tou_stats_accepted: 'Accepted',
+      tou_stats_baseline_length: 'Baseline length',
+      tou_stats_last_checked: 'Last checked',
+      tou_stats_next_check: 'Next check',
+      tou_stats_pending: 'Pending…',
+      tou_stats_on_next_reload: 'On next reload',
+      tou_stats_chars: '{n} chars',
+      tou_force_check: 'Force check now',
+      tou_checking_url: 'Checking live URL…',
+      tou_baseline_saved: 'Baseline saved!',
+      tou_unchanged: 'Unchanged ({variance})',
+      tou_revoked: 'WME Open Maps:\n\nTerms of Use have changed by {percent}%!\n\nConsent has been revoked. Please read and re-accept.',
+      notice_dismiss: 'Dismiss',
+      tou_gate_banner: '"{title}" was added. Expand its row and accept Terms of Use before turning it on.',
+      add_map_pick_hint: 'Open the list or type to filter maps.',
+      active_maps_filter_placeholder: 'Filter active maps…',
+      active_maps_filter_all: 'All',
+      active_maps_filter_favorites: 'Favorites',
+      active_maps_filter_in_view: 'In view',
+      active_maps_filter_visible: 'Visible',
+      active_maps_filter_tou_pending: 'ToU pending',
+      active_maps_filter_no_match: 'No maps match these filters.',
+      active_maps_filter_mode_aria: 'Filter active maps list',
+      reset_terms_button: 'Revoke all map terms (reload)',
+      reset_terms_confirm: 'Revoke all saved Terms of Use? Affected maps stay locked until you accept again. The page will reload.',
+      query_window_close: 'Close query results',
+      query_window_minimize: 'Minimize or restore panel height',
+      query_results_for: 'Query results: {title}',
+      tou_gate_add_alert: 'Open Maps — Terms of Use\n\n"{title}" requires you to review and accept its terms in the Open Maps sidebar before it can turn on. Expand this map (chevron), open Terms of Use, follow the legal links, then tap I Accept.\n\nThis is normal; the script is working.',
+      tou_pending_hint: 'Terms of Use acceptance required',
+      no_layers_enabled_hint: 'No map layers are enabled. Open map options and turn on at least one layer.',
+      tou_link_probe_checking: 'Checking whether the Terms of Use page can be reached…',
+      tou_link_probe_ok: 'Terms of Use page is reachable — verified {when}.',
+      tou_link_probe_fail: 'Terms of Use page could not be loaded ({detail}).',
+      tou_accept_disabled_tooltip: 'Open every language link above first to enable.',
       errors: {
         network: 'Network error',
         network_description: 'Received the following status code when retrieving information: ',
@@ -137,6 +223,7 @@ async function onWmeReady() {
         OM: 'Oman',
         US: 'United States',
         HR: 'Croatia',
+        CZ: 'Czechia',
         UN: 'Universal',
         EU: 'European Union'
       },
@@ -248,7 +335,9 @@ async function onWmeReady() {
         v3_2_33: '- Fixed Luchtfoto 2025 map layers (NL)',
         v3_2_34: '- Fixed broken map layer reordering',
         v3_2_35: '- WV Leaves Off layers updated (US)',
-        v3_2_36: '- Add Orthophotos 2024 map (BE)\n- Limit default BAG objects shown (NL)'
+        v3_2_36: '- Add Orthophotos 2024 map (BE)\n- Limit default BAG objects shown (NL)',
+        v3_2_37: '- Added ČÚZK (Czechia) WMS maps (CZ)',
+        v3_2_38: '- Migrate ČÚZK WMS to ags.cuzk.gov.cz (ortofoto, GeoNames, ZABAGED polohopis); add Přehledová mapa overview (CZ)'
       }
     },
     nl: {
@@ -276,6 +365,11 @@ async function onWmeReady() {
       layer_out_of_range: 'Deze kaart wordt mogelijk niet weergegeven op dit zoomniveau',
       satellite_imagery: 'Geef satellietbeelden weer',
       select_map: 'Selecteer een kaart om toe te voegen',
+      maps_to_add_title: 'Toe te voegen kaarten',
+      add_maps_filter_mode_aria: 'Filter toe te voegen kaarten op kaartbeeld',
+      add_maps_none_in_view: 'Geen kaarten voor dit beeld. Kies Alle of verschuif de kaart.',
+      add_map_no_matches: 'Geen kaarten komen overeen met je zoekopdracht',
+      add_map_all_added: 'Alle kaarten zijn al toegevoegd',
       opacity_label: 'Doorzichtigheid',
       opacity_label_tooltip: 'Wijzig de doorzichtigheid van de kaart',
       transparent_label: 'Transparent',
@@ -283,6 +377,84 @@ async function onWmeReady() {
       map_improvement_label: 'Kaartweergave verbeteren',
       map_improvement_label_tooltip: 'Pas allerhande verbeteringen toe op de kaarttegels',
       map_layers_title: 'Kaartlagen',
+      find_available_layers: 'Beschikbare lagen zoeken',
+      find_available_layers_loading: 'Server bevragen…',
+      find_available_layers_loaded: 'Beschikbare lagen geladen',
+      find_available_layers_retry: 'Ophalen mislukt (klik om opnieuw te proberen)',
+      terms_section_title: 'Gebruiksvoorwaarden',
+      tou_section_status_accepted: 'Geaccepteerd',
+      tou_section_status_required: 'Actie vereist',
+      tou_section_status_dismissed: 'Niet geverifieerd (deze sessie)',
+      favorite_add: 'Toevoegen aan favorieten',
+      favorite_remove: 'Verwijderen uit favorieten',
+      layer_group_title: 'Open Maps',
+      meta_type: 'Type',
+      meta_region: 'Regio',
+      meta_bbox: 'BBox',
+      draw_bbox_on_map: 'Begrenzingskader op de kaart tekenen',
+      visual_adjustments: 'Visuele aanpassingen',
+      slider_brightness: 'Helderheid',
+      slider_contrast: 'Contrast',
+      slider_saturation: 'Verzadiging',
+      slider_hue_rotate: 'Tint draaien',
+      slider_gamma: 'Gamma',
+      blend_mode_label: 'Mengmodus',
+      invert_colors: 'Kleuren omkeren (donkere modus)',
+      reset_visual_default: 'Standaard herstellen',
+      map_options_toggle: 'Kaartdetails en lagen',
+      zoom_to_map_area: 'Inzoomen op kaartgebied',
+      visibility_locked_tou: 'Accepteer eerst de gebruiksvoorwaarden',
+      tou_config_error: 'Configuratiefout',
+      tou_link_accepted: 'Gebruiksvoorwaarden (geaccepteerd)',
+      tou_link_dismissed: 'Gebruiksvoorwaarden (genegeerd — niet geverifieerd)',
+      tou_link_required: 'Gebruiksvoorwaarden (vereist)',
+      tou_invalid_title: 'Ongeldige kaartconfiguratie',
+      tou_invalid_body: 'Deze kaart vereist een gebruiksvoorwaardenvermelding (touId) in het script, maar die ontbreekt of is ongeldig. De kaart blijft geblokkeerd. Neem contact op met de onderhouder.',
+      tou_desc_accepted: 'Je hebt de voorwaarden geaccepteerd. Je kunt ze hieronder opnieuw bekijken:',
+      tou_desc_dismissed: 'De pagina met gebruiksvoorwaarden kon niet worden geverifieerd. Je hebt de waarschuwing voor deze sessie genegeerd; de laag is ontgrendeld maar dit telt niet als acceptatie.',
+      tou_desc_required: 'Schakel deze laag pas in na het lezen en accepteren van de voorwaarden:',
+      tou_read_terms_in: 'Lees de voorwaarden in:',
+      tou_accept: 'Ik accepteer',
+      tou_unreachable_title: 'Pagina met gebruiksvoorwaarden kon niet worden geladen',
+      tou_unreachable_detail_suffix: ' De knop Ik accepteer blijft uit tot de pagina geverifieerd is; er wordt niets opgeslagen.',
+      tou_unreachable_hint: 'Negeren verbergt deze melding en ontgrendelt de laag voor deze sessie; er wordt geen acceptatie vastgelegd. Herladen wist dit; neem contact op met de auteur als het aanhoudt.',
+      tou_dismiss_session: 'Negeren voor deze sessie',
+      tou_reachable_line: 'Pagina met gebruiksvoorwaarden bereikbaar — gecontroleerd {when}.',
+      tou_stats_accepted: 'Geaccepteerd',
+      tou_stats_baseline_length: 'Basislengte',
+      tou_stats_last_checked: 'Laatst gecontroleerd',
+      tou_stats_next_check: 'Volgende controle',
+      tou_stats_pending: 'In afwachting…',
+      tou_stats_on_next_reload: 'Bij volgende herladen',
+      tou_stats_chars: '{n} tekens',
+      tou_force_check: 'Nu geforceerd controleren',
+      tou_checking_url: 'Live-URL controleren…',
+      tou_baseline_saved: 'Basis opgeslagen!',
+      tou_unchanged: 'Ongewijzigd ({variance})',
+      tou_revoked: 'WME Open Maps:\n\nGebruiksvoorwaarden zijn met {percent}% gewijzigd!\n\nToestemming is ingetrokken. Lees en accepteer opnieuw.',
+      notice_dismiss: 'Sluiten',
+      tou_gate_banner: '"{title}" is toegevoegd. Vouw de rij uit en accepteer de gebruiksvoorwaarden voordat je de kaart inschakelt.',
+      add_map_pick_hint: 'Open de lijst of typ om te filteren.',
+      active_maps_filter_placeholder: 'Filter actieve kaarten…',
+      active_maps_filter_all: 'Alle',
+      active_maps_filter_favorites: 'Favorieten',
+      active_maps_filter_in_view: 'In beeld',
+      active_maps_filter_visible: 'Zichtbaar',
+      active_maps_filter_tou_pending: 'Gebruiksvoorwaarden open',
+      active_maps_filter_no_match: 'Geen kaarten voldoen aan deze filters.',
+      active_maps_filter_mode_aria: 'Lijst actieve kaarten filteren',
+      reset_terms_button: 'Alle kaartvoorwaarden intrekken (herladen)',
+      reset_terms_confirm: 'Alle opgeslagen gebruiksvoorwaarden intrekken? Getroffen kaarten blijven geblokkeerd tot je opnieuw accepteert. De pagina wordt herladen.',
+      query_window_close: 'Queryresultaten sluiten',
+      query_window_minimize: 'Paneelhoogte minimaliseren of herstellen',
+      query_results_for: 'Queryresultaten: {title}',
+      tou_gate_add_alert: 'Open Maps — gebruiksvoorwaarden\n\n"{title}" vereist dat je de voorwaarden in de Open Maps-zijbalk bekijkt en accepteert voordat de kaart kan worden ingeschakeld. Vouw deze kaart uit (pijl), open Gebruiksvoorwaarden, volg de links, en tik op Ik accepteer.\n\nDit is normaal; het script werkt.',
+      tou_pending_hint: 'Acceptatie van gebruiksvoorwaarden vereist',
+      no_layers_enabled_hint: 'Geen kaartlagen ingeschakeld. Open de kaartopties en zet minstens één laag aan.',
+      tou_link_probe_checking: 'Controleren of de pagina met gebruiksvoorwaarden bereikbaar is…',
+      tou_link_probe_ok: 'Pagina met gebruiksvoorwaarden is bereikbaar — gecontroleerd {when}.',
+      tou_link_probe_fail: 'Pagina met gebruiksvoorwaarden kon niet worden geladen ({detail}).',
+      tou_accept_disabled_tooltip: 'Open eerst elke taallink hierboven.',
       errors: {
         network: 'Networkfout',
         network_description: 'Bij het opvragen van informatie werd de volgende statuscode ontvangen: ',
@@ -300,6 +472,7 @@ async function onWmeReady() {
         OM: 'Oman',
         US: 'Verenigde Staten',
         HR: 'Kroatië',
+        CZ: 'Tsjechië',
         UN: 'Universal',
         EU: 'European Union'
       },
@@ -411,12 +584,25 @@ async function onWmeReady() {
         v3_2_33: '- Luchtfoto 2025 kaartlagen hersteld (NL)',
         v3_2_34: '- Rangschikken van kaartlagen hersteld',
         v3_2_35: '- WV Leaves Off layers updated (US)',
-        v3_2_36: '- Orthophotos 2024 kaart toegevoegd (BE)\n- Toon standaard alleen verblijfsobjecten in BAG (NL)'
+        v3_2_36: '- Orthophotos 2024 kaart toegevoegd (BE)\n- Toon standaard alleen verblijfsobjecten in BAG (NL)',
+        v3_2_37: '- ČÚZK WMS-kaarten toegevoegd (CZ)',
+        v3_2_38: '- ČÚZK WMS gemigreerd naar ags.cuzk.gov.cz (ortofoto, GeoNames, ZABAGED polohopis); overzichtskaart Přehledová mapa toegevoegd (CZ)'
       }
     },
     fr: {
       tab_title: 'Open Maps',
       maps_title: 'Cartes Actives',
+      terms_section_title: 'Conditions d’utilisation',
+      tou_section_status_accepted: 'Accepté',
+      tou_section_status_required: 'Action requise',
+      tou_section_status_dismissed: 'Non vérifié (cette session)',
+      find_available_layers: 'Trouver les couches disponibles',
+      find_available_layers_loading: 'Interrogation du serveur…',
+      find_available_layers_loaded: 'Couches disponibles chargées',
+      find_available_layers_retry: 'Échec du chargement (cliquer pour réessayer)',
+      tou_pending_hint: 'Acceptation des conditions d’utilisation requise',
+      no_layers_enabled_hint: 'Aucune couche de carte n’est activée. Ouvrez les options de la carte et activez au moins une couche.',
+      tou_accept_disabled_tooltip: 'Ouvrez d’abord chaque lien de langue ci-dessus.',
       no_local_maps: 'Aucune carte disponible ici',
       opacity_label: 'Opacité',
       areas: {
@@ -427,6 +613,7 @@ async function onWmeReady() {
         OM: 'Oman',
         US: 'États Unis',
         HR: 'Croatie',
+        CZ: 'Tchéquie',
         UN: 'Universal',
         EU: 'European Union'
       },
@@ -453,6 +640,8 @@ async function onWmeReady() {
       layer_out_of_range: 'Mapa não pode ser exibido no nível de zoom atual',
       satellite_imagery: 'Mostrar imagem satélite',
       select_map: 'Selecione o mapa para adicionar',
+      add_map_no_matches: 'Nenhum mapa corresponde à sua busca',
+      add_map_all_added: 'Todos os mapas já foram adicionados',
       opacity_label: 'Opacidade',
       opacity_label_tooltip: 'Ajustar a transparência da camada',
       transparent_label: 'Transparência',
@@ -460,6 +649,76 @@ async function onWmeReady() {
       map_improvement_label: 'Melhorar a exibição do mapa',
       map_improvement_label_tooltip: 'Aplique várias melhorias nos blocos de mapa',
       map_layers_title: 'Camadas do mapa',
+      find_available_layers: 'Encontrar camadas disponíveis',
+      find_available_layers_loading: 'Consultando o servidor…',
+      find_available_layers_loaded: 'Camadas disponíveis carregadas',
+      find_available_layers_retry: 'Falha ao obter (clique para tentar de novo)',
+      terms_section_title: 'Termos de uso',
+      tou_section_status_accepted: 'Aceito',
+      tou_section_status_required: 'Ação necessária',
+      tou_section_status_dismissed: 'Não verificado (esta sessão)',
+      favorite_add: 'Adicionar aos favoritos',
+      favorite_remove: 'Remover dos favoritos',
+      layer_group_title: 'Open Maps',
+      meta_type: 'Tipo',
+      meta_region: 'Região',
+      meta_bbox: 'BBox',
+      draw_bbox_on_map: 'Desenhar caixa de limite no mapa',
+      visual_adjustments: 'Ajustes visuais',
+      slider_brightness: 'Brilho',
+      slider_contrast: 'Contraste',
+      slider_saturation: 'Saturação',
+      slider_hue_rotate: 'Rotação de matiz',
+      slider_gamma: 'Gama',
+      blend_mode_label: 'Modo de mesclagem',
+      invert_colors: 'Inverter cores (modo escuro)',
+      reset_visual_default: 'Restaurar padrão',
+      map_options_toggle: 'Detalhes e camadas do mapa',
+      zoom_to_map_area: 'Aproximar área do mapa',
+      visibility_locked_tou: 'Aceite os Termos de uso primeiro',
+      tou_config_error: 'Erro de configuração',
+      tou_link_accepted: 'Termos de uso (aceitos)',
+      tou_link_dismissed: 'Termos de uso (dispensados — não verificados)',
+      tou_link_required: 'Termos de uso (obrigatório)',
+      tou_invalid_title: 'Configuração de mapa inválida',
+      tou_invalid_body: 'Este mapa exige uma entrada de Termos de uso (touId) no script, mas está ausente ou inválida. O mapa permanece bloqueado por segurança. Contacte o mantenedor do script.',
+      tou_desc_accepted: 'Você aceitou os termos. Pode revê-los abaixo:',
+      tou_desc_dismissed: 'A página dos Termos de uso não pôde ser verificada. Você dispensou o aviso só para esta sessão; a camada fica desbloqueada, mas isso não conta como aceitação.',
+      tou_desc_required: 'Antes de ativar esta camada, revise e aceite os termos:',
+      tou_read_terms_in: 'Ler termos em:',
+      tou_accept: 'Aceito',
+      tou_unreachable_title: 'A página dos Termos de uso não pôde ser carregada',
+      tou_unreachable_detail_suffix: ' O botão Aceito permanece desativado até a página ser verificada; nada é salvo.',
+      tou_unreachable_hint: 'Dispensar oculta este aviso e desbloqueia a camada nesta sessão; nada é registrado como aceitação. Recarregar limpa isto; contacte o autor se persistir.',
+      tou_dismiss_session: 'Dispensar nesta sessão',
+      tou_reachable_line: 'Página dos Termos de uso acessível — verificada em {when}.',
+      tou_stats_accepted: 'Aceito',
+      tou_stats_baseline_length: 'Tamanho da linha de base',
+      tou_stats_last_checked: 'Última verificação',
+      tou_stats_next_check: 'Próxima verificação',
+      tou_stats_pending: 'Pendente…',
+      tou_stats_on_next_reload: 'No próximo recarregamento',
+      tou_stats_chars: '{n} caracteres',
+      tou_force_check: 'Forçar verificação agora',
+      tou_checking_url: 'Verificando URL…',
+      tou_baseline_saved: 'Linha de base salva!',
+      tou_unchanged: 'Inalterado ({variance})',
+      tou_revoked: 'WME Open Maps:\n\nOs Termos de uso mudaram em {percent}%!\n\nO consentimento foi revogado. Leia e aceite novamente.',
+      notice_dismiss: 'Dispensar',
+      tou_gate_banner: '"{title}" foi adicionado. Expanda a linha e aceite os Termos de uso antes de ativar.',
+      add_map_pick_hint: 'Abra a lista ou digite para filtrar mapas.',
+      reset_terms_button: 'Revogar todos os termos de mapa (recarregar)',
+      reset_terms_confirm: 'Revogar todos os Termos de uso guardados? Os mapas afetados ficam bloqueados até aceitar de novo. A página será recarregada.',
+      query_window_close: 'Fechar resultados da consulta',
+      query_window_minimize: 'Minimizar ou restaurar altura do painel',
+      query_results_for: 'Resultados da consulta: {title}',
+      tou_gate_add_alert: 'Open Maps — Termos de uso\n\n"{title}" exige que você revise e aceite os termos na barra lateral Open Maps antes de ativar. Expanda este mapa (seta), abra Termos de uso, siga os links e toque em Aceito.\n\nIsso é esperado; o script está funcionando.',
+      tou_pending_hint: 'Aceitação dos termos de uso obrigatória',
+      no_layers_enabled_hint: 'Nenhuma camada do mapa está ativa. Abra as opções do mapa e ative pelo menos uma camada.',
+      tou_link_probe_checking: 'A verificar se a página dos termos de uso está acessível…',
+      tou_link_probe_ok: 'Página dos termos de uso acessível — verificada em {when}.',
+      tou_link_probe_fail: 'A página dos termos de uso não pôde ser carregada ({detail}).',
+      tou_accept_disabled_tooltip: 'Abra primeiro cada link de idioma acima.',
       errors: {
         network: 'Erro na rede',
         network_description: 'Recebido o seguinte código de status ao recuperar informações: ',
@@ -477,6 +736,7 @@ async function onWmeReady() {
         OM: 'Omã',
         US: 'Estados Unidos',
         HR: 'Croácia',
+        CZ: 'Tchéquia',
         UN: 'Universal',
         EU: 'European Union'
       }
@@ -2543,6 +2803,207 @@ async function onWmeReady() {
         'AD.Address': { queryable: false, title: 'Addresses' }
       }
     },
+    // Czechia ČÚZK WMS entries: derived from userscript "Czech WMS layers" (@author petrjanik, d2-mac, MajkiiTelini).
+    {
+      id: 42001,
+      title: 'ČÚZK Ortofoto',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://ags.cuzk.gov.cz/arcgis1/services/ORTOFOTO_WM/MapServer/WMSServer?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'ČÚZK orthophoto (ORTOFOTO_WM, Web Mercator).',
+      attribution: 'ČÚZK',
+      queryable: false,
+      default_layers: ['0'],
+      layers: {
+        0: { queryable: false, title: 'Orthophoto' }
+      }
+    },
+    {
+      id: 42002,
+      title: 'ČÚZK Katastrální mapa',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://services.cuzk.cz/wms/wms.asp?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'ČÚZK cadastral map WMS.',
+      attribution: 'ČÚZK',
+      queryable: false,
+      default_layers: ['hranice_parcel', 'dalsi_p_mapy', 'RST_KN'],
+      layers: {
+        hranice_parcel: { queryable: false, title: 'Parcel boundaries' },
+        dalsi_p_mapy: { queryable: false, title: 'Other cadastral map layers' },
+        RST_KN: { queryable: false, title: 'Raster cadastral map (RST_KN)' }
+      }
+    },
+    {
+      id: 42003,
+      title: 'ČÚZK INSPIRE adresy',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://services.cuzk.cz/wms/inspire-ad-wms.asp?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'INSPIRE Address (AD) visualization — descriptive and orientation numbers and street names.',
+      attribution: 'ČÚZK',
+      queryable: true,
+      query_filters: [ applyAllTransformations ],
+      default_layers: [
+        'AD.Addresses.Text.AddressNumber',
+        'AD.Addresses.ByPrefixNumber.TypOfBuilding.2',
+        'AD.Addresses.ByPrefixNumber.TypOfBuilding.1',
+        'AD.Addresses.Text.AddressAreaName',
+        'AD.Addresses.Text.ThoroughfareName'
+      ],
+      layers: {
+        'AD.Addresses.Text.AddressNumber': { queryable: true, title: 'Address number (text)' },
+        'AD.Addresses.ByPrefixNumber.TypOfBuilding.2': { queryable: true, title: 'Building type (č.p.) — variant 2' },
+        'AD.Addresses.ByPrefixNumber.TypOfBuilding.1': { queryable: true, title: 'Building type (č.p.) — variant 1' },
+        'AD.Addresses.Text.AddressAreaName': { queryable: true, title: 'Address area name' },
+        'AD.Addresses.Text.ThoroughfareName': { queryable: true, title: 'Thoroughfare / street name' }
+      }
+    },
+    {
+      id: 42004,
+      title: 'ČÚZK ZABAGED — Veřejné budovy',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://ags.cuzk.gov.cz/arcgis/services/ZABAGED_POLOHOPIS/MapServer/WMSServer?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'ZABAGED® polohopis — public buildings and institutions (layer ids remapped for ZABAGED_POLOHOPIS; two stacks).',
+      attribution: 'ČÚZK ZABAGED®',
+      queryable: false,
+      default_layers: ['94,95,96,97,98,99,100,101,102,103', '38,39,40,41,42,43,44,123'],
+      layers: {
+        '94,95,96,97,98,99,100,101,102,103': { queryable: false, title: 'Public facility points (hospital, school, office, …)' },
+        '38,39,40,41,42,43,44,123': { queryable: false, title: 'Building footprints & major structures' }
+      }
+    },
+    {
+      id: 42005,
+      title: 'ČÚZK ZABAGED — Lesy a vodstva',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://ags.cuzk.gov.cz/arcgis/services/ZABAGED_POLOHOPIS/MapServer/WMSServer?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'ZABAGED® polohopis — land cover / forest and water (two stacks; ids from ZABAGED_POLOHOPIS GetCapabilities).',
+      attribution: 'ČÚZK ZABAGED®',
+      queryable: false,
+      default_layers: ['0,1,2,3,4,5,6,7,8,9,10,11,128,129,130,131,132', '12,13,50,51,52,53,54,31,124,125,126,127'],
+      layers: {
+        '0,1,2,3,4,5,6,7,8,9,10,11,128,129,130,131,132': { queryable: false, title: 'Land cover, forest & vegetation' },
+        '12,13,50,51,52,53,54,31,124,125,126,127': { queryable: false, title: 'Water bodies, shorelines, dams & springs' }
+      }
+    },
+    {
+      id: 42006,
+      title: 'ČÚZK ZABAGED — Místní cesty',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://ags.cuzk.gov.cz/arcgis/services/ZABAGED_POLOHOPIS/MapServer/WMSServer?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'ZABAGED® polohopis — streets, local roads and paths (two stacks; ids from ZABAGED_POLOHOPIS GetCapabilities).',
+      attribution: 'ČÚZK ZABAGED®',
+      queryable: false,
+      default_layers: ['60,61,62,63,64,66', '65,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83'],
+      layers: {
+        '60,61,62,63,64,66': { queryable: false, title: 'Streets, paths & minor roads' },
+        '65,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83': { queryable: false, title: 'Major roads, rail, bridges & crossings' }
+      }
+    },
+    {
+      id: 42007,
+      title: 'ČÚZK GeoNames',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://ags.cuzk.gov.cz/arcgis/services/GEONAMES/Geonames/MapServer/WMSServer?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: true,
+      area: 'CZ',
+      abstract: 'ČÚZK GeoNames geographic names (ArcGIS WMS GEONAMES/Geonames, EPSG:3857).',
+      attribution: 'ČÚZK',
+      queryable: false,
+      default_layers: ['8', '9', '10', '11', '12', '13', '14', '19', '22', '23', '24'],
+      layers: {
+        0: { queryable: false, title: 'Border names' },
+        1: { queryable: false, title: 'Other names' },
+        2: { queryable: false, title: 'Industry & extraction sites' },
+        3: { queryable: false, title: 'Accommodation & catering' },
+        4: { queryable: false, title: 'Medical & spa facilities' },
+        5: { queryable: false, title: 'Sports facilities' },
+        6: { queryable: false, title: 'Cemeteries' },
+        7: { queryable: false, title: 'Sacred objects' },
+        8: { queryable: false, title: 'Castles, châteaux, fortifications' },
+        9: { queryable: false, title: 'Cultural facilities' },
+        10: { queryable: false, title: 'Telecom structures' },
+        11: { queryable: false, title: 'Airports' },
+        12: { queryable: false, title: 'Water transport' },
+        13: { queryable: false, title: 'Land transport' },
+        14: { queryable: false, title: 'Surface & vegetation' },
+        15: { queryable: false, title: 'Other landforms' },
+        16: { queryable: false, title: 'Large landforms' },
+        17: { queryable: false, title: 'Other water infrastructure' },
+        18: { queryable: false, title: 'Other watercourses & water bodies' },
+        19: { queryable: false, title: 'Rivers & large water bodies' },
+        20: { queryable: false, title: 'Regions' },
+        21: { queryable: false, title: 'Protected nature areas' },
+        22: { queryable: false, title: 'Local parts (settlements)' },
+        23: { queryable: false, title: 'Parts of towns & municipalities' },
+        24: { queryable: false, title: 'Towns & municipalities' }
+      }
+    },
+    {
+      id: 42008,
+      title: 'ČÚZK Přehledová mapa',
+      touId: 'cz-cuzk',
+      favicon: true,
+      type: 'WMS',
+      url: 'https://ags.cuzk.gov.cz/arcgis1/services/PrehledovaMapa/MapServer/WMSServer?',
+      crs: 'EPSG:3857',
+      bbox: [12.0, 48.5, 18.9, 51.1],
+      format: 'image/png',
+      transparent: false,
+      area: 'CZ',
+      abstract: 'ČÚZK national overview basemap (PrehledovaMapa, Web Mercator).',
+      attribution: 'ČÚZK',
+      queryable: false,
+      default_layers: ['0'],
+      layers: {
+        0: { queryable: false, title: 'Overview map' }
+      }
+    },
     {
       id: 96801,
       title: 'Oman National Basemap (EN) Transparent with Major Landmarks',
@@ -2832,29 +3293,40 @@ async function onWmeReady() {
 // --- TERMS OF USE REGISTRY ---
   const TOU_REGISTRY = {
     'al-asig': { name: 'ASIG Geoportal Terms of Use', links: { 'en': 'https://geoportal.asig.gov.al/en/info/terms', 'sq': 'https://geoportal.asig.gov.al/sq/info/kusht' }, selector: '.page-content' },
-    'waze-internal': { name: 'Waze Terms of Service', links: { 'en': 'https://www.waze.com/legal/tos' }, selector: 'main' },
+    'waze-internal': { name: 'Waze Terms of Service', links: { 'en': 'https://www.xxxxxwaze.com/legal/tos' }, selector: 'main' },
     'eu-tentec': { name: 'European Commission Legal Notice', links: { 'en': 'https://commission.europa.eu/legal-notice_en' }, selector: 'main' },
     'us-wvu': { name: 'West Virginia GIS Clearinghouse Terms', links: { 'en': 'https://www.mapwv.gov/terms.html' }, selector: 'body' },
     'us-usgs': { name: 'USGS Public Domain Policy', links: { 'en': 'https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits' }, selector: '.main-content' },
-    'us-vgin': { name: 'Virginia VGIN Data Usage Terms', links: { 'en': 'https://www.vdem.virginia.gov/vgin/' }, selector: 'main' },
+    'us-vgin': { name: 'Virginia VGIN Data Usage Terms', links: { 'en': 'https://vgin.vdem.virginia.gov/pages/cl-vgin-data-usage' }, selector: 'main' },
     'us-tnmap': { name: 'TN.gov Policies & Disclaimer', links: { 'en': 'https://www.tn.gov/help/policies/disclaimer.html' }, selector: 'main' },
     'us-pasda': { name: 'PASDA Open Data Policy', links: { 'en': 'https://www.pasda.psu.edu/about.html' }, selector: '#content' },
     'us-nconemap': { name: 'NC OneMap Terms', links: { 'en': 'https://www.nconemap.gov/pages/terms' }, selector: '.markdown-body' },
     'us-indianamap': { name: 'IndianaMap Open Data Terms', links: { 'en': 'https://www.in.gov/core/policies.html' }, selector: 'main' },
-    'us-mdimap': { name: 'Maryland Open Data Terms', links: { 'en': 'https://opendata.maryland.gov/pages/terms' }, selector: '.markdown-body' },
+    'us-mdimap': { name: 'Maryland Open Data Terms', links: { 'en': 'https://www.maryland.gov/terms-use' }, selector: '.markdown-body' },
     'nl-pdok': { name: 'PDOK Algemene Voorwaarden', links: { 'nl': 'https://www.pdok.nl/algemene-voorwaarden' }, selector: 'main' },
     'nl-rws': { name: 'Rijkswaterstaat Open Data', links: { 'nl': 'https://www.rijkswaterstaat.nl/algemene-voorwaarden' }, selector: 'main' },
     'be-vlaanderen': { name: 'Gratis Open Data Licentie Vlaanderen', links: { 'nl': 'https://www.vlaanderen.be/digitaal-vlaanderen/onze-diensten-en-platformen/open-data/voorwaarden-voor-het-hergebruik-van-overheidsinformatie/modellicentie-gratis-hergebruik' }, selector: 'main' },
     'be-wallonie': { name: 'Géoportail de la Wallonie Mentions Légales', links: { 'fr': 'https://geoportail.wallonie.be/mentions-legales' }, selector: 'main' },
     'be-urbis': { name: 'UrbIS License (Paradigm)', links: { 'en': 'https://datastore.brussels/web/about', 'fr': 'https://datastore.brussels/web/about', 'nl': 'https://datastore.brussels/web/about' }, selector: 'main' },
     'be-mobility': { name: 'Brussels Mobility Open Data', links: { 'en': 'https://data.mobility.brussels/licence/' }, selector: 'main' },
-    'be-minfin': { name: 'FPS Finances Open Data Terms', links: { 'fr': 'https://finances.belgium.be/fr/sur_le_spf/open-data', 'nl': 'https://financien.belgium.be/nl/over_de_fod/open-data' }, selector: 'main' }
+    'be-minfin': { name: 'FPS Finances Open Data Terms', links: { 'fr': 'https://finances.belgium.be/fr/sur_le_spf/open-data', 'nl': 'https://financien.belgium.be/nl/over_de_fod/open-data' }, selector: 'main' },
+    'cz-cuzk': { name: 'ČÚZK Conditions for Network Services', links: { 'en': 'https://cuzk.gov.cz/English/Practical-Information/Conditions-of-Provision-for-Spatial-Data-and-Netwo/Conditions-for-Provision-of-CUZK-Network-Services.aspx', 'cs': 'https://www.cuzk.cz/Predpisy/Podminky-poskytovani-prostor-dat-a-sitovych-sluzeb/Podminky-poskytovani-prostorovych-dat-CUZK.aspx' }, selector: 'main' }
   };
 
 // --- TERMS OF USE HELPER ---
+  var touUnreachableSessionDismissed = Object.create(null);
+
   function isTouAccepted(touId) {
     if (touId === 'none') return true; // Explicitly declared as no ToU required
     if (!touId || !TOU_REGISTRY[touId]) return false; // Missing or invalid ToU = LOCKED
+    var s = Settings.get();
+    if (s.state.acceptedToUs && s.state.acceptedToUs[touId]) return true;
+    return !!touUnreachableSessionDismissed[touId];
+  }
+
+  function hasStoredTouAcceptance(touId) {
+    if (touId === 'none') return true;
+    if (!touId || !TOU_REGISTRY[touId]) return false;
     var s = Settings.get();
     return !!(s.state.acceptedToUs && s.state.acceptedToUs[touId]);
   }
@@ -2863,6 +3335,61 @@ async function onWmeReady() {
   const omFetch = (options) => new Promise((resolve, reject) => {
     GM_xmlhttpRequest({ ...options, onload: resolve, onerror: reject, ontimeout: reject });
   });
+
+  function formatTouFetchError(err) {
+    if (err == null) return 'Request failed';
+    if (typeof err === 'string') return err;
+    if (typeof err === 'object') {
+      if (err.message) return String(err.message);
+      if (err.error) return String(err.error);
+      if (err.statusText) return String(err.statusText);
+      if (err.status != null) return 'Request failed (HTTP ' + err.status + ')';
+    }
+    return String(err);
+  }
+
+  function formatTouUnreachableDetail(res) {
+    var msg = res.msg;
+    if (msg != null && typeof msg === 'object') {
+      msg = msg.message || msg.error || JSON.stringify(msg);
+    }
+    msg = (msg == null || msg === '') ? 'Network or connection error.' : String(msg);
+    if (res.httpStatus != null) {
+      return 'HTTP ' + res.httpStatus + ' — ' + msg.replace(/^HTTP\s+\d+\s*[—\-]?\s*/i, '');
+    }
+    return msg;
+  }
+
+  /** Fetch ToU URL without requiring prior acceptance (for first-load UI probe). */
+  async function probeToUReachability(touId, callback) {
+    var result;
+    const touObj = TOU_REGISTRY[touId];
+    if (!touObj) {
+      result = { status: 'invalid' };
+    } else {
+      const checkUrl = touObj.links[Object.keys(touObj.links)[0]];
+      try {
+        const res = await omFetch({ method: 'GET', url: checkUrl, timeout: 10000 });
+        if (res.status !== 200) {
+          result = { status: 'unreachable', httpStatus: res.status, msg: 'HTTP ' + res.status };
+        } else {
+          const doc = new DOMParser().parseFromString(res.responseText, 'text/html');
+          const el = doc.querySelector(touObj.selector) || doc.body;
+          if (!el) {
+            result = { status: 'unreachable', httpStatus: res.status, msg: 'Selector not found' };
+          } else {
+            el.querySelectorAll('script, style, svg, nav, footer, header').forEach(function(n) { n.remove(); });
+            var currentLen = el.textContent.replace(/\s+/g, ' ').trim().length;
+            result = { status: 'ok', len: currentLen };
+          }
+        }
+      } catch (err) {
+        result = { status: 'unreachable', msg: formatTouFetchError(err) };
+      }
+    }
+    if (callback) callback(result);
+    return result;
+  }
 
   async function performToUCheck(touId, force, callback) {
     const s = Settings.get();
@@ -2883,12 +3410,18 @@ async function onWmeReady() {
         const checkUrl = touObj.links[Object.keys(touObj.links)[0]];
         const res = await omFetch({ method: 'GET', url: checkUrl, timeout: 10000 });
 
-        if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+        if (res.status !== 200) {
+          callback?.({ status: 'unreachable', httpStatus: res.status, msg: 'HTTP ' + res.status });
+          return;
+        }
 
         const doc = new DOMParser().parseFromString(res.responseText, "text/html");
         const el = doc.querySelector(touObj.selector) || doc.body;
 
-        if (!el) throw new Error('Selector not found');
+        if (!el) {
+          callback?.({ status: 'unreachable', httpStatus: res.status, msg: 'Selector not found' });
+          return;
+        }
 
         // Clean noise
         el.querySelectorAll('script, style, svg, nav, footer, header').forEach(n => n.remove());
@@ -2916,7 +3449,7 @@ async function onWmeReady() {
           }
         }
       } catch (err) {
-        callback?.({ status: 'error', msg: err.message });
+        callback?.({ status: 'unreachable', msg: formatTouFetchError(err) });
       }
     } else {
       callback?.({ status: 'skipped' });
@@ -2953,6 +3486,12 @@ async function onWmeReady() {
       if (!settings.state.acceptedToUs) {
         settings.state.acceptedToUs = {};
       }
+      if (!settings.state.touUnreachableBypass) {
+        settings.state.touUnreachableBypass = {};
+      }
+      if (!settings.state.favoriteMapIds) {
+        settings.state.favoriteMapIds = [];
+      }
       return settings;
     },
     'put': function(obj) {
@@ -2970,26 +3509,68 @@ async function onWmeReady() {
 
   var Tooltips = (function() {
     var elements = [];
+    var defaultOpts = { trigger: 'hover', container: 'body', placement: 'top' };
     return {
-      'add': function(element, text, force) {
-        if (Settings.get().tooltips || force) {
+      'add': function(element, text, force, tooltipOpts) {
+        var opts = Object.assign({}, defaultOpts, tooltipOpts || {});
+        var useHtml = !!opts.html;
+        if (!Settings.get().tooltips && !force) {
           element.title = text;
-          $(element).tooltip({
-            trigger: 'hover'
-          });
+          var regIdx = elements.indexOf(element);
+          if (regIdx !== -1) elements.splice(regIdx, 1);
+          element.dataset.title = text;
+          elements.push(element);
+          return;
         }
+        try {
+          $(element).tooltip('destroy');
+        } catch (err) {}
+        element.removeAttribute('data-original-title');
         if (!force) {
+          var i = elements.indexOf(element);
+          if (i !== -1) elements.splice(i, 1);
           element.dataset.title = text;
           elements.push(element);
         }
+        var titleStr = useHtml ? String(text).replace(/\n/g, '<br>') : text;
+        if (useHtml) {
+          element.removeAttribute('title');
+          $(element).tooltip(Object.assign({}, opts, { title: titleStr }));
+        } else {
+          element.title = titleStr;
+          $(element).tooltip(opts);
+        }
       },
       'remove': function(element) {
-        $(element).tooltip('destroy');
+        try {
+          $(element).tooltip('destroy');
+        } catch (err) {}
+        element.removeAttribute('data-original-title');
         element.title = '';
         var toRemoveIdx = elements.findIndex(function(el) { return el == element; });
         if (toRemoveIdx !== -1) {
           elements.splice(toRemoveIdx, 1);
         }
+      },
+      /** Hide + destroy all Bootstrap tooltips on root and descendants (e.g. before removing a map card). Tooltips with container:body outlive their trigger otherwise. */
+      'teardownSubtree': function(root) {
+        if (!root || !root.querySelectorAll) return;
+        var list = [root].concat(Array.prototype.slice.call(root.querySelectorAll('*')));
+        list.forEach(function(el) {
+          var $el = $(el);
+          try {
+            $el.tooltip('hide');
+          } catch (err1) {}
+          try {
+            $el.tooltip('destroy');
+          } catch (err2) {}
+          try {
+            $el.tooltip('dispose');
+          } catch (err3) {}
+          el.removeAttribute('data-original-title');
+          var idx = elements.indexOf(el);
+          if (idx !== -1) elements.splice(idx, 1);
+        });
       },
       'enabled': function() {
         return Settings.get().tooltips;
@@ -3005,9 +3586,7 @@ async function onWmeReady() {
         } else {
           elements.forEach(function(element) {
             element.title = element.dataset.title;
-            $(element).tooltip({
-              trigger: 'hover'
-            });
+            $(element).tooltip(Object.assign({}, defaultOpts));
           });
         }
       }
@@ -3023,6 +3602,8 @@ async function onWmeReady() {
     };
   })();
   //#endregion
+
+  var pendingUpdateNoticeMessage = null;
 
   //#region Check version
   // Convert from old storage object
@@ -3047,7 +3628,7 @@ async function onWmeReady() {
       message += '\nv' + versions[i] + ':\n' + I18n.t('openmaps.update.v' + versions[i].replace(/\./g, '_'));
     }
     Settings.set('version', scriptVersion);
-    alert(message);
+    pendingUpdateNoticeMessage = message;
   }
   //#endregion
 
@@ -3070,8 +3651,26 @@ async function onWmeReady() {
     return Promise.resolve(tabPane);
   })();
 
+  if (pendingUpdateNoticeMessage) {
+    var updateNoticeBox = document.createElement('div');
+    updateNoticeBox.className = 'openmaps-sidebar-notice openmaps-sidebar-notice--update';
+    var updateNoticePre = document.createElement('pre');
+    updateNoticePre.className = 'openmaps-sidebar-notice-body';
+    updateNoticePre.textContent = pendingUpdateNoticeMessage;
+    var updateNoticeDismiss = document.createElement('wz-button');
+    updateNoticeDismiss.className = 'openmaps-wz-btn-compact';
+    updateNoticeDismiss.setAttribute('size', 'sm');
+    updateNoticeDismiss.setAttribute('color', 'secondary');
+    updateNoticeDismiss.textContent = I18n.t('openmaps.notice_dismiss');
+    updateNoticeDismiss.addEventListener('click', function() { updateNoticeBox.remove(); });
+    updateNoticeBox.appendChild(updateNoticePre);
+    updateNoticeBox.appendChild(updateNoticeDismiss);
+    tab.appendChild(updateNoticeBox);
+    pendingUpdateNoticeMessage = null;
+  }
+
   // New map layer drawer group
-  var omGroup = createLayerToggler(null, true, 'Open Maps', null);
+  var omGroup = createLayerToggler(null, true, I18n.t('openmaps.layer_group_title'), null);
 
 // Satellite imagery toggle
 // --- CACHED SATELLITE IMAGERY TOGGLE ---
@@ -3096,9 +3695,50 @@ async function onWmeReady() {
   // ----------------------------------------
 
   // Implement tab content
+  var activeMapsHeader = document.createElement('div');
+  activeMapsHeader.className = 'openmaps-active-maps-header';
   var title = document.createElement('h4');
   title.textContent = I18n.t('openmaps.maps_title');
-  tab.appendChild(title);
+  activeMapsHeader.appendChild(title);
+
+  var activeMapsFilterMode = document.createElement('select');
+  activeMapsFilterMode.className = 'form-control openmaps-active-maps-mode-select';
+  activeMapsFilterMode.setAttribute('aria-label', I18n.t('openmaps.active_maps_filter_mode_aria'));
+  [
+    { v: 'all', t: I18n.t('openmaps.active_maps_filter_all') },
+    { v: 'favorites', t: I18n.t('openmaps.active_maps_filter_favorites') },
+    { v: 'in_view', t: I18n.t('openmaps.active_maps_filter_in_view') },
+    { v: 'visible', t: I18n.t('openmaps.active_maps_filter_visible') },
+    { v: 'tou_pending', t: I18n.t('openmaps.active_maps_filter_tou_pending') }
+  ].forEach(function(o) {
+    var opt = document.createElement('option');
+    opt.value = o.v;
+    opt.textContent = o.t;
+    activeMapsFilterMode.appendChild(opt);
+  });
+  activeMapsHeader.appendChild(activeMapsFilterMode);
+  tab.appendChild(activeMapsHeader);
+  activeMapsFilterMode.addEventListener('change', function() { applyActiveMapsFilter(); });
+
+  var activeMapsFilterBar = document.createElement('div');
+  activeMapsFilterBar.className = 'openmaps-active-maps-filter-bar';
+  var activeMapsFilterInput = document.createElement('input');
+  activeMapsFilterInput.type = 'text';
+  activeMapsFilterInput.className = 'form-control openmaps-add-map-filter openmaps-active-maps-filter-input';
+  activeMapsFilterInput.placeholder = I18n.t('openmaps.active_maps_filter_placeholder');
+  activeMapsFilterInput.setAttribute('autocomplete', 'off');
+  activeMapsFilterInput.setAttribute('aria-label', I18n.t('openmaps.active_maps_filter_placeholder'));
+
+  var activeMapsFilterEmpty = document.createElement('div');
+  activeMapsFilterEmpty.className = 'openmaps-active-maps-filter-empty';
+  activeMapsFilterEmpty.style.display = 'none';
+  activeMapsFilterEmpty.setAttribute('role', 'status');
+
+  activeMapsFilterBar.appendChild(activeMapsFilterInput);
+  activeMapsFilterBar.appendChild(activeMapsFilterEmpty);
+  tab.appendChild(activeMapsFilterBar);
+  activeMapsFilterInput.addEventListener('input', function() { applyActiveMapsFilter(); });
+
 var handleList = document.createElement('div');
   handleList.className = 'openmaps-map-list';
   tab.appendChild(handleList);
@@ -3116,6 +3756,64 @@ var handleList = document.createElement('div');
     listEl.addEventListener('sortupdate', onMapSort);
   }
 
+  /** Stack OpenMaps tile layers above satellite: first row in sidebar = frontmost among our maps, but never above native WME layers (roads, etc.). */
+  function syncOpenMapsLayerIndices() {
+    const olMap = W.map.getOLMap();
+    const wazeLayers = W.map.getLayers();
+    const aerialImageryIndex = Math.max(0, ...wazeLayers.map(l =>
+      l.project === 'earthengine-legacy' ? W.map.getLayerIndex(l) : 0
+    ));
+
+    const ourLayers = new Set();
+    handles.forEach(h => {
+      if (h.layer) ourLayers.add(h.layer);
+      if (h.bboxLayer) ourLayers.add(h.bboxLayer);
+    });
+
+    let minForeignAbove = Infinity;
+    for (let li = 0; li < wazeLayers.length; li++) {
+      const layer = wazeLayers[li];
+      if (ourLayers.has(layer)) continue;
+      const idx = W.map.getLayerIndex(layer);
+      if (idx > aerialImageryIndex && idx < minForeignAbove) minForeignAbove = idx;
+    }
+
+    if (!handles.some(h => h.layer)) return;
+
+    const len = handles.length;
+    const floorZ = aerialImageryIndex + 1;
+    let topIndex = aerialImageryIndex + len;
+    if (minForeignAbove !== Infinity) {
+      const maxOurZ = minForeignAbove - 1;
+      if (topIndex > maxOurZ) topIndex = maxOurZ;
+    }
+    let bottomIndex = topIndex - len + 1;
+    if (bottomIndex < floorZ) {
+      bottomIndex = floorZ;
+      topIndex = bottomIndex + len - 1;
+      if (minForeignAbove !== Infinity && topIndex > minForeignAbove - 1) {
+        topIndex = minForeignAbove - 1;
+        bottomIndex = Math.max(floorZ, topIndex - len + 1);
+      }
+    }
+
+    handles.forEach((h, i) => {
+      if (!h.layer) return;
+      const z = Math.max(floorZ, topIndex - i);
+      olMap.setLayerIndex(h.layer, z);
+    });
+
+    const maxOurZ = minForeignAbove === Infinity ? Infinity : minForeignAbove - 1;
+    handles.forEach(h => {
+      if (!h.layer || !h.bboxLayer) return;
+      const ti = W.map.getLayerIndex(h.layer);
+      let bi = ti + 1;
+      if (maxOurZ !== Infinity && bi > maxOurZ) bi = maxOurZ;
+      if (bi <= ti) bi = ti;
+      olMap.setLayerIndex(h.bboxLayer, bi);
+    });
+  }
+
 function onMapSort() {
     const nodes = handleList.querySelectorAll('.maps-menu-item');
     const newHandles = [];
@@ -3126,14 +3824,8 @@ function onMapSort() {
     });
     handles = newHandles;
 
-    // MODERNIZED: Use W.map.getLayers() and ES6 Spread operator
-    const wazeLayers = W.map.getLayers();
-    const aerialImageryIndex = Math.max(0, ...wazeLayers.map(l =>
-      l.project === 'earthengine-legacy' ? W.map.getLayerIndex(l) : 0
-    ));
-
-    handles.forEach((h, i) => {
-      if (h.layer) W.map.getOLMap().setLayerIndex(h.layer, aerialImageryIndex + i + 1);
+    syncOpenMapsLayerIndices();
+    handles.forEach((h) => {
       if (h.togglerNode) h.togglerNode.parentNode.appendChild(h.togglerNode);
     });
 
@@ -3145,59 +3837,194 @@ function onMapSort() {
 // --- NATIVE SEARCHABLE MAP SELECTOR ---
     var addMapContainer = document.createElement('div');
     addMapContainer.style.position = 'relative';
-    addMapContainer.style.marginTop = '24px';    // Increased gap above
+    addMapContainer.style.marginTop = '8px';
     addMapContainer.style.marginBottom = '32px'; // Added significant gap below
 
   var addMapInput = document.createElement('input');
   addMapInput.type = 'text';
-  addMapInput.className = 'form-control';
-  addMapInput.placeholder = I18n.t('openmaps.select_map') + ' 🔍';
-  addMapInput.setAttribute('list', 'openmaps-datalist');
+  addMapInput.className = 'form-control openmaps-add-map-filter';
+  addMapInput.placeholder = I18n.t('openmaps.select_map');
+  addMapInput.setAttribute('autocomplete', 'off');
+  addMapInput.setAttribute('aria-autocomplete', 'list');
+  addMapInput.setAttribute('aria-controls', 'openmaps-add-map-suggestions');
 
-  var addMapDatalist = document.createElement('datalist');
-  addMapDatalist.id = 'openmaps-datalist';
+  var addMapSuggestions = document.createElement('div');
+  addMapSuggestions.id = 'openmaps-add-map-suggestions';
+  addMapSuggestions.className = 'openmaps-add-map-suggestions';
+  addMapSuggestions.style.display = 'none';
+  addMapSuggestions.setAttribute('role', 'listbox');
 
-addMapContainer.appendChild(addMapInput);
-  addMapContainer.appendChild(addMapDatalist);
+  var addMapViewportHint = document.createElement('div');
+  addMapViewportHint.className = 'openmaps-add-map-viewport-hint';
+  addMapViewportHint.setAttribute('aria-live', 'polite');
+
+  addMapContainer.appendChild(addMapInput);
+  addMapContainer.appendChild(addMapSuggestions);
+  addMapContainer.appendChild(addMapViewportHint);
+
+  var addMapsHeader = document.createElement('div');
+  addMapsHeader.className = 'openmaps-add-maps-header';
+  var addMapsTitle = document.createElement('h4');
+  addMapsTitle.textContent = I18n.t('openmaps.maps_to_add_title');
+  addMapsHeader.appendChild(addMapsTitle);
+  var addMapsFilterMode = document.createElement('select');
+  addMapsFilterMode.className = 'form-control openmaps-add-maps-mode-select';
+  addMapsFilterMode.setAttribute('aria-label', I18n.t('openmaps.add_maps_filter_mode_aria'));
+  [
+    { v: 'all', t: I18n.t('openmaps.active_maps_filter_all') },
+    { v: 'in_view', t: I18n.t('openmaps.active_maps_filter_in_view') }
+  ].forEach(function(o) {
+    var opt = document.createElement('option');
+    opt.value = o.v;
+    opt.textContent = o.t;
+    addMapsFilterMode.appendChild(opt);
+  });
+  addMapsHeader.appendChild(addMapsFilterMode);
+  addMapsFilterMode.addEventListener('change', function() {
+    if (addMapSuggestions.style.display === 'block') {
+      populateAddMapSuggestions(addMapInput.value);
+    }
+  });
+
+  tab.appendChild(addMapsHeader);
   tab.appendChild(addMapContainer);
+
+  var addMapSuggestionsBlurTimer = null;
+  var addMapSuggestionsPositionListenersOn = false;
+  function positionAddMapSuggestions() {
+    if (addMapSuggestions.style.display !== 'block') return;
+    var r = addMapInput.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return;
+    var gap = 2;
+    var top = r.bottom + gap;
+    var left = r.left;
+    var width = Math.max(160, r.width);
+    var vv = window.visualViewport;
+    var bottomEdge = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    var avail = bottomEdge - top - 12;
+    var maxH = Math.max(120, Math.min(560, avail));
+    addMapSuggestions.style.position = 'fixed';
+    addMapSuggestions.style.left = left + 'px';
+    addMapSuggestions.style.top = top + 'px';
+    addMapSuggestions.style.width = width + 'px';
+    addMapSuggestions.style.maxHeight = maxH + 'px';
+    addMapSuggestions.style.right = 'auto';
+    addMapSuggestions.style.marginTop = '0';
+    addMapSuggestions.style.boxSizing = 'border-box';
+    addMapSuggestions.style.zIndex = '100550';
+  }
+  function syncAddMapSuggestionsPositionListeners() {
+    if (addMapSuggestions.style.display === 'block') {
+      if (!addMapSuggestionsPositionListenersOn) {
+        window.addEventListener('scroll', positionAddMapSuggestions, true);
+        window.addEventListener('resize', positionAddMapSuggestions);
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', positionAddMapSuggestions);
+          window.visualViewport.addEventListener('scroll', positionAddMapSuggestions);
+        }
+        addMapSuggestionsPositionListenersOn = true;
+      }
+    } else if (addMapSuggestionsPositionListenersOn) {
+      window.removeEventListener('scroll', positionAddMapSuggestions, true);
+      window.removeEventListener('resize', positionAddMapSuggestions);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', positionAddMapSuggestions);
+        window.visualViewport.removeEventListener('scroll', positionAddMapSuggestions);
+      }
+      addMapSuggestionsPositionListenersOn = false;
+    }
+  }
+  function hideAddMapSuggestions() {
+    addMapSuggestions.style.display = 'none';
+    syncAddMapSuggestionsPositionListeners();
+  }
+  function showAddMapSuggestions() {
+    addMapSuggestions.style.display = 'block';
+    populateAddMapSuggestions(addMapInput.value);
+    positionAddMapSuggestions();
+    syncAddMapSuggestionsPositionListeners();
+  }
+
+  addMapSuggestions.addEventListener('mousedown', function(e) {
+    if (addMapSuggestionsBlurTimer) {
+      clearTimeout(addMapSuggestionsBlurTimer);
+      addMapSuggestionsBlurTimer = null;
+    }
+    e.preventDefault();
+  });
+
+  addMapInput.addEventListener('focus', function() {
+    if (addMapSuggestionsBlurTimer) {
+      clearTimeout(addMapSuggestionsBlurTimer);
+      addMapSuggestionsBlurTimer = null;
+    }
+    showAddMapSuggestions();
+  });
+
+  addMapInput.addEventListener('blur', function() {
+    addMapSuggestionsBlurTimer = setTimeout(hideAddMapSuggestions, 200);
+  });
+
+  addMapInput.addEventListener('input', function() {
+    showAddMapSuggestions();
+  });
+
+  addMapInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      hideAddMapSuggestions();
+      addMapInput.blur();
+    }
+  });
 
   // --- RESTORED: Tell the script to update the list when the map loads and moves! ---
   updateMapSelector();
   W.map.events.register('moveend', null, updateMapSelector);
   // ----------------------------------------------------------------------------------
-
-  addMapInput.addEventListener('input', function() {
-    if (!addMapInput.value) return;
-    var option = Array.from(addMapDatalist.options).find(o => o.value === addMapInput.value);
-    if (option) {
-      var mapId = option.dataset.id;
-      handles.push(new MapHandle(maps.get(parseInt(mapId))));
-      saveMapState();
-      addMapInput.value = ''; // Clear search bar
-      addMapInput.blur();
-      updateMapSelector();
-      refreshMapDrag(); // Make the new map draggable!
-    }
-  });
   // --------------------------------------
 
-  var footer = document.createElement('p');
-  var hideTooltips = document.createElement('a');
-  hideTooltips.textContent = (Settings.get().tooltips ? I18n.t('openmaps.hide_tooltips') : I18n.t('openmaps.show_tooltips'));
-  hideTooltips.style.float = 'right';
-  hideTooltips.style.cursor = 'pointer';
-  hideTooltips.addEventListener('click', function() {
-    Tooltips.toggle();
-    hideTooltips.textContent = (Settings.get().tooltips ? I18n.t('openmaps.hide_tooltips') : I18n.t('openmaps.show_tooltips'));
-  });
-  footer.appendChild(hideTooltips);
+  var footer = document.createElement('div');
+  footer.className = 'openmaps-sidebar-footer';
+  var footerVersion = document.createElement('span');
+  footerVersion.className = 'openmaps-sidebar-footer-version';
   try {
-    footer.appendChild(document.createTextNode(GM_info.script.name + ': v' + GM_info.script.version));
+    footerVersion.textContent = GM_info.script.name + ': v' + GM_info.script.version;
   } catch (e) {
     // Probably no support for GM_info, ignore
   }
-  footer.style.fontSize = '11px';
+  var hideTooltips = document.createElement('wz-button');
+  hideTooltips.setAttribute('size', 'sm');
+  hideTooltips.setAttribute('color', 'secondary');
+  hideTooltips.textContent = (Settings.get().tooltips ? I18n.t('openmaps.hide_tooltips') : I18n.t('openmaps.show_tooltips'));
+  hideTooltips.className = 'openmaps-sidebar-footer-help openmaps-wz-btn-compact';
+  hideTooltips.addEventListener('click', function(ev) {
+    ev.preventDefault();
+    Tooltips.toggle();
+    hideTooltips.textContent = (Settings.get().tooltips ? I18n.t('openmaps.hide_tooltips') : I18n.t('openmaps.show_tooltips'));
+  });
+  footer.appendChild(footerVersion);
+  footer.appendChild(hideTooltips);
   tab.appendChild(footer);
+
+  var resetTermsGlobalBox = document.createElement('div');
+  resetTermsGlobalBox.className = 'open-maps-reset-all-terms-global';
+  resetTermsGlobalBox.style.cssText = 'margin-top: 14px; padding-top: 12px; border-top: 1px dotted #ccc;';
+  var resetTermsGlobalBtn = document.createElement('wz-button');
+  resetTermsGlobalBtn.className = 'openmaps-wz-btn-compact';
+  resetTermsGlobalBtn.setAttribute('color', 'secondary');
+  resetTermsGlobalBtn.setAttribute('size', 'sm');
+  resetTermsGlobalBtn.style.cssText = 'width:100%; text-align:left;';
+  resetTermsGlobalBtn.innerHTML = '<i class="fa fa-history" aria-hidden="true"></i> ' + I18n.t('openmaps.reset_terms_button');
+  resetTermsGlobalBtn.addEventListener('click', function() {
+    if (confirm(I18n.t('openmaps.reset_terms_confirm'))) {
+      var s = Settings.get();
+      s.state.acceptedToUs = {};
+      Settings.put(s);
+      location.reload();
+    }
+  });
+  resetTermsGlobalBox.appendChild(resetTermsGlobalBtn);
+  tab.appendChild(resetTermsGlobalBox);
+
   //#endregion
 
   //#region Reload previous map(s)
@@ -3252,9 +4079,14 @@ addMapContainer.appendChild(addMapInput);
     }
   });
   mapObserver.observe(document.getElementById('map'), { attributes: true, attributeFilter: ['class'] });
-  var queryWindowSwitch = document.createElement('span');
-  queryWindowSwitch.className = 'fa fa-fw fa-2x fa-retweet open-maps-query-window-button-left';
+  var queryWindowSwitch = document.createElement('wz-button');
+  queryWindowSwitch.setAttribute('color', 'clear-icon');
+  queryWindowSwitch.setAttribute('size', 'sm');
+  queryWindowSwitch.className = 'open-maps-query-window-button-left open-maps-query-window-toolbar-wz';
+  queryWindowSwitch.innerHTML = '<i class="fa fa-fw fa-retweet" aria-hidden="true"></i>';
   queryWindowSwitch.dataset.placement = 'right';
+  queryWindowSwitch.setAttribute('aria-label', I18n.t('openmaps.query_window_switch'));
+  queryWindowSwitch.title = I18n.t('openmaps.query_window_switch');
   Tooltips.add(queryWindowSwitch, I18n.t('openmaps.query_window_switch'));
   queryWindowSwitch.addEventListener('click', function() {
     queryWindowOriginalContent.classList.toggle('hidden');
@@ -3264,16 +4096,22 @@ addMapContainer.appendChild(addMapInput);
     Settings.put(settings);
   });
   queryWindow.appendChild(queryWindowSwitch);
-  var queryWindowQuery = document.createElement('span');
-  queryWindowQuery.className = 'fa fa-fw fa-2x fa-hand-pointer-o open-maps-query-window-button-left';
+  var queryWindowQuery = document.createElement('wz-button');
+  queryWindowQuery.setAttribute('color', 'clear-icon');
+  queryWindowQuery.setAttribute('size', 'sm');
+  queryWindowQuery.className = 'open-maps-query-window-button-left open-maps-query-window-toolbar-wz';
+  queryWindowQuery.innerHTML = '<i class="fa fa-fw fa-hand-pointer-o" aria-hidden="true"></i>';
   queryWindowQuery.dataset.placement = 'right';
+  queryWindowQuery.setAttribute('aria-label', I18n.t('openmaps.query_window_query'));
+  queryWindowQuery.title = I18n.t('openmaps.query_window_query');
   Tooltips.add(queryWindowQuery, I18n.t('openmaps.query_window_query'));
   queryWindowQuery.addEventListener('click', function() {
+    var qIcon = queryWindowQuery.querySelector('i');
     if (!getFeatureInfoControl.active) {
       if (getFeatureInfoControl.params) {
-        queryWindowQuery.style.color = 'blue';
+        if (qIcon) qIcon.style.color = 'blue';
         getFeatureInfoControl.params.callback = function() {
-          queryWindowQuery.style.color = '';
+          if (qIcon) qIcon.style.color = '';
         };
         getFeatureInfoControl.activate();
       } else {
@@ -3284,20 +4122,33 @@ addMapContainer.appendChild(addMapInput);
     }
   });
   queryWindow.appendChild(queryWindowQuery);
-  var queryWindowClose = document.createElement('span');
-  queryWindowClose.className = 'fa fa-fw fa-2x fa-window-close open-maps-query-window-button-right';
+  var queryWindowClose = document.createElement('wz-button');
+  queryWindowClose.setAttribute('color', 'clear-icon');
+  queryWindowClose.setAttribute('size', 'sm');
+  queryWindowClose.className = 'open-maps-query-window-button-right open-maps-query-window-toolbar-wz';
+  queryWindowClose.innerHTML = '<i class="fa fa-fw fa-window-close" aria-hidden="true"></i>';
+  queryWindowClose.setAttribute('aria-label', I18n.t('openmaps.query_window_close'));
+  queryWindowClose.title = I18n.t('openmaps.query_window_close');
   queryWindowClose.addEventListener('click', function() {
     queryWindow.style.display = 'none';
   });
   queryWindow.appendChild(queryWindowClose);
-  var queryWindowMinimize = document.createElement('span');
-  queryWindowMinimize.className = 'fa fa-fw fa-2x fa-toggle-up open-maps-query-window-button-right';
+  var queryWindowMinimize = document.createElement('wz-button');
+  queryWindowMinimize.setAttribute('color', 'clear-icon');
+  queryWindowMinimize.setAttribute('size', 'sm');
+  queryWindowMinimize.className = 'open-maps-query-window-button-right open-maps-query-window-toolbar-wz';
+  queryWindowMinimize.innerHTML = '<i class="fa fa-fw fa-toggle-up" aria-hidden="true"></i>';
+  queryWindowMinimize.setAttribute('aria-label', I18n.t('openmaps.query_window_minimize'));
+  queryWindowMinimize.title = I18n.t('openmaps.query_window_minimize');
   queryWindowMinimize.addEventListener('click', function() {
     var isMinimized = queryWindow.style.height != '';
     queryWindow.style.height = (isMinimized ? '' : Settings.get().queryWindowHeight || '185px');
     queryWindow.style.resize = (isMinimized ? 'none' : 'vertical');
-    queryWindowMinimize.classList.toggle('fa-toggle-up', isMinimized);
-    queryWindowMinimize.classList.toggle('fa-toggle-down', !isMinimized);
+    var qmIcon = queryWindowMinimize.querySelector('i');
+    if (qmIcon) {
+      qmIcon.classList.toggle('fa-toggle-up', isMinimized);
+      qmIcon.classList.toggle('fa-toggle-down', !isMinimized);
+    }
   });
   queryWindow.appendChild(queryWindowMinimize);
   var queryWindowTitle = document.createElement('h2');
@@ -3351,7 +4202,7 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
           // Uses Optional Chaining to prevent null crashes and Template Literals for the string
           var mapId = getFeatureInfoControl.params?.id;
           var queriedMap = mapId ? maps.get(mapId) : null;
-          queryWindowTitle.textContent = queriedMap ? `Query Results: ${queriedMap.title}` : I18n.t('openmaps.query_window_title');
+          queryWindowTitle.textContent = queriedMap ? I18n.t('openmaps.query_results_for').replace(/\{title\}/g, queriedMap.title) : I18n.t('openmaps.query_window_title');
       // --------------------------------
       queryWindowLoading.style.display = 'block';
       while (queryWindowContent.firstChild) {
@@ -3708,6 +4559,7 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
     container.appendChild(textDiv);
 
     var copyBtn = document.createElement('wz-button');
+    copyBtn.className = 'openmaps-wz-btn-compact';
     copyBtn.setAttribute('color', 'secondary');
     copyBtn.setAttribute('size', 'sm');
 
@@ -3804,39 +4656,219 @@ var layerItem = document.createElement('li');
     }
   }
 
+function getNotAddedMaps() {
+    var out = [];
+    maps.forEach(function(map) {
+      if (!handles.some(function(h) { return map.id == h.mapId; })) out.push(map);
+    });
+    return out;
+  }
+
+  function isMapFavorite(mapId) {
+    return Settings.get().state.favoriteMapIds.indexOf(mapId) !== -1;
+  }
+
+  function setMapFavorite(mapId, favorite) {
+    var s = Settings.get();
+    var arr = s.state.favoriteMapIds;
+    var idx = arr.indexOf(mapId);
+    if (favorite && idx === -1) arr.push(mapId);
+    if (!favorite && idx !== -1) arr.splice(idx, 1);
+    Settings.put(s);
+  }
+
+  function applyActiveMapsFilter() {
+    var q = (activeMapsFilterInput.value || '').trim().toLowerCase();
+    var mode = activeMapsFilterMode.value;
+    var anyShown = false;
+    handles.forEach(function(h) {
+      var node = handleList.querySelector('.maps-menu-item[data-map-id="' + h.mapId + '"]');
+      if (!node) return;
+      var map = maps.get(h.mapId);
+      if (!map) return;
+      var show = true;
+      if (q) {
+        var regionLabel = I18n.t('openmaps.areas.' + map.area) || map.area || '';
+        var hay = (map.title + ' ' + regionLabel + ' ' + (map.area || '') + ' ' + (map.type || '')).toLowerCase();
+        if (hay.indexOf(q) < 0) show = false;
+      }
+      if (show && mode === 'favorites' && !isMapFavorite(h.mapId)) show = false;
+      if (show && mode === 'in_view' && h.outOfArea) show = false;
+      if (show && mode === 'visible' && !(h.layer && h.layer.getVisibility())) show = false;
+      if (show && mode === 'tou_pending') {
+        var touPending = map.touId !== 'none' && TOU_REGISTRY[map.touId] && !isTouAccepted(map.touId);
+        if (!touPending) show = false;
+      }
+      node.style.display = show ? '' : 'none';
+      node.setAttribute('aria-hidden', show ? 'false' : 'true');
+      if (show) anyShown = true;
+    });
+    activeMapsFilterEmpty.textContent = I18n.t('openmaps.active_maps_filter_no_match');
+    activeMapsFilterEmpty.style.display = (handles.length > 0 && !anyShown) ? 'block' : 'none';
+  }
+
+  function compareMapsForAddList(a, b) {
+    var fa = isMapFavorite(a.id), fb = isMapFavorite(b.id);
+    if (fa !== fb) return fa ? -1 : 1;
+    return (a.title || '').localeCompare(b.title || '');
+  }
+
+  function syncAddMapViewportHint() {
+    var notAdded = getNotAddedMaps();
+    if (notAdded.length > 0) {
+      addMapViewportHint.textContent = I18n.t('openmaps.add_map_pick_hint');
+      addMapViewportHint.style.display = 'block';
+    } else {
+      addMapViewportHint.textContent = '';
+      addMapViewportHint.style.display = 'none';
+    }
+  }
+
+  function showTouGateNotice(mapTitle) {
+    var touNotice = document.createElement('div');
+    touNotice.className = 'openmaps-sidebar-notice openmaps-sidebar-notice--tou';
+    touNotice.setAttribute('role', 'status');
+    var touNoticeMsg = document.createElement('div');
+    touNoticeMsg.className = 'openmaps-sidebar-notice-message';
+    touNoticeMsg.textContent = I18n.t('openmaps.tou_gate_banner').replace(/\{title\}/g, mapTitle);
+    var touNoticeDismiss = document.createElement('wz-button');
+    touNoticeDismiss.className = 'openmaps-wz-btn-compact';
+    touNoticeDismiss.setAttribute('size', 'sm');
+    touNoticeDismiss.setAttribute('color', 'secondary');
+    touNoticeDismiss.textContent = I18n.t('openmaps.notice_dismiss');
+    touNoticeDismiss.addEventListener('click', function() { touNotice.remove(); });
+    touNotice.appendChild(touNoticeMsg);
+    touNotice.appendChild(touNoticeDismiss);
+    tab.insertBefore(touNotice, tab.firstChild);
+  }
+
+function selectMapToAdd(mapId) {
+    var addedMap = maps.get(parseInt(mapId, 10));
+    if (!addedMap) return;
+    handles.push(new MapHandle(addedMap));
+    if (addedMap.touId !== 'none' && TOU_REGISTRY[addedMap.touId] && !isTouAccepted(addedMap.touId)) {
+      showTouGateNotice(addedMap.title);
+    }
+    saveMapState();
+    addMapInput.value = '';
+    hideAddMapSuggestions();
+    addMapInput.blur();
+    updateMapSelector();
+    refreshMapDrag();
+    var lastCard = handleList.querySelector('.maps-menu-item:last-of-type');
+    if (lastCard) lastCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+function isAddMapIntersectingViewport(map) {
+    var currentExtent = getMapExtent();
+    if (!currentExtent) return true;
+    var dataProjection = new OpenLayers.Projection('EPSG:4326');
+    var bounds = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(dataProjection, W.map.getProjectionObject());
+    return bounds.intersectsBounds(currentExtent);
+  }
+
+function populateAddMapSuggestions(filterText) {
+    while (addMapSuggestions.firstChild) {
+      addMapSuggestions.removeChild(addMapSuggestions.firstChild);
+    }
+    var q = (filterText || '').trim().toLowerCase();
+    var allNotAdded = getNotAddedMaps().slice().sort(compareMapsForAddList);
+    var inViewOnly = addMapsFilterMode.value === 'in_view';
+    var notAdded = inViewOnly ? allNotAdded.filter(isAddMapIntersectingViewport) : allNotAdded;
+    if (allNotAdded.length === 0) {
+      var allAdded = document.createElement('div');
+      allAdded.className = 'openmaps-add-map-suggestion-empty';
+      allAdded.textContent = I18n.t('openmaps.add_map_all_added');
+      addMapSuggestions.appendChild(allAdded);
+      syncAddMapViewportHint();
+      if (addMapSuggestions.style.display === 'block') positionAddMapSuggestions();
+      return;
+    }
+    if (inViewOnly && notAdded.length === 0) {
+      var noneView = document.createElement('div');
+      noneView.className = 'openmaps-add-map-suggestion-empty';
+      noneView.textContent = I18n.t('openmaps.add_maps_none_in_view');
+      addMapSuggestions.appendChild(noneView);
+      syncAddMapViewportHint();
+      if (addMapSuggestions.style.display === 'block') positionAddMapSuggestions();
+      return;
+    }
+    var rowCount = 0;
+    notAdded.forEach(function(map) {
+      var regionLabel = I18n.t('openmaps.areas.' + map.area) || map.area || '';
+      if (q) {
+        var hay = (map.title + ' ' + regionLabel + ' ' + (map.area || '')).toLowerCase();
+        if (hay.indexOf(q) < 0) return;
+      }
+      rowCount++;
+      var row = document.createElement('div');
+      row.className = 'openmaps-add-map-suggestion-row';
+      row.setAttribute('role', 'option');
+      row.dataset.mapId = String(map.id);
+      row.addEventListener('click', function() {
+        selectMapToAdd(row.dataset.mapId);
+      });
+      if (map.area) {
+        var flagImg = document.createElement('img');
+        flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
+        flagImg.alt = '';
+        flagImg.className = 'openmaps-add-map-suggestion-flag';
+        flagImg.title = regionLabel;
+        flagImg.onerror = function() { flagImg.style.visibility = 'hidden'; };
+        row.appendChild(flagImg);
+      } else {
+        var spacer = document.createElement('span');
+        spacer.className = 'openmaps-add-map-suggestion-flag-spacer';
+        row.appendChild(spacer);
+      }
+      var textCol = document.createElement('div');
+      textCol.className = 'openmaps-add-map-suggestion-text';
+      var titleEl = document.createElement('div');
+      titleEl.className = 'openmaps-add-map-suggestion-title';
+      titleEl.textContent = map.title;
+      var subEl = document.createElement('div');
+      subEl.className = 'openmaps-add-map-suggestion-sub';
+      subEl.textContent = regionLabel;
+      textCol.appendChild(titleEl);
+      textCol.appendChild(subEl);
+      row.appendChild(textCol);
+      addMapSuggestions.appendChild(row);
+    });
+    if (rowCount === 0) {
+      var none = document.createElement('div');
+      none.className = 'openmaps-add-map-suggestion-empty';
+      none.textContent = I18n.t('openmaps.add_map_no_matches');
+      addMapSuggestions.appendChild(none);
+    }
+    syncAddMapViewportHint();
+    if (addMapSuggestions.style.display === 'block') {
+      positionAddMapSuggestions();
+    }
+  }
+
 function updateMapSelector() {
     const currentExtent = getMapExtent();
-    if (!currentExtent) return;
-
     var localMaps = [];
-    let dataProjection = new OpenLayers.Projection('EPSG:4326');
-    // TODO: decrease calculations by checking whether anything has changed instead of always refilling the select
-    maps.forEach((map) => {
-      // FIX: Split the bbox array into 4 separate coordinates so OpenLayers doesn't corrupt!
-      let bounds = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(dataProjection, W.map.getProjectionObject());
-      if (bounds.intersectsBounds(currentExtent)) {
-        localMaps.push(map);
-      }
-    });
-   // Clear list
-    while (addMapDatalist.firstChild) {
-      addMapDatalist.removeChild(addMapDatalist.firstChild);
-    }
-
-    if (localMaps.length > 0) {
-      localMaps.forEach((map) => {
-        // Hide maps that are already active
-        if (handles.some((handle) => map.id == handle.mapId)) return;
-
-        var option = document.createElement('option');
-        option.value = map.title; // What the user searches for
-        option.dataset.id = map.id;
-        option.textContent = I18n.t('openmaps.areas.' + map.area); // Shows region as a subtitle!
-        addMapDatalist.appendChild(option);
+    if (currentExtent) {
+      let dataProjection = new OpenLayers.Projection('EPSG:4326');
+      maps.forEach((map) => {
+        let bounds = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(dataProjection, W.map.getProjectionObject());
+        if (bounds.intersectsBounds(currentExtent)) {
+          localMaps.push(map);
+        }
       });
     }
 
-    // Have some active maps moved out of view?
+    if (addMapSuggestions.style.display === 'block') {
+      populateAddMapSuggestions(addMapInput.value);
+    }
+
+    if (!currentExtent) {
+      syncAddMapViewportHint();
+      applyActiveMapsFilter();
+      return;
+    }
+
     handles.forEach(function(handle) {
       var handleIsLocal = localMaps.some((map) => map.id == handle.mapId);
       if (handleIsLocal && handle.outOfArea) {
@@ -3850,6 +4882,8 @@ function updateMapSelector() {
         if (handle.updateVisibility) handle.updateVisibility();
       }
     });
+    syncAddMapViewportHint();
+    applyActiveMapsFilter();
   }
 
 function getMapExtent() {
@@ -3862,6 +4896,10 @@ function getMapExtent() {
   //#endregion
 
   //#region Map tile support functions
+function openMapsEscapeForHtmlTooltip(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
 function loadTileError(tile, callback) {
     GM_xmlhttpRequest({
       method: 'GET',
@@ -4225,7 +5263,7 @@ function MapHandle(map, options) {
     this.outOfArea = currentExtent ? !this.area.intersectsBounds(currentExtent) : true;
 
     // UI Element References
-    var UI = {};
+    var UI = { touDetails: null, mapLayersNoActiveMark: null };
     var loadedTiles = 0, totalTiles = 0, layerRedrawNeeded = false;
 
     // Setup map layers state
@@ -4251,8 +5289,25 @@ var layerToggler = createLayerToggler(omGroup, !this.hidden, map.title, intent =
     // --- 2. UTILITY HELPER FUNCTIONS ---
     function createIconButton(icon, titleText, forceTooltip) {
       var btn = document.createElement('button');
+      btn.type = 'button';
       btn.className = 'fa ' + icon + ' open-maps-icon-button';
-      if (titleText) { btn.dataset.container = '#sidebar'; Tooltips.add(btn, titleText, forceTooltip); }
+      if (titleText) {
+        btn.setAttribute('aria-label', titleText);
+        btn.dataset.container = '#sidebar';
+        Tooltips.add(btn, titleText, forceTooltip);
+      }
+      return btn;
+    }
+
+    function createOrangeExclaimButton(tooltipText, forceTooltip) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fa fa-exclamation-circle open-maps-icon-button open-maps-orange-exclaim-circle-btn';
+      if (tooltipText) {
+        btn.setAttribute('aria-label', tooltipText);
+        btn.dataset.container = '#sidebar';
+        Tooltips.add(btn, tooltipText, forceTooltip);
+      }
       return btn;
     }
 
@@ -4287,7 +5342,12 @@ function updateTileLoader() {
     }
 
    this.clearError = function() {
+      try {
+        $(UI.error).tooltip('destroy');
+      } catch (err) {}
+      UI.error.removeAttribute('data-original-title');
       UI.error.title = '';
+      Tooltips.add(UI.error, I18n.t('openmaps.retrieving_error'), true);
       UI.error.style.display = 'none';
     };
 
@@ -4349,7 +5409,9 @@ var handle = document.createElement('div');
       if (map.area) {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
-        flagImg.title = I18n.t('openmaps.areas.' + map.area) || map.area;
+        var flagTip = I18n.t('openmaps.areas.' + map.area) || map.area;
+        flagImg.setAttribute('aria-label', flagTip);
+        Tooltips.add(flagImg, flagTip);
         flagImg.style.cssText = 'position:absolute; bottom:-2px; right:-6px; width:16px; height:12px; border-radius:2px; box-shadow:0 1px 3px rgba(0,0,0,0.6); border:1px solid #fff; z-index:2; pointer-events:auto; background:#fff;';
         badgeWrapper.appendChild(flagImg);
       }
@@ -4358,7 +5420,7 @@ var handle = document.createElement('div');
 
       var textContainer = document.createElement('div');
       textContainer.className = 'open-maps-text-container';
-      textContainer.style.justifyContent = 'center'; // Perfectly centers the title vertically
+      textContainer.style.cssText = 'display:flex; flex-direction:column; align-items:flex-start; justify-content:center; min-width:0; flex:1;';
 
       UI.title = document.createElement('div');
       UI.title.className = 'open-maps-title';
@@ -4373,7 +5435,30 @@ var handle = document.createElement('div');
       var buttons = document.createElement('div');
       buttons.className = 'buttons';
 
-      UI.error = createIconButton('fa-exclamation-triangle');
+      UI.touPendingBtn = createOrangeExclaimButton(I18n.t('openmaps.tou_pending_hint'), true);
+      UI.touPendingBtn.style.display = (map.touId !== 'none' && TOU_REGISTRY[map.touId] && !isTouAccepted(map.touId)) ? 'flex' : 'none';
+      UI.touPendingBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        UI.editContainer.style.display = 'block';
+        UI.editBtn.style.transform = 'rotate(180deg)';
+        if (UI.touDetails) UI.touDetails.open = true;
+      });
+      buttons.appendChild(UI.touPendingBtn);
+
+      UI.noLayersWarningBtn = createOrangeExclaimButton(I18n.t('openmaps.no_layers_enabled_hint'), true);
+      UI.noLayersWarningBtn.style.display = 'none';
+      UI.noLayersWarningBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        UI.editContainer.style.display = 'block';
+        UI.editBtn.style.transform = 'rotate(180deg)';
+        var layerDetails = Array.prototype.slice.call(UI.editContainer.querySelectorAll('details')).find(function(d) {
+          return d.querySelector('.openmaps-map-list');
+        });
+        if (layerDetails) layerDetails.open = true;
+      });
+      buttons.appendChild(UI.noLayersWarningBtn);
+
+      UI.error = createIconButton('fa-exclamation-triangle', I18n.t('openmaps.retrieving_error'), true);
       UI.error.style.color = 'red'; UI.error.style.display = 'none';
       UI.error.addEventListener('click', self.clearError);
       buttons.appendChild(UI.error);
@@ -4382,7 +5467,7 @@ var handle = document.createElement('div');
       buttons.appendChild(UI.info);
 
     // --- ZOOM TO BBOX BUTTON ---
-      UI.zoomToBboxBtn = createIconButton('fa-search-plus', 'Zoom to map area', true);
+      UI.zoomToBboxBtn = createIconButton('fa-crosshairs', I18n.t('openmaps.zoom_to_map_area'), true);
       UI.zoomToBboxBtn.style.display = 'none'; // Hidden by default
 UI.zoomToBboxBtn.addEventListener('click', function(e) {
         e.stopPropagation();
@@ -4426,7 +5511,7 @@ UI.zoomToBboxBtn.addEventListener('click', function(e) {
 
 // --- SMART VISIBILITY TOGGLE ---
       var lockIcon = !isTouAccepted(map.touId) ? 'fa-lock' : (self.hidden ? 'fa-eye-slash' : 'fa-eye');
-      UI.visibility = createIconButton(lockIcon, !isTouAccepted(map.touId) ? 'Terms of Use must be accepted first' : I18n.t('openmaps.hideshow_layer'));
+      UI.visibility = createIconButton(lockIcon, !isTouAccepted(map.touId) ? I18n.t('openmaps.visibility_locked_tou') : I18n.t('openmaps.hideshow_layer'));
 
       if (!isTouAccepted(map.touId)) {
         UI.visibility.style.color = '#d93025'; // Make lock red
@@ -4436,10 +5521,9 @@ UI.zoomToBboxBtn.addEventListener('click', function(e) {
         if (e) e.stopPropagation();
 
         if (!isTouAccepted(map.touId)) {
-          // Force open the edit panel AND ensure the ToU box is visible!
+          // Force open the edit panel AND ensure the ToU section is visible!
           UI.editContainer.style.display = 'block';
-          var touBox = UI.editContainer.querySelector('.open-maps-tou-box');
-          if (touBox) touBox.style.display = 'block';
+          if (UI.touDetails) UI.touDetails.open = true;
           return;
         }
 
@@ -4448,7 +5532,25 @@ UI.zoomToBboxBtn.addEventListener('click', function(e) {
       });
       buttons.appendChild(UI.visibility);
 
-UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
+      var favBtn = createIconButton(isMapFavorite(map.id) ? 'fa-star' : 'fa-star-o', isMapFavorite(map.id) ? I18n.t('openmaps.favorite_remove') : I18n.t('openmaps.favorite_add'));
+      favBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var wasFav = isMapFavorite(map.id);
+        setMapFavorite(map.id, !wasFav);
+        favBtn.classList.remove('fa-star', 'fa-star-o');
+        favBtn.classList.add(!wasFav ? 'fa-star' : 'fa-star-o');
+        Tooltips.remove(favBtn);
+        var tip = !wasFav ? I18n.t('openmaps.favorite_remove') : I18n.t('openmaps.favorite_add');
+        Tooltips.add(favBtn, tip);
+        favBtn.setAttribute('aria-label', tip);
+        if (addMapSuggestions.style.display === 'block') {
+          populateAddMapSuggestions(addMapInput.value);
+        }
+        applyActiveMapsFilter();
+      });
+      buttons.appendChild(favBtn);
+
+UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_toggle'));
       UI.editBtn.style.transition = 'transform 0.2s ease';
       UI.editBtn.addEventListener('click', function() {
         var isHidden = UI.editContainer.style.display == 'none';
@@ -4477,7 +5579,7 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
       metaBox.style.cssText = 'margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e8eaed; font-size: 11px; color: #5f6368; line-height: 1.4;';
 
       var metaTop = document.createElement('div');
-      metaTop.innerHTML = `<strong>Type:</strong> <span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">${map.type || 'WMS'}</span> &nbsp;|&nbsp; <strong>Region:</strong> ${I18n.t('openmaps.areas.' + map.area) || map.area}`;
+      metaTop.innerHTML = '<strong>' + I18n.t('openmaps.meta_type') + ':</strong> <span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span> &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
       metaBox.appendChild(metaTop);
 
  // PERMANENT BBOX DISPLAY (Monospace for easy visual comparison)
@@ -4491,7 +5593,7 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
         var bRight = parseFloat(map.bbox.right !== undefined ? map.bbox.right : map.bbox[2]).toFixed(4);
         var bTop = parseFloat(map.bbox.top !== undefined ? map.bbox.top : map.bbox[3]).toFixed(4);
 
-        metaBbox.innerHTML = '<strong>BBox:</strong> [' + bLeft + ', ' + bBottom + ', ' + bRight + ', ' + bTop + ']';
+        metaBbox.innerHTML = '<strong>' + I18n.t('openmaps.meta_bbox') + ':</strong> [' + bLeft + ', ' + bBottom + ', ' + bRight + ', ' + bTop + ']';
         metaBox.appendChild(metaBbox);
       }
       if (map.abstract) {
@@ -4503,12 +5605,23 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
       UI.editContainer.appendChild(metaBox);
       // -----------------------------
 
+      // --- VISUAL ADJUSTMENTS (opacity, bbox, improve + filters) ---
+      var advColors = document.createElement('details');
+      advColors.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+      var summary = document.createElement('summary');
+      summary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
+      summary.innerHTML = '<i class="fa fa-sliders" style="margin-right:5px; color:#5f6368;" aria-hidden="true"></i>' + I18n.t('openmaps.visual_adjustments');
+      advColors.appendChild(summary);
+
+      var slidersContainer = document.createElement('div');
+      slidersContainer.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:10px;';
+
       if (map.format != 'image/jpeg') {
         var transCheck = document.createElement('wz-checkbox');
         transCheck.checked = self.transparent; transCheck.textContent = I18n.t('openmaps.transparent_label');
         transCheck.addEventListener('change', () => { self.transparent = !self.transparent; self.layer.mergeNewParams({ transparent: self.transparent }); saveMapState(); });
         Tooltips.add(transCheck, I18n.t('openmaps.transparent_label_tooltip'));
-        UI.editContainer.appendChild(transCheck);
+        slidersContainer.appendChild(transCheck);
       }
 
       if (map.hasOwnProperty('pixelManipulations')) {
@@ -4516,23 +5629,21 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
         impCheck.checked = self.improveMap; impCheck.textContent = I18n.t('openmaps.map_improvement_label');
         impCheck.addEventListener('change', () => { self.improveMap = !self.improveMap; self.layer.redraw(); saveMapState(); });
         Tooltips.add(impCheck, I18n.t('openmaps.map_improvement_label_tooltip'));
-        UI.editContainer.appendChild(impCheck);
+        slidersContainer.appendChild(impCheck);
       }
 
-      // --- CLEANER BBOX TOGGLE ---
       var bboxCheck = document.createElement('wz-checkbox');
       bboxCheck.checked = self.displayBbox;
-      bboxCheck.textContent = 'Draw Boundary Box on Map';
+      bboxCheck.textContent = I18n.t('openmaps.draw_bbox_on_map');
       bboxCheck.addEventListener('change', (e) => {
         self.displayBbox = e.target.checked;
         self.updateBboxLayer();
         saveMapState();
       });
-      UI.editContainer.appendChild(bboxCheck);
+      slidersContainer.appendChild(bboxCheck);
 
-   // --- LIVE OPACITY SLIDER ---
       var opacityBox = document.createElement('div');
-      opacityBox.style.cssText = 'display:flex; align-items:center; margin-left:30px; gap:8px; font-size:11px; color:#5f6368; margin-top:8px;';
+      opacityBox.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:11px; color:#5f6368;';
       Tooltips.add(opacityBox, I18n.t('openmaps.opacity_label_tooltip'));
 
       var opLabel = document.createElement('span');
@@ -4552,25 +5663,11 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
         self.opacity = this.value;
         opVal.textContent = this.value + '%';
       });
-      // FIX: Only save to LocalStorage when the user releases the mouse button!
       opSlider.addEventListener('change', function() { saveMapState(); });
 
       opacityBox.appendChild(opSlider);
       opacityBox.appendChild(opVal);
-      UI.editContainer.appendChild(opacityBox);
-      // ---------------------------
-
-
-        // --- IMAGE ADJUSTMENTS DASHBOARD ---
-      var advColors = document.createElement('details');
-      advColors.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
-      var summary = document.createElement('summary');
-      summary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
-      summary.innerHTML = '<i class="fa fa-sliders" style="margin-right:5px; color:#5f6368;"></i>Visual Adjustments';
-      advColors.appendChild(summary);
-
-      var slidersContainer = document.createElement('div');
-      slidersContainer.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:10px;';
+      slidersContainer.appendChild(opacityBox);
 
       function createSlider(label, prop, min, max, unit) {
         var row = document.createElement('div');
@@ -4594,17 +5691,17 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
         return {row, slider};
       }
 
-      var sBright = createSlider('Brightness', 'brightness', 0, 200, '%');
-      var sContrast = createSlider('Contrast', 'contrast', 0, 200, '%');
-      var sSaturate = createSlider('Saturation', 'saturate', 0, 300, '%');
-      var sHue = createSlider('Hue Rotate', 'hue', 0, 360, '°');
-      var sGamma = createSlider('Gamma', 'gamma', 10, 200, '%');;
+      var sBright = createSlider(I18n.t('openmaps.slider_brightness'), 'brightness', 0, 200, '%');
+      var sContrast = createSlider(I18n.t('openmaps.slider_contrast'), 'contrast', 0, 200, '%');
+      var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
+      var sHue = createSlider(I18n.t('openmaps.slider_hue_rotate'), 'hue', 0, 360, '°');
+      var sGamma = createSlider(I18n.t('openmaps.slider_gamma'), 'gamma', 10, 200, '%');;
 // --- BLEND MODE DROPDOWN ---
       var blendRow = document.createElement('div');
       blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
 
       var blendLabel = document.createElement('span');
-      blendLabel.textContent = 'Blend Mode:';
+      blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
 
       var blendSelect = document.createElement('select');
       blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
@@ -4613,8 +5710,7 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
       modes.forEach(mode => {
         var opt = document.createElement('option');
         opt.value = mode;
-        // Capitalize first letter and remove dashes for clean UI
-        opt.textContent = mode.charAt(0).toUpperCase() + mode.slice(1).replace('-', ' ');
+        opt.textContent = mode.split('-').map(function(part) { return part.charAt(0).toUpperCase() + part.slice(1); }).join(' ');
         if (mode === self.blendMode) opt.selected = true;
         blendSelect.appendChild(opt);
       });
@@ -4631,14 +5727,15 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
       // -----------------------------
       var invRow = document.createElement('div');
       var invCheck = document.createElement('wz-checkbox');
-      invCheck.textContent = 'Invert Colors (Dark Mode)';
+      invCheck.textContent = I18n.t('openmaps.invert_colors');
       invCheck.checked = self.invert;
       invCheck.addEventListener('change', (e) => { self.invert = e.target.checked; self.applyFilters(); saveMapState(); });
       invRow.appendChild(invCheck);
 
       var resetBtn = document.createElement('wz-button');
+      resetBtn.className = 'openmaps-wz-btn-compact';
       resetBtn.setAttribute('size', 'sm'); resetBtn.setAttribute('color', 'secondary');
-      resetBtn.textContent = 'Reset to Default';
+      resetBtn.textContent = I18n.t('openmaps.reset_visual_default');
       resetBtn.style.marginTop = '5px';
       resetBtn.addEventListener('click', () => {
         self.brightness = 100; self.contrast = 100; self.saturate = 100; self.hue = 0; self.gamma = 100; self.invert = false;
@@ -4662,10 +5759,32 @@ UI.editBtn = createIconButton('fa-chevron-down', 'Settings');
 
   
 
-      // Sub-Layers
+      // Sub-Layers (+ discoverable layers tool lives in this section for WMS/ESRI)
+      var mapLayersDetailsRoot = null;
+      function appendMapLayersSummaryInner(summaryEl) {
+        summaryEl.textContent = '';
+        var listIco = document.createElement('i');
+        listIco.className = 'fa fa-list';
+        listIco.style.cssText = 'margin-right:5px; color:#5f6368;';
+        listIco.setAttribute('aria-hidden', 'true');
+        summaryEl.appendChild(listIco);
+        summaryEl.appendChild(document.createTextNode(I18n.t('openmaps.map_layers_title')));
+        var layerWarn = document.createElement('i');
+        layerWarn.className = 'fa fa-exclamation-circle open-maps-maplayers-summary-warning';
+        layerWarn.setAttribute('aria-hidden', 'true');
+        layerWarn.style.display = 'none';
+        summaryEl.appendChild(layerWarn);
+        UI.mapLayersNoActiveMark = layerWarn;
+        Tooltips.add(layerWarn, I18n.t('openmaps.no_layers_enabled_hint'), true);
+      }
+
       if (self.mapLayers.length > 1) {
-        var layersTitle = document.createElement('p'); layersTitle.textContent = I18n.t('openmaps.map_layers_title') + ':';
-        UI.editContainer.appendChild(layersTitle);
+        mapLayersDetailsRoot = document.createElement('details');
+        mapLayersDetailsRoot.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+        var layersSummary = document.createElement('summary');
+        layersSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
+        appendMapLayersSummaryInner(layersSummary);
+        mapLayersDetailsRoot.appendChild(layersSummary);
         var subLayerContainer = document.createElement('div'); subLayerContainer.className = 'openmaps-map-list';
 
         self.mapLayers.forEach(layerItem => {
@@ -4732,7 +5851,7 @@ var lBtns = document.createElement('div'); lBtns.className = 'buttons';
 
           var lQuery = null; // Scope the variable here so we can save it!
           if (mapLayer.queryable) {
-            lQuery = createIconButton('fa-hand-pointer-o');
+            lQuery = createIconButton('fa-hand-pointer-o', I18n.t('openmaps.query_layer'));
             lQuery.addEventListener('click', function() { this.style.color = 'blue'; getFeatureInfoControl.params = { url: map.url, id: map.id, layers: layerItem.name, callback: () => lQuery.style.color = '' }; getFeatureInfoControl.activate(); });
             lBtns.appendChild(lQuery);
           }
@@ -4745,7 +5864,6 @@ var lBtns = document.createElement('div'); lBtns.className = 'buttons';
             layerItem.visible = !layerItem.visible;
             layerRedrawNeeded = true;
             self.updateLayers();
-            self.updateVisibility();
           });
 
           // Register layer UI elements for state sync (including the query button!)
@@ -4764,7 +5882,8 @@ var lBtns = document.createElement('div'); lBtns.className = 'buttons';
 
           item.appendChild(lHeader); subLayerContainer.appendChild(item);
         });
-        UI.editContainer.appendChild(subLayerContainer);
+        mapLayersDetailsRoot.appendChild(subLayerContainer);
+        UI.editContainer.appendChild(mapLayersDetailsRoot);
         sortable(subLayerContainer, { forcePlaceholderSize: true, placeholderClass: 'result', handle: '.open-maps-drag-handle' })[0].addEventListener('sortupdate', e => {
           if (e.detail.elementIndex < 0 || e.detail.elementIndex >= self.mapLayers.length || e.detail.oldElementIndex < 0 || e.detail.oldElementIndex >= self.mapLayers.length) return;
           self.mapLayers.splice(e.detail.elementIndex, 0, self.mapLayers.splice(e.detail.oldElementIndex, 1)[0]);
@@ -4773,39 +5892,106 @@ var lBtns = document.createElement('div'); lBtns.className = 'buttons';
         });
       }
 
-      buildFetchLayersTool();
-      buildCapabilitiesTool();
-        // --- INLINE TERMS OF USE BOX (Relocated to bottom) ---
+      if (map.type === 'WMS' || map.type === 'ESRI') {
+        if (!mapLayersDetailsRoot) {
+          mapLayersDetailsRoot = document.createElement('details');
+          mapLayersDetailsRoot.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+          var layersSummaryOnly = document.createElement('summary');
+          layersSummaryOnly.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
+          appendMapLayersSummaryInner(layersSummaryOnly);
+          mapLayersDetailsRoot.appendChild(layersSummaryOnly);
+          UI.editContainer.appendChild(mapLayersDetailsRoot);
+        }
+        buildFetchLayersTool(mapLayersDetailsRoot);
+      }
+        // --- TERMS OF USE (collapsible section, same pattern as Visual adjustments / Map layers)
       if (map.touId !== 'none') {
         var isConfigValid = map.touId && TOU_REGISTRY[map.touId];
-        var accepted = isConfigValid ? isTouAccepted(map.touId) : false;
+        var touUnlocked = isConfigValid ? isTouAccepted(map.touId) : false;
 
-        // 1. The Toggle Link
-        var touLink = document.createElement('a');
-        var updateLinkText = function(isAcc) {
+        var touDetails = document.createElement('details');
+        touDetails.className = 'open-maps-tou-details';
+        touDetails.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+        UI.touDetails = touDetails;
+
+        var touSummary = document.createElement('summary');
+        touSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none; display:flex; align-items:center; flex-wrap:wrap; gap:4px;';
+        var touSummaryLeadIcon = document.createElement('i');
+        touSummaryLeadIcon.className = 'fa fa-balance-scale';
+        touSummaryLeadIcon.style.cssText = 'margin-right:4px; color:#5f6368;';
+        touSummaryLeadIcon.setAttribute('aria-hidden', 'true');
+        touSummary.appendChild(touSummaryLeadIcon);
+        touSummary.appendChild(document.createTextNode(I18n.t('openmaps.terms_section_title')));
+        var touSummaryStatus = document.createElement('span');
+        touSummaryStatus.className = 'open-maps-tou-summary-status';
+        touSummaryStatus.style.cssText = 'font-weight:600; margin-left:6px;';
+        touSummary.appendChild(touSummaryStatus);
+        touDetails.appendChild(touSummary);
+
+        var touReadTermsProbeStatus = null;
+
+        var touProbeUiState = 'checking';
+        var touProbeVerifiedAt = 0;
+        var touProbeFailDetail = '';
+
+        function syncTouReadTermsProbeIndicator() {
+          if (!touReadTermsProbeStatus) return;
+          Tooltips.remove(touReadTermsProbeStatus);
+          touReadTermsProbeStatus.innerHTML = '';
           if (!isConfigValid) {
-            touLink.innerHTML = '<i class="fa fa-exclamation-triangle"></i> Configuration Error';
-            touLink.style.color = '#d93025';
-          } else {
-            var icon = isAcc ? '<i class="fa fa-check-square-o"></i>' : '<i class="fa fa-balance-scale"></i>';
-            touLink.innerHTML = icon + ' Terms of Use ' + (isAcc ? '(Accepted)' : '(Required)');
-            touLink.style.color = isAcc ? '#0f9d58' : '#d93025';
+            touReadTermsProbeStatus.style.display = 'none';
+            return;
           }
-          touLink.style.cssText += 'display:block; margin-top:12px; cursor:pointer; font-size:13px; font-weight:bold;';
-        };
-        updateLinkText(accepted);
+          var stored = hasStoredTouAcceptance(map.touId);
+          var sessOnly = !!touUnreachableSessionDismissed[map.touId] && !stored;
+          if (stored || sessOnly) {
+            touReadTermsProbeStatus.style.display = 'none';
+            return;
+          }
+          touReadTermsProbeStatus.style.display = 'inline-block';
+          if (touProbeUiState === 'checking') {
+            touReadTermsProbeStatus.innerHTML = '<i class="fa fa-spinner fa-spin" style="color:#80868b;" aria-hidden="true"></i>';
+            Tooltips.add(touReadTermsProbeStatus, I18n.t('openmaps.tou_link_probe_checking'), true);
+          } else if (touProbeUiState === 'ok') {
+            touReadTermsProbeStatus.innerHTML = '<i class="fa fa-check-circle" style="color:#5f8a6e;" aria-hidden="true"></i>';
+            var whenStr = touProbeVerifiedAt ? new Date(touProbeVerifiedAt).toLocaleString() : '';
+            Tooltips.add(touReadTermsProbeStatus, I18n.t('openmaps.tou_link_probe_ok').replace(/\{when\}/g, whenStr), true);
+          } else if (touProbeUiState === 'fail') {
+            touReadTermsProbeStatus.innerHTML = '<i class="fa fa-exclamation-triangle open-maps-tou-probe-fail-icon" aria-hidden="true"></i>';
+            var d = touProbeFailDetail || '—';
+            Tooltips.add(touReadTermsProbeStatus, I18n.t('openmaps.tou_link_probe_fail').replace(/\{detail\}/g, d), true);
+          }
+        }
 
-        // 2. The Box Container
+        var updateLinkText = function() {
+          if (!isConfigValid) {
+            touSummaryStatus.innerHTML = '<i class="fa fa-exclamation-triangle" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_config_error');
+            touSummaryStatus.style.color = '#d93025';
+          } else {
+            var stored = hasStoredTouAcceptance(map.touId);
+            var sessOnly = !!touUnreachableSessionDismissed[map.touId] && !stored;
+            if (stored) {
+              touSummaryStatus.innerHTML = '<i class="fa fa-check-square-o" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_section_status_accepted');
+              touSummaryStatus.style.color = '#0f9d58';
+            } else if (sessOnly) {
+              touSummaryStatus.innerHTML = '<i class="fa fa-exclamation-circle open-maps-orange-fa-inline open-maps-orange-fa-inline--gap" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_section_status_dismissed');
+              touSummaryStatus.style.color = '#e37400';
+            } else {
+              touSummaryStatus.style.color = '';
+              touSummaryStatus.innerHTML = '<i class="fa fa-exclamation-circle open-maps-orange-fa-inline" aria-hidden="true"></i>';
+              Tooltips.add(touSummaryStatus.firstElementChild, I18n.t('openmaps.tou_section_status_required'), true);
+            }
+          }
+          syncTouReadTermsProbeIndicator();
+        };
+        updateLinkText();
+
+        // 2. The Box Container (body of the Terms of Use section)
         var touBox = document.createElement('div');
         touBox.className = 'open-maps-tou-box';
-        touBox.style.cssText = 'padding:10px; border-radius:8px; margin-top:8px; margin-bottom:10px; display:' + (accepted ? 'none' : 'block') + ';';
-        touBox.style.background = accepted ? '#f8f9fa' : '#fce8e6';
-        touBox.style.border = accepted ? '1px solid #dadce0' : '1px solid #fad2cf';
-
-        touLink.addEventListener('click', function(e) {
-          e.preventDefault();
-          touBox.style.display = (touBox.style.display === 'none') ? 'block' : 'none';
-        });
+        touBox.style.cssText = 'padding:10px; border-radius:8px; margin-top:4px; margin-bottom:4px;';
+        touBox.style.background = '#fce8e6';
+        touBox.style.border = '1px solid #fad2cf';
 
         var tTitle = document.createElement('div');
         tTitle.style.cssText = 'color:#333; margin-bottom:5px; font-size:12px; font-weight:bold;';
@@ -4817,25 +6003,62 @@ var lBtns = document.createElement('div'); lBtns.className = 'buttons';
 
         if (!isConfigValid) {
           // ERROR STATE: Map is missing a ToU definition
-          tTitle.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#d93025;"></i> Invalid Map Configuration';
-          tDesc.textContent = 'This map layer requires a Terms of Use declaration (touId) in the script source, but it is missing or invalid. It has been locked for safety. Please contact the script maintainer.';
+          tTitle.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#d93025;" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_invalid_title');
+          tDesc.textContent = I18n.t('openmaps.tou_invalid_body');
         } else {
           // NORMAL STATE
           var touObj = TOU_REGISTRY[map.touId];
           tTitle.textContent = touObj.name;
-          tDesc.textContent = accepted ? 'You have accepted the terms of use. You may review them below:' : 'Before enabling this layer, you must review and accept the terms:';
+          function refreshTouPanelChrome() {
+            var stored = hasStoredTouAcceptance(map.touId);
+            var sessOnly = !!touUnreachableSessionDismissed[map.touId] && !stored;
+            if (stored) {
+              touBox.style.background = '#e6f4ea';
+              touBox.style.border = '1px solid #ceead6';
+              tDesc.textContent = I18n.t('openmaps.tou_desc_accepted');
+            } else if (sessOnly) {
+              touBox.style.background = '#fff8e1';
+              touBox.style.border = '1px solid #fbc02d';
+              tDesc.textContent = I18n.t('openmaps.tou_desc_dismissed');
+            } else {
+              touBox.style.background = '#fce8e6';
+              touBox.style.border = '1px solid #fad2cf';
+              tDesc.textContent = I18n.t('openmaps.tou_desc_required');
+            }
+            updateLinkText();
+          }
+          refreshTouPanelChrome();
+
+          var touReachWarn = document.createElement('div');
+          touReachWarn.style.cssText = 'display:none; margin-bottom:8px; padding:8px; border-radius:4px; background:#fff8e1; border:1px solid #fbc02d; font-size:11px; color:#5d4037; line-height:1.35;';
+          touBox.appendChild(touReachWarn);
 
           var tLinkBox = document.createElement('div');
           tLinkBox.style.cssText = 'font-weight:bold; font-size:11px; margin-bottom:10px; color:#202124;';
-          tLinkBox.appendChild(document.createTextNode('Read terms in: '));
+          tLinkBox.appendChild(document.createTextNode(I18n.t('openmaps.tou_read_terms_in') + ' '));
+          touReadTermsProbeStatus = document.createElement('span');
+          touReadTermsProbeStatus.className = 'open-maps-tou-readterms-probe';
+          touReadTermsProbeStatus.style.cssText = 'display:inline-block; margin-right:4px; min-width:14px; text-align:center; vertical-align:middle;';
+          tLinkBox.appendChild(touReadTermsProbeStatus);
 
           var linksClicked = false;
+          var touProbeUnreachable = false;
           var acceptBtn = document.createElement('wz-button');
+          acceptBtn.className = 'openmaps-wz-btn-compact';
           acceptBtn.setAttribute('color', 'secondary');
           acceptBtn.setAttribute('size', 'sm');
           acceptBtn.disabled = true;
-          acceptBtn.textContent = 'I Accept';
-          acceptBtn.style.display = accepted ? 'none' : 'inline-block';
+          acceptBtn.textContent = I18n.t('openmaps.tou_accept');
+          acceptBtn.style.display = hasStoredTouAcceptance(map.touId) ? 'none' : 'inline-block';
+
+          function refreshAcceptBtnTooltip() {
+            Tooltips.remove(acceptBtn);
+            if (acceptBtn.style.display === 'none') return;
+            if (acceptBtn.disabled) {
+              Tooltips.add(acceptBtn, I18n.t('openmaps.tou_accept_disabled_tooltip'), true, { container: 'body' });
+            }
+          }
+          refreshAcceptBtnTooltip();
 
           Object.keys(touObj.links).forEach(lang => {
             var a = document.createElement('a');
@@ -4844,19 +6067,75 @@ var lBtns = document.createElement('div'); lBtns.className = 'buttons';
             a.innerHTML = '<i class="fa fa-external-link" style="font-size:10px;"></i> [' + lang.toUpperCase() + ']';
             a.style.cssText = 'margin-left:5px; color:#1a73e8; cursor:pointer; text-decoration:none;';
             a.addEventListener('click', () => {
-              if (!accepted) {
+              if (!hasStoredTouAcceptance(map.touId) && !touProbeUnreachable) {
                 linksClicked = true;
                 acceptBtn.disabled = false;
                 acceptBtn.setAttribute('color', 'positive');
+                refreshAcceptBtnTooltip();
               }
             });
             tLinkBox.appendChild(a);
           });
 touBox.appendChild(tLinkBox);
+          syncTouReadTermsProbeIndicator();
+
+          probeToUReachability(map.touId, function(res) {
+            if (res.status === 'ok') {
+              touProbeUiState = 'ok';
+              touProbeVerifiedAt = Date.now();
+              syncTouReadTermsProbeIndicator();
+              return;
+            }
+            if (res.status === 'invalid') {
+              touProbeUiState = 'fail';
+              touProbeFailDetail = '—';
+              syncTouReadTermsProbeIndicator();
+              return;
+            }
+            touProbeUiState = 'fail';
+            touProbeFailDetail = formatTouUnreachableDetail(res);
+            syncTouReadTermsProbeIndicator();
+            if (res.status !== 'unreachable') return;
+            touProbeUnreachable = true;
+            linksClicked = false;
+            acceptBtn.disabled = true;
+            acceptBtn.setAttribute('color', 'secondary');
+            refreshAcceptBtnTooltip();
+            touReachWarn.style.display = 'block';
+            touReachWarn.textContent = '';
+            var wTitle = document.createElement('div');
+            wTitle.style.fontWeight = 'bold';
+            wTitle.textContent = I18n.t('openmaps.tou_unreachable_title');
+            var wDetail = document.createElement('div');
+            wDetail.style.cssText = 'margin-top:4px; font-size:10px; opacity:0.95;';
+            wDetail.textContent = formatTouUnreachableDetail(res) + I18n.t('openmaps.tou_unreachable_detail_suffix');
+            var wHint = document.createElement('div');
+            wHint.style.cssText = 'margin-top:6px; font-size:10px;';
+            wHint.textContent = I18n.t('openmaps.tou_unreachable_hint');
+            var wDismiss = document.createElement('wz-button');
+            wDismiss.className = 'openmaps-wz-btn-compact';
+            wDismiss.setAttribute('size', 'sm');
+            wDismiss.setAttribute('color', 'secondary');
+            wDismiss.textContent = I18n.t('openmaps.tou_dismiss_session');
+            wDismiss.style.cssText = 'margin-top:8px;';
+            wDismiss.addEventListener('click', function() {
+              touReachWarn.style.display = 'none';
+              touUnreachableSessionDismissed[map.touId] = true;
+              window.dispatchEvent(new CustomEvent('om-tou-sync', { detail: { touId: map.touId, accepted: true, sessionUnreachableDismiss: true } }));
+              self.setManualVisibility(true);
+              setTimeout(function() {
+                if (UI.touDetails) UI.touDetails.open = false;
+              }, 1500);
+            });
+            touReachWarn.appendChild(wTitle);
+            touReachWarn.appendChild(wDetail);
+            touReachWarn.appendChild(wHint);
+            touReachWarn.appendChild(wDismiss);
+          });
 
           // --- 3. LIVE STATUS DASHBOARD ---
           var statsBox = document.createElement('div');
-          statsBox.style.cssText = 'margin-top: 10px; padding-top: 8px; border-top: 1px solid #ceead6; font-size: 11px; color: #555; display: ' + (accepted ? 'block' : 'none') + ';';
+          statsBox.style.cssText = 'margin-top: 10px; padding-top: 8px; border-top: 1px solid #ceead6; font-size: 11px; color: #555; display: ' + (hasStoredTouAcceptance(map.touId) ? 'block' : 'none') + ';';
           touBox.appendChild(statsBox); // <--- ADD THIS MISSING LINE!
 
             // Listen for background updates to refresh the UI automatically
@@ -4872,39 +6151,44 @@ touBox.appendChild(tLinkBox);
              // Handle legacy timestamp format gracefully for display
              var isLegacy = (typeof accData === 'number');
              var acceptedDate = new Date(isLegacy ? accData : accData.acceptedAt).toLocaleDateString();
-             var lastCheckedStr = (isLegacy || !accData.lastChecked) ? 'Pending...' : new Date(accData.lastChecked).toLocaleString();
-             var nextCheckStr = (isLegacy || !accData.lastChecked) ? 'On next reload' : new Date(accData.lastChecked + 30*24*60*60*1000).toLocaleDateString();
-             var lenStr = (isLegacy || !accData.length) ? 'Pending...' : accData.length.toLocaleString() + ' chars';
+             var lastCheckedStr = (isLegacy || !accData.lastChecked) ? I18n.t('openmaps.tou_stats_pending') : new Date(accData.lastChecked).toLocaleString();
+             var nextCheckStr = (isLegacy || !accData.lastChecked) ? I18n.t('openmaps.tou_stats_on_next_reload') : new Date(accData.lastChecked + 30*24*60*60*1000).toLocaleDateString();
+             var lenStr = (isLegacy || !accData.length) ? I18n.t('openmaps.tou_stats_pending') : I18n.t('openmaps.tou_stats_chars').replace(/\{n\}/g, accData.length.toLocaleString());
 
              statsBox.innerHTML = `
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Accepted:</span> <strong>${acceptedDate}</strong></div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Baseline Length:</span> <strong>${lenStr}</strong></div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Last Checked:</span> <strong>${lastCheckedStr}</strong></div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>Next Check:</span> <strong>${nextCheckStr}</strong></div>
+               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_accepted')}</span> <strong>${acceptedDate}</strong></div>
+               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_baseline_length')}</span> <strong>${lenStr}</strong></div>
+               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_last_checked')}</span> <strong>${lastCheckedStr}</strong></div>
+               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_next_check')}</span> <strong>${nextCheckStr}</strong></div>
              `;
 
-             var forceBtn = document.createElement('button');
-             forceBtn.innerHTML = '<i class="fa fa-refresh"></i> Force Check Now';
-             forceBtn.style.cssText = 'margin-top: 6px; width: 100%; padding: 4px; font-size: 11px; cursor: pointer; border: 1px solid #ceead6; border-radius: 4px; background: #fff; color: #0f9d58; font-weight: bold; transition: all 0.2s;';
+             var forceBtn = document.createElement('wz-button');
+             forceBtn.className = 'openmaps-wz-btn-compact';
+             forceBtn.setAttribute('size', 'sm');
+             forceBtn.setAttribute('color', 'secondary');
+             forceBtn.innerHTML = '<i class="fa fa-refresh" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_force_check');
+             forceBtn.style.cssText = 'margin-top: 6px; width: 100%;';
 
              forceBtn.addEventListener('click', function() {
-                forceBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Checking live URL...';
+                forceBtn.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_checking_url');
                 forceBtn.disabled = true;
 
                 performToUCheck(map.touId, true, function(res) {
                    forceBtn.disabled = false;
-                   if (res.status === 'error') {
-                     forceBtn.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#d93025;"></i> ' + res.msg;
+                   if (res.status === 'unreachable') {
+                     forceBtn.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#f9a825;" aria-hidden="true"></i> ' + formatTouUnreachableDetail(res);
+                   } else if (res.status === 'error') {
+                     forceBtn.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#d93025;" aria-hidden="true"></i> ' + res.msg;
                    } else if (res.status === 'revoked') {
-                     alert('WME OpenMaps:\n\nTerms of Use have changed by ' + (res.diff*100).toFixed(1) + '%!\n\nConsent has been revoked. Please read and re-accept.');
-                     touBox.style.display = 'none';
+                     alert(I18n.t('openmaps.tou_revoked').replace(/\{percent\}/g, (res.diff*100).toFixed(1)));
+                     if (UI.touDetails) UI.touDetails.open = false;
                      UI.editContainer.style.display = 'none';
-                     updateLinkText(false);
+                     updateLinkText();
                    } else if (res.status === 'baseline') {
-                     forceBtn.innerHTML = '<i class="fa fa-check"></i> Baseline Saved!';
+                     forceBtn.innerHTML = '<i class="fa fa-check" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_baseline_saved');
                      setTimeout(updateStatsUI, 1500);
                    } else if (res.status === 'unchanged') {
-                     forceBtn.innerHTML = '<i class="fa fa-check"></i> Unchanged (' + (res.diff*100).toFixed(2) + '% var)';
+                     forceBtn.innerHTML = '<i class="fa fa-check" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_unchanged').replace(/\{variance\}/g, (res.diff*100).toFixed(2) + '%');
                      setTimeout(updateStatsUI, 2500);
                    }
                 });
@@ -4915,22 +6199,20 @@ touBox.appendChild(tLinkBox);
           window.addEventListener('om-tou-sync', (e) => {
             if (e.detail.touId === map.touId) {
               if (e.detail.accepted) {
-                // Lock variables to true and update visual elements
-                accepted = true;
                 acceptBtn.style.display = 'none';
-                statsBox.style.display = 'block';
-                touBox.style.background = '#e6f4ea';
-                touBox.style.border = '1px solid #ceead6';
-                updateLinkText(true);
-
-                UI.visibility.style.color = '';
-                UI.visibility.classList.remove('fa-lock');
-                UI.visibility.classList.add('fa-eye');
-
-                // WAIT for the engine to finish the save operation, then refresh stats
-                setTimeout(() => {
+                if (e.detail.sessionUnreachableDismiss) {
+                  statsBox.style.display = 'none';
+                  refreshTouPanelChrome();
+                } else {
+                  statsBox.style.display = 'block';
+                  refreshTouPanelChrome();
+                  setTimeout(() => {
                     updateStatsUI();
-                }, 800);
+                  }, 800);
+                }
+
+                if (self.updateVisibility) self.updateVisibility();
+                applyActiveMapsFilter();
               } else {
                 // If terms are revoked by another map's check, reload to enforce the lock!
                 location.reload();
@@ -4938,13 +6220,13 @@ touBox.appendChild(tLinkBox);
             }
           });
 
-          if (accepted) {
+          if (hasStoredTouAcceptance(map.touId)) {
             updateStatsUI();
           }
           // --------------------------------
 
 acceptBtn.addEventListener('click', () => {
-            if (!linksClicked) return;
+            if (!linksClicked || touProbeUnreachable) return;
 
             var s = Settings.get();
             s.state.acceptedToUs[map.touId] = { acceptedAt: Date.now(), lastChecked: 0, length: 0 };
@@ -4961,20 +6243,30 @@ acceptBtn.addEventListener('click', () => {
             // 3. Unlock the current map
             self.setManualVisibility(true);
 
-            setTimeout(() => { if(touBox.style.display === 'block') touBox.style.display = 'none'; }, 1500);
+            setTimeout(() => { if (UI.touDetails) UI.touDetails.open = false; }, 1500);
           });
 
           touBox.appendChild(acceptBtn);
         }
 
-        UI.editContainer.appendChild(touLink);
-        UI.editContainer.appendChild(touBox);
+        touDetails.appendChild(touBox);
+        touDetails.open = !touUnlocked;
+        UI.editContainer.appendChild(touDetails);
       }
       // -----------------------------------------------------------
 
+      buildCapabilitiesTool();
+
       var rmBox = document.createElement('div'); rmBox.className = 'open-maps-remove-container';
-      var rmBtn = document.createElement('button'); rmBtn.className = 'open-maps-remove-btn'; rmBtn.innerHTML = '<i class="fa fa-trash"></i> ' + I18n.t('openmaps.remove_layer');
+      var rmBtn = document.createElement('wz-button');
+      rmBtn.setAttribute('size', 'sm');
+      rmBtn.setAttribute('color', 'secondary');
+      rmBtn.className = 'open-maps-remove-map-wz openmaps-wz-btn-compact openmaps-wz-btn-icon-only';
+      rmBtn.innerHTML = '<i class="fa fa-trash" aria-hidden="true"></i>';
+      rmBtn.setAttribute('aria-label', I18n.t('openmaps.remove_layer'));
+      Tooltips.add(rmBtn, I18n.t('openmaps.remove_layer'));
       rmBtn.addEventListener('click', () => {
+        Tooltips.teardownSubtree(UI.container);
         if (self.layer) W.map.removeLayer(self.layer);
         if (self.bboxLayer) W.map.removeLayer(self.bboxLayer);
         layerToggler.parentNode.removeChild(layerToggler);
@@ -4985,29 +6277,16 @@ acceptBtn.addEventListener('click', () => {
       });
       rmBox.appendChild(rmBtn); UI.editContainer.appendChild(rmBox);
 
-        // --- PERMANENT RESET BUTTON ---
-      var resetAllBox = document.createElement('div');
-      resetAllBox.style.cssText = 'margin-top: 10px; border-top: 1px dotted #ccc; padding-top: 10px;';
-      var resetAllBtn = document.createElement('button');
-      resetAllBtn.className = 'open-maps-remove-btn';
-      resetAllBtn.style.color = '#5f6368';
-      resetAllBtn.innerHTML = '<i class="fa fa-history"></i> Reset All Terms';
-      resetAllBtn.onclick = () => {
-          if (confirm('Revoke ALL Terms? This will lock all layers.')) {
-              var s = Settings.get(); s.state.acceptedToUs = {}; Settings.put(s);
-              location.reload();
-          }
-      };
-      resetAllBox.appendChild(resetAllBtn);
-      UI.editContainer.appendChild(resetAllBox);
       UI.container.appendChild(UI.editContainer);
     }
 
-  function buildFetchLayersTool() {
-      if (map.type !== 'WMS' && map.type !== 'ESRI') return;
+  function buildFetchLayersTool(mapLayersDetailsEl) {
+      if ((map.type !== 'WMS' && map.type !== 'ESRI') || !mapLayersDetailsEl) return;
       var fetchLink = document.createElement('a');
-      fetchLink.innerHTML = '<i class="fa fa-search"></i> Find available layers';
-      fetchLink.style.cssText = 'display:block; margin-top:12px; cursor:pointer; font-size:13px; font-weight:bold; color:#267bd8;';
+      fetchLink.href = '#';
+      fetchLink.innerHTML = '<i class="fa fa-search" aria-hidden="true"></i> ' + I18n.t('openmaps.find_available_layers');
+      var afterSublayers = mapLayersDetailsEl.querySelector('.openmaps-map-list');
+      fetchLink.style.cssText = 'display:block; margin-top:' + (afterSublayers ? '10px' : '4px') + '; cursor:pointer; font-size:13px; font-weight:bold; color:#267bd8;';
       var resultsDiv = document.createElement('div');
       resultsDiv.style.cssText = 'margin-top:8px; max-height:250px; overflow-y:auto; background-color:#f9f9f9; border:1px solid #ccc; display:none;';
 
@@ -5022,7 +6301,7 @@ acceptBtn.addEventListener('click', () => {
         }
 
         fetchLink.style.pointerEvents = 'none'; fetchLink.style.color = '#999';
-        fetchLink.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Querying server...';
+        fetchLink.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ' + I18n.t('openmaps.find_available_layers_loading');
         resultsDiv.style.display = 'block'; resultsDiv.innerHTML = '<div style="padding:5px; font-style:italic; font-size:12px;">Fetching map data...</div>';
 
         var isWMS = (map.type === 'WMS');
@@ -5035,7 +6314,7 @@ acceptBtn.addEventListener('click', () => {
             fetchLink.style.pointerEvents = 'auto';
             fetchLink.style.color = '#267bd8';
             resultsDiv.innerHTML = '';
-            fetchLink.innerHTML = '<i class="fa fa-check-circle" style="color:#0f9d58;"></i> Available layers loaded';
+            fetchLink.innerHTML = '<i class="fa fa-check-circle" style="color:#0f9d58;" aria-hidden="true"></i> ' + I18n.t('openmaps.find_available_layers_loaded');
 
             var listDiv = document.createElement('div'); listDiv.style.padding = '5px'; listDiv.style.fontSize = '12px';
 
@@ -5067,12 +6346,13 @@ acceptBtn.addEventListener('click', () => {
             onerror: () => {
             fetchLink.style.pointerEvents = 'auto';
             fetchLink.style.color = '#d93025';
-            fetchLink.innerHTML = '<i class="fa fa-times-circle"></i> Fetch failed (Click to retry)';
+            fetchLink.innerHTML = '<i class="fa fa-times-circle" aria-hidden="true"></i> ' + I18n.t('openmaps.find_available_layers_retry');
             resultsDiv.innerHTML = '<div style="padding:5px; color:red; font-size:12px;">Failed to reach server.</div>';
           }
         });
       });
-      UI.editContainer.appendChild(fetchLink); UI.editContainer.appendChild(resultsDiv);
+      mapLayersDetailsEl.appendChild(fetchLink);
+      mapLayersDetailsEl.appendChild(resultsDiv);
     }
 
 
@@ -5148,8 +6428,7 @@ onload: res => {
       // BLOCK ENABLE IF TOU NOT ACCEPTED OR CONFIG BROKEN
       if (wantsVisible && !isTouAccepted(map.touId)) {
         UI.editContainer.style.display = 'block';
-        var touBox = UI.editContainer.querySelector('.open-maps-tou-box');
-        if (touBox) touBox.style.display = 'block';
+        if (UI.touDetails) UI.touDetails.open = true;
         return;
       }
 
@@ -5170,6 +6449,7 @@ onload: res => {
 
       saveMapState();
       if (self.updateVisibility) self.updateVisibility();
+      applyActiveMapsFilter();
     };
     // -------------------------------------
 
@@ -5207,6 +6487,7 @@ this.updateBboxLayer = function() {
           W.map.addLayer(self.bboxLayer);
         }
         self.bboxLayer.setVisibility(true);
+        syncOpenMapsLayerIndices();
       } else {
         if (self.bboxLayer) self.bboxLayer.setVisibility(false);
       }
@@ -5253,6 +6534,20 @@ this.updateVisibility = function() {
       } else {
         UI.visibility.classList.add(self.hidden ? 'fa-eye-slash' : 'fa-eye');
         UI.visibility.style.color = '';
+      }
+
+      if (UI.touPendingBtn) {
+        var showTouPending = map.touId !== 'none' && TOU_REGISTRY[map.touId] && !isTouAccepted(map.touId);
+        UI.touPendingBtn.style.display = showTouPending ? 'flex' : 'none';
+      }
+
+      var visibleLayerCount = self.mapLayers.filter(function(l) { return l.visible; }).length;
+      var showNoLayers = !self.hidden && !self.outOfArea && isTouAccepted(map.touId) && self.mapLayers.length > 0 && visibleLayerCount === 0 && ['WMS', 'ESRI', 'XYZ'].indexOf(map.type) !== -1;
+      if (UI.noLayersWarningBtn) {
+        UI.noLayersWarningBtn.style.display = showNoLayers ? 'flex' : 'none';
+      }
+      if (UI.mapLayersNoActiveMark) {
+        UI.mapLayersNoActiveMark.style.display = showNoLayers ? 'inline' : 'none';
       }
 
 // 4. Bounding Box (Blocked State & UI Toggles)
@@ -5366,16 +6661,15 @@ this.updateVisibility = function() {
         }
 
         self.layer.events.register('tileerror', null, obj => {
-          if (UI.error.title != '') return;
+          if (window.getComputedStyle(UI.error).display !== 'none') return;
           UI.error.style.display = 'inline';
-          UI.error.title = 'Checking layer status...';
+          Tooltips.add(UI.error, 'Checking layer status…', true);
 
           loadTileError(obj.tile, msg => {
             if (msg.ok) {
               self.clearError();
             } else {
-              // Set native multi-line tooltip with clean error data
-              UI.error.title = msg.title + '\n' + msg.description;
+              Tooltips.add(UI.error, openMapsEscapeForHtmlTooltip(msg.title) + '\n' + openMapsEscapeForHtmlTooltip(msg.description), true, { html: true });
             }
           });
         });
@@ -5388,9 +6682,7 @@ this.updateVisibility = function() {
         self.layer.events.register('visibilitychanged', null, self.updateVisibility);
 
         W.map.addLayer(self.layer);
-        var wazeLayers = typeof W.map.getLayers === 'function' ? W.map.getLayers() : W.map.layers;
-        var aerialImageryIndex = Math.max.apply(null, wazeLayers.map(layer => layer.project == 'earthengine-legacy' ? W.map.getLayerIndex(layer) : 0));
-        W.map.getOLMap().setLayerIndex(self.layer, (aerialImageryIndex >= 0 ? aerialImageryIndex : 0) + handles.length + 1);
+        syncOpenMapsLayerIndices();
 
       } else if (layerRedrawNeeded) {
         if (map.type === 'WMS') self.layer.mergeNewParams({ layers: visibleLayers.join() });
@@ -5398,6 +6690,7 @@ this.updateVisibility = function() {
         layerRedrawNeeded = false;
       }
       saveMapState();
+      self.updateVisibility();
     };
 
 // --- 5. INITIAL EXECUTION ---
@@ -5417,16 +6710,41 @@ this.updateVisibility = function() {
 #sidepanel-openMaps {
   /* FIX: 4px left padding, 18px right padding for breathing room */
   padding: 0 18px 0 4px;
-  box-sizing: border-box; overflow-x: hidden;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  /* Let the pane size to content; map picker uses position:fixed (see positionAddMapSuggestions) */
+  overflow-y: visible !important;
+  max-height: none !important;
+  min-height: 0;
+  height: fit-content;
   font-family: var(--wz-font-family, "Rubik", "Boing", "Helvetica Neue", Helvetica, Arial, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-size: var(--wz-body-font-size, 13px);
 }
 
-#sidepanel-openMaps h4 { margin-bottom: 5px; font-size: 1.3em; font-weight: bold; margin-left: 4px; }
-#sidepanel-openMaps select, #sidepanel-openMaps input[list] { background-color: var(--background_variant, #f2f4f7); height: 32px; font-size: 1.1em; width: 100%; border-radius: 4px; border: 1px solid var(--border_subtle, #ccc); padding: 4px 8px; box-sizing: border-box; color: var(--content_primary, #3c4043); outline: none; transition: border-color 0.2s; }
-#sidepanel-openMaps input[list]:focus { border-color: #267bd8; box-shadow: 0 0 0 1px #267bd8; }
+#sidepanel-openMaps .openmaps-active-maps-header,
+#sidepanel-openMaps .openmaps-add-maps-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px 0; flex-wrap: wrap; }
+#sidepanel-openMaps .openmaps-add-maps-header { margin-top: 20px; }
+#sidepanel-openMaps .openmaps-active-maps-header h4,
+#sidepanel-openMaps .openmaps-add-maps-header h4 { margin: 0; font-size: 1.3em; font-weight: bold; flex: 1 1 auto; min-width: 0; line-height: 1.2; }
+#sidepanel-openMaps .openmaps-active-maps-mode-select,
+#sidepanel-openMaps .openmaps-add-maps-mode-select { width: auto !important; max-width: min(50%, 240px); min-width: 118px; flex-shrink: 0; height: 32px; font-size: 12px !important; padding: 4px 6px !important; box-sizing: border-box; }
+#sidepanel-openMaps .openmaps-active-maps-filter-bar { margin: 0 0 8px 0; }
+#sidepanel-openMaps .openmaps-active-maps-filter-empty { font-size: 11px; color: var(--content_secondary, #70757a); margin-top: 6px; line-height: 1.35; }
+#sidepanel-openMaps select, #sidepanel-openMaps .openmaps-add-map-filter { background-color: var(--background_variant, #f2f4f7); height: 32px; font-size: 1.1em; width: 100%; border-radius: 4px; border: 1px solid var(--border_subtle, #ccc); padding: 4px 8px; box-sizing: border-box; color: var(--content_primary, #3c4043); outline: none; transition: border-color 0.2s; }
+#sidepanel-openMaps .openmaps-add-map-filter:focus { border-color: #267bd8; box-shadow: 0 0 0 1px #267bd8; }
+/* position/size set in JS (fixed) so list is not clipped by sidebar overflow and uses space below input */
+#sidepanel-openMaps .openmaps-add-map-suggestions { display: none; position: fixed; margin: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; background: var(--background_default, #fff); border: 1px solid var(--border_subtle, #ccc); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); box-sizing: border-box; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-bottom: 1px solid var(--border_subtle, #eee); }
+#sidepanel-openMaps .openmaps-add-map-suggestion-row:last-child { border-bottom: none; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-row:hover { background-color: var(--background_variant, #f1f3f4); }
+#sidepanel-openMaps .openmaps-add-map-suggestion-flag { width: 16px; height: 12px; object-fit: cover; border-radius: 2px; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.08); box-sizing: border-box; vertical-align: middle; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-flag-spacer { display: inline-block; width: 16px; height: 12px; flex-shrink: 0; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-title { font-weight: 600; font-size: 13px; color: var(--content_primary, #3c4043); line-height: 1.25; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-sub { font-size: 11px; color: var(--content_secondary, #70757a); line-height: 1.2; }
+#sidepanel-openMaps .openmaps-add-map-suggestion-empty { padding: 10px 8px; color: var(--content_secondary, #70757a); font-size: 12px; line-height: 1.35; }
 
 /* 1. INCREASE SPACE AMONG MAP CARDS */
 #sidepanel-openMaps > .openmaps-map-list { display: flex; flex-direction: column; gap: 8px; margin-left: 4px; }
@@ -5477,6 +6795,37 @@ this.updateVisibility = function() {
 .open-maps-icon-button:hover { background-color: var(--background_variant, #f1f3f4); color: var(--content_primary, #202124); }
 .open-maps-icon-button.fa-info-circle { color: #337ab7; cursor: help; display: none; }
 
+/* Orange warnings: Font Awesome exclamation-circle — same font rendering as eye / triangle icons */
+#sidepanel-openMaps .open-maps-orange-exclaim-circle-btn.fa-exclamation-circle {
+  color: #f9a825;
+  font-size: 1em;
+  line-height: 1;
+}
+#sidepanel-openMaps .open-maps-orange-exclaim-circle-btn:hover {
+  background: var(--background_variant, #f1f3f4);
+  color: #f57c00;
+}
+#sidepanel-openMaps .open-maps-orange-fa-inline {
+  color: #f9a825;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: -0.08em;
+}
+#sidepanel-openMaps .open-maps-orange-fa-inline--gap {
+  margin-right: 6px;
+}
+#sidepanel-openMaps .open-maps-maplayers-summary-warning {
+  margin-left: 6px;
+  color: #f9a825;
+  font-size: 12px;
+  vertical-align: -0.08em;
+}
+#sidepanel-openMaps .open-maps-tou-probe-fail-icon {
+  color: #d93025;
+  font-size: 13px;
+  vertical-align: -0.06em;
+}
+
 /* Edit Panel - NATIVE RELATIVE FONTS */
 #sidepanel-openMaps .maps-menu-item > div.edit-panel {
   padding: 8px 0px 8px 10px;
@@ -5504,18 +6853,53 @@ input.open-maps-opacity-slider { vertical-align: middle; display: inline; margin
 .open-maps-maximum-layers { border-radius: 8px; padding: 8px; background-color: #fff; }
 .open-maps-maximum-layers h3 { margin-bottom: 15px; font-size: 1em; font-weight: 700; }
 
-.open-maps-query-window { display: none; top: 40px; left: 100px; right: 60px; max-height: calc(100% - 80px); overflow-y: auto; background-color: #fff; border: 2px solid #ddd; padding: 5px; color: #000; cursor: auto; z-index: 10000; position: absolute; }
+.open-maps-query-window { display: none; top: 40px; left: 100px; right: 60px; max-height: calc(100% - 80px); overflow-y: auto; background-color: var(--background_default, #fff); border: 2px solid var(--border_subtle, #ddd); padding: 5px; color: var(--content_primary, #000); cursor: auto; z-index: 10000; position: absolute; }
 .open-maps-query-window .hidden { display: none; }
+.open-maps-query-window-toolbar-wz { vertical-align: middle; margin: 0 2px; line-height: 1; }
+.open-maps-query-window-toolbar-wz:hover { opacity: 0.9; }
 .open-maps-query-window-button-left, .open-maps-query-window-button-right { cursor: pointer; }
 .open-maps-query-window-button-left { float: left; }
 .open-maps-query-window-button-right { float: right; }
-.open-maps-query-window h2 { text-align: center; font-weight: bold; margin-bottom: 0.5em; }
+.open-maps-query-window h2 { text-align: center; font-weight: bold; margin-bottom: 0.5em; color: var(--content_primary, inherit); }
 .open-maps-query-window table td { user-select: text; }
 
+#sidepanel-openMaps .openmaps-sidebar-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; line-height: 1.35; }
+#sidepanel-openMaps .openmaps-sidebar-footer-version { color: var(--content_secondary, #70757a); min-width: 0; font-size: inherit; }
+#sidepanel-openMaps .openmaps-sidebar-footer-help { cursor: pointer; color: var(--link_primary, #1a73e8); flex-shrink: 0; }
+/* Footer wz-button: match 11px (global .openmaps-wz-btn-compact uses 10px) */
+#sidepanel-openMaps .openmaps-sidebar-footer wz-button.openmaps-wz-btn-compact {
+  font-size: 11px;
+  line-height: 1.35;
+  --wz-font-size-label-small: 11px;
+  --wz-font-size-body-small: 11px;
+}
+
+.openmaps-sidebar-notice { margin-bottom: 12px; padding: 10px; border-radius: 8px; border: 1px solid var(--border_subtle, #dadce0); background: var(--background_variant, #f8f9fa); color: var(--content_primary, #3c4043); font-size: 12px; line-height: 1.4; }
+.openmaps-sidebar-notice--update { border-color: #1a73e8; background: #e8f0fe; }
+.openmaps-sidebar-notice--tou { border-color: #f9a825; background: #fff8e1; }
+.openmaps-sidebar-notice-body { margin: 0 0 8px 0; white-space: pre-wrap; font-family: inherit; font-size: 11px; max-height: 40vh; overflow-y: auto; }
+.openmaps-sidebar-notice-message { margin-bottom: 8px; }
+
+#sidepanel-openMaps .openmaps-add-map-viewport-hint { display: none; font-size: 11px; color: var(--content_secondary, #70757a); margin-top: 6px; line-height: 1.35; }
+
+/* Compact wz-button text + tighter remove row */
+#sidepanel-openMaps wz-button.openmaps-wz-btn-compact,
+.openmaps-sidebar-notice wz-button.openmaps-wz-btn-compact {
+  font-size: 10px;
+  line-height: 1.25;
+  --wz-font-size-label-small: 10px;
+  --wz-font-size-body-small: 10px;
+}
+#sidepanel-openMaps wz-button.openmaps-wz-btn-icon-only,
+.openmaps-sidebar-notice wz-button.openmaps-wz-btn-icon-only {
+  min-height: 22px;
+  padding: 0;
+  width: auto;
+}
 /* Custom Remove Button Styling */
-.open-maps-remove-container { display: flex; justify-content: flex-end; align-items: center; gap: 10px; width: 100%; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border_subtle, #e8eaed); }
-.open-maps-remove-btn { height: 32px; background: none; border: 1px solid transparent; color: #d93025; cursor: pointer; font-size: 0.9em; font-weight: 600; padding: 4px 8px; border-radius: 4px; transition: all 0.2s ease; display: flex; align-items: center; gap: 4px; }
-.open-maps-remove-btn:hover { background: #fce8e6; border-color: #fce8e6; color: #c5221f; }
+.open-maps-remove-container { display: flex; justify-content: flex-end; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border_subtle, #e8eaed); }
+.open-maps-remove-map-wz { font-weight: 500; color: #d93025; }
+.open-maps-remove-map-wz i.fa { font-size: 12px; }
 `;
   }
   if (!styleElement.parentNode) {
