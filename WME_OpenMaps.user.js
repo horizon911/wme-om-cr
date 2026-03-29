@@ -223,7 +223,7 @@ async function onWmeReady() {
         OM: 'Oman',
         US: 'United States',
         HR: 'Croatia',
-        CZ: 'Czechia',
+        CZ: 'Czech Republic',
         UN: 'Universal',
         EU: 'European Union'
       },
@@ -336,7 +336,7 @@ async function onWmeReady() {
         v3_2_34: '- Fixed broken map layer reordering',
         v3_2_35: '- WV Leaves Off layers updated (US)',
         v3_2_36: '- Add Orthophotos 2024 map (BE)\n- Limit default BAG objects shown (NL)',
-        v3_2_37: '- Added ČÚZK (Czechia) WMS maps (CZ)',
+        v3_2_37: '- Added ČÚZK (Czech Republic) WMS maps (CZ)',
         v3_2_38: '- Migrate ČÚZK WMS to ags.cuzk.gov.cz (ortofoto, GeoNames, ZABAGED polohopis); add Přehledová mapa overview (CZ)'
       }
     },
@@ -2803,7 +2803,7 @@ async function onWmeReady() {
         'AD.Address': { queryable: false, title: 'Addresses' }
       }
     },
-    // Czechia ČÚZK WMS entries: derived from userscript "Czech WMS layers" (@author petrjanik, d2-mac, MajkiiTelini).
+    // Czech Republic ČÚZK WMS entries: derived from userscript "Czech WMS layers" (@author petrjanik, d2-mac, MajkiiTelini).
     {
       id: 42001,
       title: 'ČÚZK Ortofoto',
