@@ -1,0 +1,38 @@
+{
+  // userDataDir: false = your normal browser profile (extensions, Waze login).
+  // Quit Chrome/Edge completely first (including tray), or use "Attach to Chrome".
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "WME: Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "url": "https://www.waze.com/editor/",
+      "webRoot": "${workspaceFolder}",
+      "userDataDir": false
+    },
+    {
+      "name": "WME: Edge",
+      "type": "msedge",
+      "request": "launch",
+      "url": "https://www.waze.com/editor/",
+      "webRoot": "${workspaceFolder}",
+      "userDataDir": false
+    },
+    {
+      "name": "WME (beta): Chrome",
+      "type": "chrome",
+      "request": "launch",
+      "url": "https://beta.waze.com/editor/",
+      "webRoot": "${workspaceFolder}",
+      "userDataDir": false
+    },
+    {
+      "name": "Attach to Chrome (port 9222)",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}"
+    }
+  ]
+}

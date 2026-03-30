@@ -19,6 +19,18 @@ The **Candy Remix** focuses on aligning the script with modern WME SDK standards
 2. **[Click here to install WME OpenMaps (Candy Remix)](#)** *(Note: Insert your GreasyFork/GitHub raw link here)*.
 3. Refresh the Waze Map Editor. The OpenMaps tab () will automatically appear in the left sidebar.
 
+## Changelog
+
+### 2026.03.30
+
+- WMS maps can set `wmsMinEffectiveZoom` (or `minEffectiveZoom`) so tile `GetMap` requests use at least that WME zoom level’s ground resolution when the user is zoomed farther out—more tiles when zoomed out, but friendlier to servers with tight `MaxScaleDenominator` rules. ČÚZK Katastrální mapa enables this at zoom 16 alongside `zoomRange` 16–22.
+- When `zoomRange[0]` is set, WMS/XYZ/ESRI overlays skip remote tile URLs below that zoom (local transparent 1×1 instead) so `wmsMinEffectiveZoom` does not trigger server traffic outside the documented band.
+
+### 2026.03.29
+
+- Fix crash when the WMS server layer catalog finished loading while every sub-layer was toggled off (`mergeNewParams` on a missing OpenLayers layer).
+- ČÚZK Katastrální mapa: `zoomRange` 16–22 so the “may not display at this zoom” hint matches ČÚZK parcel WMS scale limits and caps native tile resolution consistently.
+
 ## Acknowledgements
 
 This project exists entirely thanks to the phenomenal foundational work of **Tom 'Glodenox' Puttemans**. The original WME OpenMaps script is a massive contribution to the global Waze editing community. This "remix" is simply a humble continuation  aimed at keeping the tool fast, stable and visually integrated with the modern editor.
