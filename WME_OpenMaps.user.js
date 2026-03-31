@@ -1798,7 +1798,8 @@ async function onWmeReady() {
       url: 'https://geoservices.wallonie.be/arcgis/services/TOPOGRAPHIE/PICC_VDIFF/MapServer/WMSServer',
       crs: 'EPSG:3857',
       bbox: [2.654315, 49.426121, 6.651405, 51.110628],
-      zoomRange: [16, 22],
+      zoomRange: [15, 22],
+      wmsMinEffectiveZoom: 17,
       format: 'image/png',
       area: 'BE',
       abstract: 'Service de visualisation du Projet Informatique de Cartographie Continue (PICC)',
@@ -2885,6 +2886,8 @@ async function onWmeReady() {
       url: 'https://services.cuzk.cz/wms/wms.asp?',
       crs: 'EPSG:3857',
       bbox: [12.0, 48.5, 18.9, 51.1],
+      zoomRange: [15, 22],
+      wmsMinEffectiveZoom: 17,
       format: 'image/png',
       transparent: true,
       area: 'CZ',
@@ -5764,11 +5767,17 @@ UI.zoomToBboxBtn.addEventListener('click', function(e) {
         $(this).tooltip('hide');
 
         if (self.area) {
-          W.map.getOLMap().zoomToExtent(self.area);
-          if (W.map.getZoom() < 12) {
-            if (typeof W.map.setZoom === 'function') { W.map.setZoom(12); }
-            else { W.map.getOLMap().zoomTo(12); }
-          }
+          var bboxExtent = self.area;
+          setTimeout(function() {
+            var olMap = W.map.getOLMap();
+            if (!olMap || !bboxExtent) return;
+            olMap.zoomToExtent(bboxExtent);
+            var z = W.map.getZoom();
+            if (z < 12) {
+              if (typeof W.map.setZoom === 'function') { W.map.setZoom(12); }
+              else { olMap.zoomTo(12); }
+            }
+          }, 0);
         }
       });
       buttons.appendChild(UI.zoomToBboxBtn);
@@ -7038,6 +7047,8 @@ this.updateVisibility = function() {
 
         if (map.pixelManipulations) options.tileOptions = { crossOriginKeyword: 'anonymous' };
 
+        var openmapsWmsFloorRes = null;
+
         // NATIVE TILE STRETCHING MATH
         if (map.zoomRange && map.zoomRange[1]) {
             var olMap = typeof W.map.getOLMap === 'function' ? W.map.getOLMap() : null;
@@ -7049,6 +7060,23 @@ this.updateVisibility = function() {
                 var maxRes = 156543.03392804097;
                 for (var i = 0; i <= 24; i++) standardResolutions.push(maxRes / Math.pow(2, i));
                 options.serverResolutions = standardResolutions.slice(0, map.zoomRange[1] + 1);
+            }
+        }
+
+        // WMS + catalog wmsMinEffectiveZoom / minEffectiveZoom:
+        // Do not duplicate serverResolutions (that can misalign snaps vs basemap or explode tile counts).
+        // Use the normal tile grid: each tile is ~tileSize px, so GetMap WIDTH/HEIGHT stay modest even
+        // after upscaling for the floor — large single-tile viewports hit MaxClientSize on many servers.
+        // getURL below bumps WIDTH/HEIGHT by mapRes/floorRes when zoomed out past the floor.
+        var wmsFloorRaw = map.wmsMinEffectiveZoom != null ? map.wmsMinEffectiveZoom : map.minEffectiveZoom;
+        if (map.type === 'WMS' && options.serverResolutions && options.serverResolutions.length > 0 &&
+            wmsFloorRaw != null && wmsFloorRaw !== '') {
+            var wmsFloor = Math.floor(Number(wmsFloorRaw));
+            if (!isNaN(wmsFloor) && wmsFloor > 0) {
+                var serverRes = options.serverResolutions;
+                var wmsMaxIdx = serverRes.length - 1;
+                wmsFloor = Math.min(wmsFloor, wmsMaxIdx);
+                openmapsWmsFloorRes = serverRes[wmsFloor];
             }
         }
 
@@ -7118,6 +7146,33 @@ this.updateVisibility = function() {
             default:
                 var params = { layers: visibleLayers.join(), transparent: self.transparent, format: map.format };
                 self.layer = new OpenLayers.Layer.WMS(map.title, map.url, params, options);
+                if (openmapsWmsFloorRes != null) {
+                  var floorRes = openmapsWmsFloorRes;
+                  self.layer.getURL = function(bounds) {
+                    bounds = this.adjustBounds(bounds);
+                    var imageSize = this.getImageSize();
+                    var mapRes = this.map.getResolution();
+                    var fac = 1;
+                    if (mapRes > floorRes) {
+                      fac = mapRes / floorRes;
+                      // ČÚZK (and many ArcGIS WMS) enforce MaxClientSize; keep this conservative.
+                      var maxPx = 2048;
+                      if (imageSize.w * fac > maxPx || imageSize.h * fac > maxPx) {
+                        fac = Math.min(maxPx / imageSize.w, maxPx / imageSize.h, fac);
+                      }
+                    }
+                    var w = Math.max(1, Math.round(imageSize.w * fac));
+                    var h = Math.max(1, Math.round(imageSize.h * fac));
+                    var newParams = {};
+                    var reverseAxisOrder = this.reverseAxisOrder();
+                    newParams.BBOX = this.encodeBBOX ?
+                      bounds.toBBOX(null, reverseAxisOrder) :
+                      bounds.toArray(reverseAxisOrder);
+                    newParams.WIDTH = w;
+                    newParams.HEIGHT = h;
+                    return this.getFullRequestString(newParams);
+                  };
+                }
                 break;
         }
 
