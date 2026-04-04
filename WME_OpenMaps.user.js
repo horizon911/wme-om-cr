@@ -71,7 +71,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.04.4
+// @version     2026.04.04.5
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -760,7 +760,8 @@ async function onWmeReady() {
         v2026_04_03_42: '- **Fix (satellite / My Maps):** Google My Maps vectors are **excluded from `syncOpenMapsLayerIndices` `setLayerIndex` entirely** (not only when hidden). Visible KML layers were still reordered above aerial on every sync/KML refresh, which could stop WME satellite tiles after pan/zoom. My Maps stays at WME/OpenLayers default stack position; tile/WMS/ESRI overlays still sync above aerial as before.',
         v2026_04_04_01: '- **Fix (satellite / My Maps):** **`syncOpenMapsLayerIndices` no longer installs** global OpenLayers **`Layer.setZIndex`** / **`Map.resetLayersZIndex`** hooks every run (the v40 rollback had restored that). Satellite and other WME layers were still wrapped whenever any OpenMaps row existed. Hooks attach when **`pinOpenMapsOverlayStackTop`** pins a non-empty ESRI/inspector stack; **`addlayer` / debounced `moveend`** listeners register only when **`openMapsOverlayPinStackHasWork()`**. **`minForeignAbove`** now scans **`olMap.layers`** using **resolved OpenLayers layer refs** so My Maps vectors are not treated as foreign WME layers when `W.map.getLayers()` returns different object identities than `handles[].layer`.',
         v2026_04_04_02: '- **Fix (satellite / My Maps):** Tile stacking now uses **`olMap.getLayerIndex`** for both the **aerial floor** and **`minForeignAbove`** (never mixed array loop index with `W.map.getLayerIndex`). When those numbers diverged, OpenMaps could pack tile layers into invalid slots and disturb Earth Engine / satellite tiling. **Google My Maps** vectors are **`removeLayer`’d** from `W.map`/`olMap` whenever the row is off (hidden, no sub-layer, out of area, or ToU not accepted)—not only `setVisibility(false)`—then re-added when shown. **KML load** no longer calls **`syncOpenMapsLayerIndices`** after every fetch.',
-        v2026_04_04_04: '- **Fix (satellite / My Maps):** WME roads and satellite maps “destroying” / turning blank shortly after a My Map loads is a classic **WebGL context loss** (Waze’s native map renderer crashes when the browser is overwhelmed). OpenMaps now **bypasses WME’s `W.map.addLayer` wrapper entirely** for heavy vector layers (My Maps / ESRI_FEATURE), adding them directly to the underlying OpenLayers engine. This stops WME’s React state from trying to digest thousands of our raw vectors. KML now asks for **`Canvas` rendering** before falling back to SVG, and limits KML to **1500** features max to protect WME memory limits.'
+        v2026_04_04_04: '- **Fix (satellite / My Maps):** WME roads and satellite maps turning blank shortly after a My Map loads is a classic **WebGL context loss** (Waze’s native map renderer crashes when the browser is overwhelmed). OpenMaps now **bypasses WME’s `W.map.addLayer` wrapper entirely** for heavy vector layers (My Maps / ESRI_FEATURE), adding them directly to the underlying OpenLayers engine. This stops WME’s React state from tracking thousands of foreign vectors. KML now requests **`Canvas` rendering** before falling back to SVG, and restricts loading to **1500** features maximum to protect WME memory limits.',
+        v2026_04_04_05: '- **Fix (satellite bug #2):** Ensure hidden Google My Maps layers NEVER initialize their KML fetch or get briefly added to the map. Prevents an issue where `GM_xmlhttpRequest` processing or rapid attach/detach of the Vector layer would interrupt Waze’s native `moveend` satellite tile-loading sequence even when the user map is disabled.'
       }
     },
     nl: {
@@ -1170,7 +1171,8 @@ async function onWmeReady() {
         v2026_04_03_42: '- **Fix (satelliet / My Maps):** Google My Maps-vectoren vallen **volledig buiten `setLayerIndex` in `syncOpenMapsLayerIndices`** (niet alleen als verborgen). Zichtbare KML-lagen werden nog steeds bij elke sync/KML-refresh boven luchtfoto herschikt, wat WME-satelliettiles na pan/zoom kon laten stoppen. My Maps blijft op de standaard OL-stackpositie; tegel/WMS/ESRI-overlays synchroniseren nog steeds boven luchtfoto.',
         v2026_04_04_01: '- **Fix (satelliet / My Maps):** **`syncOpenMapsLayerIndices` installeert niet langer** bij **elke** run de globale OpenLayers-hooks **`Layer.setZIndex`** / **`Map.resetLayersZIndex`** (de v40-rollback had dat teruggebracht). Satelliet en andere WME-lagen gingen dan alsnog door onze wrapper zodra er **een** OpenMaps-regel was. Hooks worden gezet als **`pinOpenMapsOverlayStackTop`** een niet-lege ESRI/inspector-stack pint; **`addlayer` / gedebounced `moveend`** alleen als **`openMapsOverlayPinStackHasWork()`**. **`minForeignAbove`** loopt nu over **`olMap.layers`** met **opgeloste OL-laagrefs**, zodat My Maps-vectoren niet als “vreemde” WME-lagen tellen als `W.map.getLayers()` andere objectidentiteiten geeft dan `handles[].layer`.',
         v2026_04_04_02: '- **Fix (satelliet / My Maps):** Tegel-stacking gebruikt nu **`olMap.getLayerIndex`** voor zowel de **luchtfoto-vloer** als **`minForeignAbove`** (nooit array-loopindex mengen met `W.map.getLayerIndex`). Als die uit elkaar liepen, konden tegellagen in ongeldige slots terechtkomen en Earth Engine / satelliet verstoren. **Google My Maps**-vectoren worden uit `W.map`/`olMap` gehaald met **`removeLayer`** zodra de rij uit staat (verborgen, geen sublaag, buiten gebied of ToU niet geaccepteerd)—niet alleen `setVisibility(false)`—en weer toegevoegd als de rij aan gaat. **KML-laden** roept **`syncOpenMapsLayerIndices` niet meer** aan na elke fetch.',
-        v2026_04_04_04: '- **Fix (satelliet / My Maps):** WME-wegen en satelliet die “vernietigd” / leeg worden kort na laden van My Maps, wijst sterk op een **WebGL-context crash** (Waze’s native maprenderer bezwijkt). OpenMaps **passeert WME’s `W.map.addLayer`-wrapper nu volledig** voor zware vectorlagen (My Maps / ESRI_FEATURE) en voegt ze direct toe aan de onderliggende OpenLayers-engine. Dit voorkomt dat WME’s React-state duizenden van onze ruwe vectoren probeert te verwerken. KML vraagt nu om **`Canvas`-rendering** in plaats van direct SVG, en beperkt KML tot **1500** features maximaal om WME’s geheugenlimieten te beschermen.'
+        v2026_04_04_04: '- **Fix (satelliet / My Maps):** WME-wegen en satelliet die leeg worden kort na laden van My Maps, wijst sterk op een **WebGL-context crash** (Waze’s native maprenderer bezwijkt). OpenMaps **passeert WME’s `W.map.addLayer`-wrapper nu volledig** voor zware vectorlagen (My Maps / ESRI_FEATURE) en voegt ze direct toe aan de onderliggende OpenLayers-engine. Dit voorkomt dat WME’s React-state duizenden van onze ruwe vectoren probeert te verwerken. KML vraagt nu om **`Canvas`-rendering** in plaats van direct SVG, en beperkt KML tot **1500** features maximaal om WME’s geheugenlimieten te beschermen.',
+        v2026_04_04_05: '- **Fix (satelliet bug #2):** Verborgen Google My Maps-lagen starten nu NOOIT meer hun KML-fetch of worden kort aan de kaart toegevoegd. Dit voorkomt dat de verwerking van `GM_xmlhttpRequest` of het snel vast-/losmaken van de Vector-laag de laadreeks van Waze’s native `moveend` satelliet-tiles onderbreekt, zelfs wanneer de gebruikerskaart is uitgeschakeld.'
       }
     },
     fr: {
@@ -12214,6 +12216,7 @@ this.updateVisibility = function() {
                     renderers: ['Canvas', 'SVG']
                   });
                   self.layer.openMapsMapId = map.id;
+                  self.__openmapsGmmRemovedFromOlStack = true;
 
                   var debounceGmm = null;
                   var gmmGen = 0;
@@ -12286,8 +12289,18 @@ this.updateVisibility = function() {
 
                   function scheduleGmm() {
                     if (debounceGmm) clearTimeout(debounceGmm);
-                    debounceGmm = setTimeout(fetchKmlNow, 550);
+                    debounceGmm = setTimeout(function() {
+                      if (!self.layer || !olMap) return;
+                      if (self.layer.redraw) self.layer.redraw();
+                    }, 550);
                   }
+
+                  self.__openmapsGmmKmlFetchTriggered = false;
+                  self.__openmapsGmmTriggerFetch = function() {
+                    if (self.__openmapsGmmKmlFetchTriggered) return;
+                    self.__openmapsGmmKmlFetchTriggered = true;
+                    fetchKmlNow();
+                  };
 
                   function bindGmmMapMoveOnce() {
                     if (self.__openmapsGmmMoveBound) return;
@@ -12434,25 +12447,20 @@ this.updateVisibility = function() {
         }
         self.layer.events.register('visibilitychanged', null, self.updateVisibility);
 
-        if (map.type === 'ESRI_FEATURE' || map.type === 'GOOGLE_MY_MAPS') {
-          // Bypassing WME's `W.map.addLayer` wrapper for heavy Vector layers.
-          // WME reacts to internal `addLayer` events; massive SVG node injection or event overhead
-          // from thousands of KML vectors can freeze the thread and destroy the map's WebGL context
-          // (which wipes out native Waze roads and satellite imagery).
+        if (map.type === 'ESRI_FEATURE') {
           var olMapAttachV = W.map.getOLMap();
           if (olMapAttachV && olMapAttachV.layers && olMapAttachV.layers.indexOf(self.layer) === -1) {
             olMapAttachV.addLayer(self.layer);
           }
-          if (map.type === 'ESRI_FEATURE' && typeof self.__openmapsEsriFeatureScheduleRefresh === 'function') {
+          if (typeof self.__openmapsEsriFeatureScheduleRefresh === 'function') {
             var esriSched = self.__openmapsEsriFeatureScheduleRefresh;
             setTimeout(function() { esriSched(); }, 0);
             setTimeout(function() { esriSched(); }, 350);
           }
-          if (map.type === 'GOOGLE_MY_MAPS' && typeof self.__openmapsGmmScheduleRefresh === 'function') {
-            var gmmSched = self.__openmapsGmmScheduleRefresh;
-            setTimeout(function() { gmmSched(); }, 0);
-            setTimeout(function() { gmmSched(); }, 400);
-          }
+        } else if (map.type === 'GOOGLE_MY_MAPS') {
+          // Bypassing WME's `W.map.addLayer` wrapper for heavy Vector layers.
+          // For GMM, we DELAY adding it to the map until it is actually visible,
+          // to prevent WME satellite tiles from breaking due to rapid add/remove on init.
         } else {
           W.map.addLayer(self.layer);
         }
@@ -12486,6 +12494,7 @@ this.updateVisibility = function() {
             try { openMapsGoogleMyMapsLayerAddToMap(self.layer); } catch (eGa) { /* ignore */ }
             self.__openmapsGmmRemovedFromOlStack = false;
             try { self.layer.setVisibility(true); } catch (eGv) { /* ignore */ }
+            if (typeof self.__openmapsGmmTriggerFetch === 'function') self.__openmapsGmmTriggerFetch();
             if (typeof self.__openmapsGmmScheduleRefresh === 'function') self.__openmapsGmmScheduleRefresh();
             gmmStackTouched = true;
           }
