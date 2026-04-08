@@ -4,7 +4,7 @@
 // @namespace      https://github.com/horizon911/
 // @contributor  Glodenox
 // @contributor  petrjanik, d2-mac, MajkiiTelini (Czech WMS layers — ČÚZK definitions)
-// @description This userscript augments the Waze Map Editor by allowing editors to overlay external, open-data maps (such as local cadasters, high-resolution orthophotos, and administrative boundaries) directly onto the editing canvas.
+// @description This userscript augments the Waze Map Editor by allowing editors to overlay external maps (open-data cadasters, orthophotos, boundaries, plus your own KML from a file or Google My Maps) directly onto the editing canvas.
 // @include     https://www.waze.com/editor*
 // @include     https://www.waze.com/*/editor*
 // @include     https://beta.waze.com/editor*
@@ -58,36 +58,373 @@
 // @connect     finances.belgium.be
 // @connect     financien.belgium.be
 // @connect     support.google.com
+// @connect     www.google.com
 // @connect     www.vlaanderen.be
 // @connect     geoportal.cuzk.gov.cz
 // @connect     ags.cuzk.gov.cz
+// @connect     wwf-sight-maps.org
+// @connect     maratlas.discomap.eea.europa.eu
+// @connect     services7.arcgis.com
+// @connect     whc.unesco.org
 // @connect     *
 // @icon        https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Candy/3D/candy_3d.png
 // @downloadURL https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.03.29.05
+// @version     2026.04.08.1
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
 // ==/UserScript==
 
+// Region map: OpenMapsSdkBootstrap (SDK + OL readiness, start of onWmeReady) · translations/settings/catalog · userMaps (GOOGLE_MY_MAPS KML; outlook: WMS/ESRI/XYZ defs) · utilities/version ·
+// sidebar/tab/layers · map query · UI · tiles · layer engine/reload · styles · log · OpenMapsBoot (WME init + bootstrap entry).
 
-
-
-/* global W, I18n, sortable, OpenLayers, Proj4js, $ */
+/* global W, I18n, sortable, OpenLayers, Proj4js, getWmeSdk, bootstrap, unsafeWindow, GM_xmlhttpRequest, GM_info */
 
 var styleElement;
 
+var OPEN_MAPS_VERSION = '2026.04.08.1';
+
+/**
+ * Google My Maps (KML) — **piece-by-piece rollout** (satellite broke when this ran unchecked).
+ *
+ * - **Stage 0:** `OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS` is false → build behaves like “hard retired” unless `unsafeWindow.__OPEN_MAPS_FORCE_GMM__` is set before load.
+ * - **Stage 1:** Feature true → paste/add/restore work **only after** `localStorage.setItem('openmaps-enable-google-mymaps','1')` + reload. `openmaps-disable-google-mymaps=1` still forces drawing off. No OpenLayers/My Maps activity until opted in.
+ *
+ * Bump the stage when re-enabling; set back to **0** to shut My Maps off in the build again without deleting code.
+ *
+ * **Troubleshooting (localStorage on the WME tab):**
+ * - `openmaps-troubleshoot=1` — log a JSON status snapshot after load; exposes `openMapsPrintTroubleshootStatus("label")` on `unsafeWindow` when allowed.
+ * - `openmaps-gmm-diag=1` — dev-only verbose OpenLayers stack / `setLayerIndex` tracing (not a satellite-failure suspect).
+ * - `openmaps-kml-diag=1` — **`[OpenMaps KML diag]`** console traces for uploaded KML / My Maps: fetch gates, parse counts, `shouldDraw` breakdown, layer on-map, feature counts. Also `unsafeWindow.__OPEN_MAPS_KML_DIAG__ = true` before load. Console: `openMapsKmlDiagDumpAllHandles("label")`.
+ * - **v2026.04.04.26:** Ineligible My Map rows **destroy** the OL vector (not only detach) so no stale `moveTo` / listeners remain; re-show + ToU + sublayer recreates a fresh layer.
+ * - **v2026.04.04.29:** A saved Active Maps row for **Google My Maps** with **Terms not accepted** and **hidden** is **not restored** on load (definition stays in Your maps; re-add after accepting Terms). Avoids a no-layer handle running the rest of OpenMaps on every session.
+ * - Enable drawing: `openmaps-enable-google-mymaps=1` (must be exactly **1**). Kill switch: `openmaps-disable-google-mymaps=1`.
+ */
+var OPEN_MAPS_GMM_ROLLOUT_STAGE = 1;
+var OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS = OPEN_MAPS_GMM_ROLLOUT_STAGE >= 1;
+
+function openMapsGoogleMyMapsForceUnlocked() {
+  try {
+    return typeof unsafeWindow !== 'undefined' && !!unsafeWindow.__OPEN_MAPS_FORCE_GMM__;
+  } catch (eU) {
+    return false;
+  }
+}
+
+/** Hard off: `openmaps-disable-google-mymaps=1` (wins over enable). */
+function openMapsGoogleMyMapsForcedOff() {
+  try {
+    return localStorage.getItem('openmaps-disable-google-mymaps') === '1';
+  } catch (eLs) {
+    return false;
+  }
+}
+
+/**
+ * My Maps drawing: only when (feature flag OR `unsafeWindow.__OPEN_MAPS_FORCE_GMM__`) **and** localStorage enable, and not hard-off.
+ */
+function openMapsGoogleMyMapsIntegrationEnabled() {
+  try {
+    if (localStorage.getItem('openmaps-disable-google-mymaps') === '1') return false;
+    if (!OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS && !openMapsGoogleMyMapsForceUnlocked()) return false;
+    return localStorage.getItem('openmaps-enable-google-mymaps') === '1';
+  } catch (eLs) {
+    return false;
+  }
+}
+
+function openMapsGoogleMyMapsHardRetiredInBuild() {
+  return !OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS && !openMapsGoogleMyMapsForceUnlocked();
+}
+
+/** I18n key for banner / Add / card hint when My Maps is not integrated (wrong message for stage vs force-unlock). */
+function openMapsGoogleMyMapsOptInBlockedMessageKey() {
+  if (openMapsGoogleMyMapsHardRetiredInBuild()) return 'openmaps.user_maps_feature_retired_hint';
+  if (!OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS && openMapsGoogleMyMapsForceUnlocked()) return 'openmaps.user_maps_force_unlock_instructions';
+  return 'openmaps.user_maps_drawing_off_instructions';
+}
+
+try {
+  console.info('[OpenMaps] WME Open Maps (Candy Remix) v' + OPEN_MAPS_VERSION);
+  if (openMapsGoogleMyMapsHardRetiredInBuild()) {
+    console.info('[OpenMaps] Google My Maps is disabled in this script build (WME satellite stability). Saved definitions are kept; nothing is drawn. To experiment: set unsafeWindow.__OPEN_MAPS_FORCE_GMM__=true before load, then localStorage.setItem("openmaps-enable-google-mymaps","1") and reload.');
+  } else if (openMapsGoogleMyMapsForcedOff()) {
+    console.info('[OpenMaps] Google My Maps forced off (localStorage openmaps-disable-google-mymaps=1).');
+  } else if (!openMapsGoogleMyMapsIntegrationEnabled()) {
+    console.info('[OpenMaps] Google My Maps: set localStorage.setItem("openmaps-enable-google-mymaps","1") then reload to draw KML.');
+  }
+} catch (eLogVer) { /* ignore */ }
+
+
+//#region OpenMapsSdkBootstrap
+/** GreasyFork script id (stable `getWmeSdk` scriptId). */
+var OPEN_MAPS_SCRIPT_ID = '570591';
+
+/** Official WME SDK instance from getWmeSdk (https://www.waze.com/editor/sdk/functions/index.getWmeSdk.html), or null. */
+var openMapsWmeSdk = null;
+
+var openMapsOlWaitAttempts = 0;
+/** ~90s cap on 1s polling for OpenLayers / W.map (avoids infinite timers if the editor breaks). */
+var OPEN_MAPS_OL_MAX_ATTEMPTS = 90;
+var openMapsOlGiveUpLogged = false;
+
+function openMapsResolveGetWmeSdkFn() {
+  if (typeof getWmeSdk === 'function') return getWmeSdk;
+  if (typeof window !== 'undefined' && typeof window.getWmeSdk === 'function') return window.getWmeSdk;
+  return null;
+}
+
+/** Single call: WME throws InvalidStateError if the same script requests a different SDK version. */
+function openMapsGetWmeSdkOnce() {
+  var g = openMapsResolveGetWmeSdkFn();
+  if (!g) return null;
+  var scriptName = 'WME OpenMaps (Candy Remix)';
+  try {
+    if (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.name) {
+      scriptName = String(GM_info.script.name);
+    }
+  } catch (eGm) { /* ignore */ }
+  try {
+    return g({ scriptId: OPEN_MAPS_SCRIPT_ID, scriptName: scriptName });
+  } catch (eSdk) {
+    try {
+      log('getWmeSdk failed: ' + (eSdk && eSdk.message ? eSdk.message : String(eSdk)));
+    } catch (eLog) { /* ignore */ }
+    return null;
+  }
+}
+
+//#region Hide WME Places “search this area” chip
+/**
+ * After a Places search, WME shows a pill to rerun the search for the current viewport. It is **WME/React UI**
+ * (`container--*`, `iconContainer--*`, `.w-icon-search`, `div.text`), not OpenMaps. Older builds also used Google
+ * `.gm-style` controls; we hide both.
+ */
+var openMapsGoogleSearchThisAreaInstalled = false;
+var openMapsGoogleSearchThisAreaTimer = null;
+var openMapsGoogleSearchThisAreaRaf = null;
+var openMapsGoogleSearchThisAreaMapMoveInstalled = false;
+/** Lowercased substrings of visible/accessible text for the chip (common WME editor languages). */
+var OPEN_MAPS_GOOGLE_SEARCH_THIS_AREA_SUBSTR = [
+  'search this area',
+  'zoek in dit gebied',
+  'in diesem gebiet suchen',
+  'rechercher dans cette zone',
+  'buscar en esta área',
+  'buscar en esta area',
+  'pesquisar nesta área',
+  'pesquisar nesta area',
+  'cerca in questa area',
+  'szukaj na tym obszarze'
+];
+
+function openMapsNormalizeUiTextChunk(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim();
+}
+
+function openMapsTextMatchesSearchThisAreaPhrase(low) {
+  if (!low) return false;
+  var subs = OPEN_MAPS_GOOGLE_SEARCH_THIS_AREA_SUBSTR;
+  for (var si = 0; si < subs.length; si++) {
+    if (low.indexOf(subs[si]) !== -1) return true;
+  }
+  return false;
+}
+
+/** WME module hashes change; climb from `div.text` to a `container--*` row that contains `.w-icon-search`. */
+function openMapsWmeSearchThisAreaChipRootFromTextEl(textEl) {
+  var el = textEl;
+  for (var up = 0; up < 12 && el; up++) {
+    el = el.parentElement;
+    if (!el || el.nodeType !== 1) break;
+    var cls = el.getAttribute('class') || '';
+    if (cls.indexOf('container--') === -1) continue;
+    try {
+      if (el.querySelector && el.querySelector('.w-icon-search')) return el;
+    } catch (eQ) { /* ignore */ }
+  }
+  return null;
+}
+
+function openMapsSweepHideWmePlacesSearchThisAreaChip() {
+  var textNodes;
+  try {
+    textNodes = document.querySelectorAll('div.text');
+  } catch (eTxt) {
+    return;
+  }
+  for (var ti = 0; ti < textNodes.length; ti++) {
+    var textEl = textNodes[ti];
+    if (!textEl || textEl.nodeType !== 1) continue;
+    var low = openMapsNormalizeUiTextChunk(textEl.textContent || '').toLowerCase();
+    if (!openMapsTextMatchesSearchThisAreaPhrase(low)) continue;
+    var root = openMapsWmeSearchThisAreaChipRootFromTextEl(textEl);
+    if (!root) continue;
+    try {
+      root.style.setProperty('display', 'none', 'important');
+    } catch (eH) { /* ignore */ }
+  }
+}
+
+function openMapsSweepHideGoogleGmStyleSearchThisAreaChip() {
+  var nodes;
+  try {
+    nodes = document.querySelectorAll('.gm-style button, .gm-style [role="button"]');
+  } catch (eSweep) {
+    return;
+  }
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    if (!el || el.nodeType !== 1) continue;
+    var chunks = [];
+    try {
+      if (el.getAttribute) {
+        var al = el.getAttribute('aria-label');
+        if (al) chunks.push(al);
+        var tt = el.getAttribute('title');
+        if (tt) chunks.push(tt);
+      }
+    } catch (eA) { /* ignore */ }
+    try {
+      chunks.push(el.textContent || '');
+    } catch (eT) { /* ignore */ }
+    var low = openMapsNormalizeUiTextChunk(chunks.join(' ')).toLowerCase();
+    if (!openMapsTextMatchesSearchThisAreaPhrase(low)) continue;
+    try {
+      el.style.setProperty('display', 'none', 'important');
+    } catch (eH) { /* ignore */ }
+  }
+}
+
+function openMapsSweepHideGoogleSearchThisAreaChip() {
+  openMapsSweepHideWmePlacesSearchThisAreaChip();
+  openMapsSweepHideGoogleGmStyleSearchThisAreaChip();
+}
+
+function openMapsScheduleHideGoogleSearchThisAreaChip() {
+  openMapsSweepHideGoogleSearchThisAreaChip();
+  if (typeof requestAnimationFrame === 'function') {
+    if (openMapsGoogleSearchThisAreaRaf != null) {
+      try {
+        cancelAnimationFrame(openMapsGoogleSearchThisAreaRaf);
+      } catch (eC) { /* ignore */ }
+    }
+    openMapsGoogleSearchThisAreaRaf = requestAnimationFrame(function() {
+      openMapsGoogleSearchThisAreaRaf = null;
+      openMapsSweepHideGoogleSearchThisAreaChip();
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(function() {
+          openMapsSweepHideGoogleSearchThisAreaChip();
+        });
+      }
+    });
+  }
+  if (openMapsGoogleSearchThisAreaTimer) clearTimeout(openMapsGoogleSearchThisAreaTimer);
+  openMapsGoogleSearchThisAreaTimer = setTimeout(function() {
+    openMapsGoogleSearchThisAreaTimer = null;
+    openMapsSweepHideGoogleSearchThisAreaChip();
+  }, 80);
+}
+
+/** After pan/zoom WME sometimes re-mounts the Places chip; sweep synchronously (cheap vs first-paint flash). */
+function openMapsSweepHideSearchThisAreaChipAfterMapInteraction() {
+  openMapsSweepHideGoogleSearchThisAreaChip();
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function() {
+      openMapsSweepHideGoogleSearchThisAreaChip();
+    });
+  }
+}
+
+function openMapsInstallHideSearchThisAreaChipOnMapMove() {
+  if (openMapsGoogleSearchThisAreaMapMoveInstalled) return;
+  openMapsGoogleSearchThisAreaMapMoveInstalled = true;
+  try {
+    if (openMapsWmeSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.on === 'function') {
+      openMapsWmeSdk.Events.on({ eventName: 'wme-map-move-end', eventHandler: openMapsSweepHideSearchThisAreaChipAfterMapInteraction });
+      openMapsWmeSdk.Events.on({ eventName: 'wme-map-zoom-changed', eventHandler: openMapsSweepHideSearchThisAreaChipAfterMapInteraction });
+    }
+  } catch (eSdk) { /* ignore */ }
+  try {
+    if (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') {
+      var olm = W.map.getOLMap();
+      if (olm && olm.events && typeof olm.events.register === 'function') {
+        olm.events.register('moveend', olm, openMapsSweepHideSearchThisAreaChipAfterMapInteraction);
+      }
+    }
+  } catch (eOl) { /* ignore */ }
+}
+
+function openMapsEnsureGoogleSearchThisAreaHideStyle() {
+  var id = 'openmaps-style-google-search-this-area';
+  var css =
+    '.gm-style button[aria-label="Search this area"],' +
+    '.gm-style button[aria-label="search this area"],' +
+    '.gm-style [role="button"][aria-label="Search this area"],' +
+    '.gm-style [role="button"][aria-label="search this area"]{display:none!important;}' +
+    /* WME Places chip: CSS-module suffixes rotate; structure is stable in Chromium (:has). */
+    'div[class*="container--"]:has(> div[class*="iconContainer--"] .w-icon-search):has(> div.text){display:none!important;}';
+  var st = document.getElementById(id);
+  if (!st) {
+    st = document.createElement('style');
+    st.id = id;
+    try {
+      document.head.appendChild(st);
+    } catch (eHead) {
+      return;
+    }
+  }
+  try {
+    st.textContent = css;
+  } catch (eTc) { /* ignore */ }
+}
+
+function openMapsInstallHideGooglePlacesSearchThisAreaChip() {
+  if (openMapsGoogleSearchThisAreaInstalled) return;
+  openMapsGoogleSearchThisAreaInstalled = true;
+  openMapsEnsureGoogleSearchThisAreaHideStyle();
+  openMapsScheduleHideGoogleSearchThisAreaChip();
+  try {
+    var obs = new MutationObserver(openMapsScheduleHideGoogleSearchThisAreaChip);
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (eObs) { /* ignore */ }
+}
+//#endregion
 
 async function onWmeReady() {
-  // Wait silently for OpenLayers to load (Fixes Zoom 12 wait and bypasses deprecated extent warning)
-  if (typeof OpenLayers == 'undefined' || !W.map || !W.map.getOLMap()) {
+  if (typeof OpenLayers === 'undefined' || !W.map || typeof W.map.getOLMap !== 'function' || !W.map.getOLMap()) {
+    openMapsOlWaitAttempts += 1;
+    if (openMapsOlWaitAttempts >= OPEN_MAPS_OL_MAX_ATTEMPTS) {
+      if (!openMapsOlGiveUpLogged) {
+        openMapsOlGiveUpLogged = true;
+        log('OpenLayers / W.map not ready after ' + OPEN_MAPS_OL_MAX_ATTEMPTS + 's; stopping retries.');
+      }
+      return;
+    }
     setTimeout(onWmeReady, 1000);
     return;
   }
+  openMapsOlWaitAttempts = 0;
 
+  if (!openMapsWmeSdk && openMapsResolveGetWmeSdkFn()) {
+    openMapsWmeSdk = openMapsGetWmeSdkOnce();
+    if (openMapsWmeSdk) {
+      try {
+        log('WME SDK bound (SDK ' + openMapsWmeSdk.getSDKVersion() + ', WME ' + openMapsWmeSdk.getWMEVersion() + ').');
+      } catch (eV) {
+        log('WME SDK bound.');
+      }
+    } else {
+      log('getWmeSdk unavailable; using legacy W.userscripts / W.map integrations.');
+    }
+  }
+
+  openMapsInstallHideSearchThisAreaChipOnMapMove();
+
+  //#endregion OpenMapsSdkBootstrap
 
   //#region Set up translations
   var translations = {
@@ -97,6 +434,10 @@ async function onWmeReady() {
       no_local_maps: 'No maps found for this area',
       hide_tooltips: 'Hide help',
       show_tooltips: 'Show help',
+      sidebar_unlock_low_zoom: 'Unlock sidebar below zoom 12',
+      sidebar_wme_lock_respect: 'Use WME low-zoom sidebar lock',
+      sidebar_unlock_low_zoom_tooltip: 'Lets you use the right sidebar (layers, scripts, etc.) when zoomed out below level 12. WME normally limits interaction there. Turn off if something misbehaves after a WME update.',
+      sidebar_wme_lock_respect_tooltip: 'Restore WME’s default behavior for the right sidebar when zoomed out below level 12.',
       expand: 'Click to expand',
       collapse: 'Click to collapse',
       hideshow_layer: 'Hide/Show map',
@@ -125,15 +466,24 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Adjust how transparent the layer is',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Make the map background transparent',
-      map_improvement_label: 'Improve map display',
-      map_improvement_label_tooltip: 'Apply several improvements to the received map tiles',
+      map_improvement_label: 'Apply pixel manipulations',
+      map_improvement_label_tooltip: 'Apply pixel-level tile processing (requires redraw; may affect performance).',
+      pixel_manipulations_title: 'Pixel manipulations',
+      pixel_manipulations_default: 'Default',
+      pixel_manipulations_override: 'Override',
+      pixel_manipulations_use_default: 'Use catalog default',
+      pixel_manipulations_select_none: 'Select none',
+      pixel_manipulations_use_default_tooltip: 'Use catalog default (clear override)',
+      pixel_manipulations_select_none_tooltip: 'Select none (override to an empty list)',
+      pixel_manipulations_tooltip: 'Advanced: per-map overrides for tile pixel processing. Works independently from CSS filters and transparency. Changes apply after redraw and may cost performance.',
       map_layers_title: 'Map layers',
+      map_layers_show_all: 'Show all layers',
+      map_layers_hide_all: 'Hide all layers',
       find_available_layers: 'Find available layers',
       find_available_layers_loading: 'Querying server…',
       layer_catalog_loading: 'Loading layer list from server…',
       find_available_layers_loaded: 'Available layers loaded',
       find_available_layers_retry: 'Fetch failed (click to retry)',
-      sync_layers_tooltip: 'Sync layer list from server',
       server_capabilities_tooltip: 'View server capabilities (cached when available)',
       server_capabilities_title: 'Server capabilities',
       server_capabilities_url_label: 'Server URL:',
@@ -150,6 +500,10 @@ async function onWmeReady() {
       meta_type: 'Type',
       meta_region: 'Region',
       meta_bbox: 'BBox',
+      zoom_meta_band: 'Zoom band',
+      zoom_meta_floor: 'Floor',
+      zoom_meta_view: 'View',
+      zoom_meta_tooltip: 'The zoom band is the range where this map is meant to show at full detail. “Floor” is the minimum zoom level used for tile requests when you are zoomed farther out. Beyond the band’s maximum zoom, tiles are stretched (overzoom). Outside the band or below the floor, the map may look incomplete.',
       draw_bbox_on_map: 'Draw boundary box on map',
       visual_adjustments: 'Visual adjustments',
       slider_brightness: 'Brightness',
@@ -161,6 +515,51 @@ async function onWmeReady() {
       invert_colors: 'Invert colors (dark mode)',
       reset_visual_default: 'Reset to default',
       map_options_toggle: 'Map details and layers',
+      inspector_title: 'Map Inspector',
+      inspector_features_grouped: 'Features by map',
+      inspector_map_group_toggle: 'Expand or collapse feature rows for this map in the list (does not hide the overlay — use Active Maps)',
+      inspector_sources: 'Sources',
+      inspector_sources_tree: 'Layers to inspect',
+      inspector_folder_toggle_rows: 'Show or hide feature rows under this heading. Viewport scanning for each layer: use the map ⋮ menu (All / None / Match Active Maps).',
+      inspector_kml_folder_feature_counts: '{inView} / {total} · in view / loaded',
+      inspector_esri_viewport: 'ESRI (viewport query)',
+      inspector_wms_arcgis_viewport: 'WMS (ArcGIS REST)',
+      inspector_wms_wfs_viewport: 'WMS (GeoServer WFS)',
+      wms_arcgis_rest_viewport_probe: 'REST viewport features (Map Inspector)',
+      wms_arcgis_rest_viewport_probe_tooltip: 'When off, Map Inspector will not run ArcGIS REST /query requests for this WMS map. WMS tiles still follow Active Maps visibility and per-layer toggles. You can turn this off to save traffic while keeping the imagery on.',
+      inspector_sources_all: 'All',
+      inspector_sources_none: 'None',
+      inspector_sources_visible: 'Match Active Maps layers',
+      inspector_sources_visible_tooltip: 'Check only layers that are turned on in Active Maps (sidebar eye + sub-layers).',
+      kml_layer_root: 'Not in a folder',
+      inspector_search_placeholder: 'Filter list…',
+      inspector_refresh: 'Refresh',
+      inspector_list_empty: 'No features in view for the active maps.',
+      inspector_list_truncated: 'List capped — zoom in for a smaller area.',
+      inspector_kind_vector: 'vector',
+      inspector_kind_esri: 'esri',
+      inspector_kind_wms: 'wms',
+      inspector_kind_wfs: 'wfs',
+      inspector_kind_query: 'query',
+      inspector_open_table: 'Data table',
+      inspector_open_data_table: 'Open data table',
+      inspector_map_row_menu: 'Map actions',
+      inspector_table_title: 'Inspector data',
+      inspector_table_search: 'Filter rows…',
+      inspector_table_close: 'Close',
+      inspector_query_ingest: 'Add query results to inspector',
+      inspector_query_ingest_auto: 'Auto-add query results',
+      inspector_auto_wms_gfi: 'Auto-fetch generic WMS (viewport center)',
+      inspector_auto_wms_gfi_tooltip: 'Runs GetFeatureInfo at the map center when panning/zooming for WMS layers that are not served via ArcGIS REST or GeoServer WFS in this script.',
+      inspector_list_empty_hint_auto: 'Use the query tool for a precise click, or zoom in.',
+      inspector_list_empty_hint_manual: '(Raster maps: use query “Add to Inspector” or auto-add.)',
+      inspector_scan_progress: 'Scanning… {done}/{total}',
+      inspector_query_add_btn: 'Add to Inspector',
+      inspector_query_add_btn_tooltip: 'Append the current query result rows to the Map Inspector list',
+      inspector_bbox_layer: 'Bounds',
+      inspector_clear_query_items: 'Clear imported query rows',
+      inspector_not_available: 'Map Inspector is not available in this session.',
+      inspector_layer_bounds: 'Bounds',
       zoom_to_map_area: 'Zoom to map area',
       visibility_locked_tou: 'Accept Terms of Use first',
       tou_config_error: 'Configuration error',
@@ -194,6 +593,25 @@ async function onWmeReady() {
       notice_dismiss: 'Dismiss',
       tou_gate_banner: '"{title}" was added. Expand its row and accept Terms of Use before turning it on.',
       add_map_pick_hint: 'Open the list or type to filter maps.',
+      user_maps_section_title: 'Your maps',
+      user_maps_add_placeholder: 'Paste My Maps link (Edit, Preview, or Share)…',
+      user_maps_add_button: 'Add',
+      user_maps_default_title: 'Google My Map',
+      user_maps_add_invalid: 'No map id found. Paste the full browser address from Google My Maps while editing or viewing your map (it must contain mid=…). You do not need a separate “KML link”.',
+      user_maps_add_duplicate: 'That My Map is already in your list.',
+      user_maps_add_error_network: 'Could not download map data. Check the link and try again.',
+      user_maps_add_error_parse: 'Could not parse KML. The map may use features this editor cannot read yet.',
+      user_maps_kml_unsupported: 'This WME build has no KML parser (OpenLayers.Format.KML).',
+      user_maps_hint: 'Use the same URL you see in the address bar on google.com/maps/d/… (e.g. …/edit?mid=… or …/viewer?mid=…). OpenMaps loads the map geometry from Google automatically. Accept Google’s terms in map details before enabling.',
+      user_maps_feature_retired_hint: 'Google My Maps is turned off in this script version — it repeatedly broke WME satellite imagery. Saved maps stay in storage but are not drawn or restored to the active list. Advanced users only: set unsafeWindow.__OPEN_MAPS_FORCE_GMM__ = true before the script loads, then in the console run localStorage.setItem("openmaps-enable-google-mymaps","1") and reload.',
+      user_maps_force_unlock_instructions: 'My Maps is off in this script build, but you unlocked it with unsafeWindow.__OPEN_MAPS_FORCE_GMM__. Run localStorage.setItem("openmaps-enable-google-mymaps","1") on this tab, then reload WME. Remove openmaps-disable-google-mymaps if you set it.',
+      user_maps_drawing_off_instructions: 'To draw My Maps on the map: run localStorage.setItem("openmaps-enable-google-mymaps","1") on this tab, then reload WME. If you set openmaps-disable-google-mymaps to 1 earlier, remove that key first.',
+      user_maps_kml_upload_button: 'Upload KML',
+      user_maps_kml_upload_hint: 'Add geometry from a .kml file on your computer (stored in OpenMaps settings; very large files may hit storage limits). Stub files that only point to online KML via <NetworkLink> are fetched automatically when you enable the layer. KMZ archives are not supported — export or unpack to KML first.',
+      user_maps_kml_upload_not_kml: 'Choose a .kml file (plain XML). KMZ is not supported here.',
+      user_maps_kml_upload_too_large: 'This file is too large to store (limit about 2 MB of text). Use a smaller KML or simplify the layer.',
+      user_maps_kml_upload_duplicate: 'An uploaded layer with the same content is already in your list.',
+      user_maps_kml_upload_read_error: 'Could not read the file. Try again or pick a different file.',
       active_maps_filter_placeholder: 'Filter active maps…',
       active_maps_filter_all: 'All',
       active_maps_filter_favorites: 'Favorites',
@@ -214,10 +632,17 @@ async function onWmeReady() {
       layer_origin_cloud: 'From server catalog (cloud)',
       layer_origin_unknown: 'Not in script or server catalog',
       layer_origin_default: 'Default layer',
-      copy_layer_definition: 'Copy layer entry for script (layers: { … })',
-      copy_definition_menu: 'Copy definition',
-      layer_card_menu: 'More actions',
-      copy_layer_definition_done: 'Copied',
+      layer_tag_curated: 'Catalog',
+      layer_tag_cloud: 'Cloud',
+      layer_tag_unknown: 'Unknown',
+      layer_tag_default: 'Default',
+      layer_tag_user_upload: 'Upload',
+      layer_tag_google_mymaps: 'My Maps',
+      copy_map_definition_tooltip: 'Copy map definition',
+      copy_map_definition_menu_all_keep_defaults: 'Copy (All layers, keep defaults)',
+      copy_map_definition_menu_all_make_enabled_default: 'Copy (All layers, make enabled layers default)',
+      copy_map_definition_menu_enabled_only_make_default: 'Copy (Enabled layers only, make them default)',
+      copy_done: 'Copied',
       tou_link_probe_checking: 'Checking whether the Terms of Use page can be reached…',
       tou_link_probe_ok: 'Terms of Use page is reachable — verified {when}.',
       tou_link_probe_fail: 'Terms of Use page could not be loaded ({detail}).',
@@ -241,7 +666,8 @@ async function onWmeReady() {
         HR: 'Croatia',
         CZ: 'Czech Republic',
         UN: 'Universal',
-        EU: 'European Union'
+        EU: 'European Union',
+        user: 'Your maps'
       },
       update: {
         message: 'WME Open Maps has been updated! Changelog:',
@@ -354,7 +780,130 @@ async function onWmeReady() {
         v3_2_36: '- Add Orthophotos 2024 map (BE)\n- Limit default BAG objects shown (NL)',
         v3_2_37: '- Added ČÚZK (Czech Republic) WMS maps (CZ)',
         v3_2_38: '- Migrate ČÚZK WMS to ags.cuzk.gov.cz (ortofoto, GeoNames, ZABAGED polohopis); add Přehledová mapa overview (CZ)',
-        v2026_03_29_05: '- Fix crash when the server layer list finished loading while all WMS sub-layers were hidden'
+        v2026_03_29_05: '- Fix crash when the server layer list finished loading while all WMS sub-layers were hidden',
+        v2026_03_31_01: '- Map details: quiet zoom line (band, optional WMS floor, current view) with a short help tooltip; no extra map listeners',
+        v2026_03_31_02: '- Map Inspector: viewport list of in-memory vector features (capped), details, highlight/zoom, data table, optional query-result import',
+        v2026_03_31_03: '- Map Inspector: ESRI MapServer viewport query (auto list), layer tree, compact icon UI, hover highlight',
+        v2026_03_31_04: '- Map Inspector: minimal chrome (native icon buttons), WMS viewport via ArcGIS REST / GeoServer WFS',
+        v2026_04_01_01: '- Reduce browser tile load pressure: no global OpenLayers image reload retries; overlay layers use buffer 0 and no resize transition (helps net::ERR_INSUFFICIENT_RESOURCES with many maps active)',
+        v2026_04_01_02: '- Map Inspector: automatic WMS GetFeatureInfo at viewport center for generic queryable layers (optional setting); shared HTML table parsing with query import',
+        v2026_04_01_03: '- Map Inspector: show scanning progress (spinner, done/total) while viewport remote requests run; refresh icon spins until complete',
+        v2026_04_01_04: '- Map Inspector: remove in-panel Details block and redundant zoom/highlight buttons (selection, map highlight, and callout unchanged)',
+        v2026_04_01_05: '- Map Inspector: denser feature list (smaller type, padding, gaps; taller scroll area) so about twice as many rows fit vertically',
+        v2026_04_01_06: '- Map Inspector: snappier map hover highlight when moving between list rows (skip redundant leave/enter OpenLayers updates; coalesce to one draw per animation frame)',
+        v2026_04_01_07: '- Map Inspector: cap concurrent viewport layer requests (queue) and track completed count so progress does not stick at 0/N when many maps fire at once; shorter per-request timeout',
+        v2026_04_01_08: '- Map Inspector: ESRI MapServer, ArcGIS REST WMS, and GeoServer WFS viewport fetches now all run through the same bounded queue so progress advances reliably',
+        v2026_04_01_09: '- Optional workaround when WME limits the right sidebar below zoom 12: on by default (pointer-events + inert); turn off in the Open Maps footer if you prefer stock WME behavior',
+        v2026_04_01_10: '- Catalog: ArcGIS Online World Heritage Sites FeatureServer (points) with Map Viewer link (distinct from UNESCO Sites Navigator layer)',
+        v2026_04_01_11: '- Catalog: ArcGIS Online World_Heritage_UNESCO FeatureServer (points) with Map Viewer link (separate from World_Heritage_Sites and UNESCO/ Sites Navigator services)',
+        v2026_04_01_13: '- ESRI_FEATURE (ArcGIS FeatureServer vectors): fix geometry parsing (shared openMapsEsriGeometryToOpenLayers) and drop stale out-of-order query results when panning',
+        v2026_04_01_14: '- Map Inspector: group checkbox toggles overlay visibility like Active Maps eye; per-map row count; map actions ⋮ menu (Open data table first); skip full viewport rescan when view bucket unchanged (Refresh forces); callout stays open on map pan; callout width 110% of inspector panel; removed low-zoom sidebar unlock workaround',
+        v2026_04_02_01: '- Edit panel: show Map Inspector backend tag for WMS URLs (ArcGIS REST vs GeoServer WFS) so editors understand which viewport requests will run.',
+        v2026_04_02_02: '- Edit panel: make the WMS inspector-backend indicator compact (append an “ArcGIS REST” / “GeoServer” chip right after Type; no extra label).',
+        v2026_04_02_03: '- ESRI_FEATURE (ArcGIS FeatureServer): point markers match sidebar avatar color and scale (130% of 32px avatar), white outline and soft shadow; hover/inspector highlight uses a larger semi-transparent white halo.',
+        v2026_04_02_04: '- ESRI_FEATURE: draw points with native OpenLayers circles (WME often skips data-URL externalGraphics); stack FeatureServer vector layers above WME POI overlays so markers are visible; keep Map Inspector highlight on top.',
+        v2026_04_02_05: '- ESRI_FEATURE: symbol size is 130% of the Map Inspector list avatar (16px); canvas point icons with shadow; two-part highlight (translucent halo under marker, solid white ring on top); map hover highlights features.',
+        v2026_04_02_06: '- ESRI_FEATURE: always draw points as native OpenLayers circles again (WME does not reliably paint canvas data-URL externalGraphics, which left markers invisible when the icon was “successfully” generated).',
+        v2026_04_02_07: '- ESRI_FEATURE: thinner white rim; stronger highlight halo; map hover always updates highlight (even before inspector list refresh); highlighted point drawn on a lift layer above other FeatureServer points; clicking a point opens Map Inspector if needed and selects like the list.',
+        v2026_04_02_08: '- ESRI_FEATURE: remove lift-layer + hidden-source hack (markers could stay invisible after un-hover); draw-order bump keeps the highlighted point on top; stronger white halo fill.',
+        v2026_04_02_09: '- ESRI_FEATURE: highlight halo ~95% opaque; halo under active symbol only, active FeatureServer layer above other ESRI layers while highlighted; map hover uses pixel-radius fallback for small points.',
+        v2026_04_02_10: '- Map Inspector: separate hover vs selection highlights on the map and in the list (both can show at once; selection stacks above hover; each ESRI point gets its own halo under that symbol).',
+        v2026_04_02_11: '- Map Inspector: ESRI halos stay under symbols (z-order when two FeatureServer layers highlight); white hover ring (no blue outline); halos only with active hover/selection; closing the map callout clears selection.',
+        v2026_04_02_12: '- Map Inspector: force halo layers below FeatureServer source after reorder; map click dismisses feature callout (remove erroneous skip on olMap.div).',
+        v2026_04_02_13: '- Map Inspector: resync in-memory vector feature refs after pan / ESRI_FEATURE layer refresh so selection highlight stays on the symbol.',
+        v2026_04_02_14: '- Map Inspector: dismiss map callout on click-outside only; map pan/drag no longer closes it (pointer drag threshold).',
+        v2026_04_03_01: '- Map Inspector: feature callout stays open while panning (OpenLayers move cancels dismiss); inspector window can be dragged partly off-screen; only the feature list scrolls (no whole-window vertical bar); list has no horizontal scrollbar.',
+        v2026_04_03_02: '- Map Inspector: restore visible feature list (flex list no longer collapses to zero height; minimize restores body as flex column).',
+        v2026_04_03_03: '- Map Inspector: selected ESRI_FEATURE layer is always raised above other FeatureServer overlays (fix early-exit when halo layer is not yet on the OL map list).',
+        v2026_04_03_04: '- Map Inspector: ESRI_FEATURE z-pin works even when handle layer ref !== feature ref (match by layer name); always track select/hover source for any ESRI avatar layer geometry (not only Point); raise vector layer even if bbox handle is missing.',
+        v2026_04_03_05: '- Map Inspector: do not reorder whole ESRI_FEATURE map layers on hover/select; draw temporary cloned point symbols on lift layers above overlays (rings/halos unchanged).',
+        v2026_04_03_06: '- Map Inspector: WMS/WFS/remote-query geometries (geometry-only rows) use the same avatar-colored lift/halo/ring points and ESRI-style line/polygon highlights as ESRI_FEATURE.',
+        v2026_04_03_07: '- Map Inspector: geometry-only rows (WMS/WFS/query) always show avatar-colored symbols on the map while the inspector is open, not only on list hover or selection.',
+        v2026_04_03_08: '- Map Inspector: map hover and click work on persistent WMS/WFS/query symbols (same hit-testing path as ESRI_FEATURE vectors).',
+        v2026_04_03_09: '- Map Inspector: document capture-phase map click runs before WME Places/POI overlays can steal the event, so inspector symbols and ESRI_FEATURE points stay selectable when Places is on.',
+        v2026_04_03_10: '- Map Inspector: inspector highlights, viewport-geometry symbols, and ESRI_FEATURE layers are pinned together at the top of the OpenLayers stack (after WME adds Places); re-pin on addlayer so symbols stay visible above Places.',
+        v2026_04_03_11: '- Map Inspector: set high CSS z-index on OpenMaps/inspector/ESRI_FEATURE layer divs so WME Places semi-transparent vectors do not paint above our symbols (OL index alone is not enough in some WME builds).',
+        v2026_04_03_12: '- Map Inspector / Places: raise overlay z-index base (~2^31 range) so **all** ESRI_FEATURE symbols (not only inspector lift/highlight) stay above Places; re-pin overlay stack after FeatureServer features load.',
+        v2026_04_03_13: '- Map Inspector: feature detail callout text is selectable and copyable (override map canvas user-select).',
+        v2026_04_03_14: '- Map Inspector / Places: assign overlay layer `z-index` from **2147483647 downward** (one step per layer) so the **backmost** pinned layer (default ESRI_FEATURE symbols) is not stuck at “base+1” in a band WME Places can paint inside; mirror `z-index` on canvas/SVG under the layer div with `!important`.',
+        v2026_04_03_15: '- Map Inspector / Places: resolve OpenLayers layers by **`layer.name`** when `olMap.layers.indexOf(handleLayer)` is −1 (WME sometimes wraps or replaces the instance). Pinning and CSS `z-index` now target the **live** map layer so ESRI_FEATURE draw order and div styling actually apply.',
+        v2026_04_03_16: '- Map Inspector / Places: ESRI_FEATURE vector layers use a **unique** OpenLayers `layer.name` per map row (`OpenMaps_ESRI_FEATURE_` + map id) and `openMapsMapId` for resolution. Duplicate map titles no longer make `openMapsResolveLayerOnOlMap` match the wrong layer, so idle FeatureServer symbols get the same high `z-index` as inspector overlays (above WME Places).',
+        v2026_04_03_17: '- Map Inspector / Places: OpenLayers **`layer.setZIndex`** assigns `div.style.zIndex` without `!important`, which **overwrites** our pinned overlay `z-index` after `resetLayersZIndex` / redraw (idle ESRI symbols fell under Places while inspector layers looked fine). Hook **`OpenLayers.Layer.prototype.setZIndex`** and **`map.resetLayersZIndex`** to re-apply overlay `!important` values immediately after OL resets stacking.',
+        v2026_04_03_18: '- Map Inspector / Places: overlay `z-index` is now enforced with **`!important` rules in an injected stylesheet** (`.openmaps-ol-overlay-z[data-openmaps-ol-ztok]`), not only inline styles. OpenLayers can still assign plain inline `z-index`; author **`!important` in a stylesheet beats non-important inline**, so idle ESRI_FEATURE symbols stay above WME Places. Also hook **`OpenLayers.Map.prototype.resetLayersZIndex`** (not only the live map instance) and only reapply when the map is **`W.map.getOLMap()`** so other OpenLayers maps on the page cannot corrupt the rule set.',
+        v2026_04_03_19: '- Map Inspector / Places: **pin and CSS z-index now target only layers that actually live on `olMap.layers`**, then **sweep** for any `OpenMaps_ESRI_FEATURE_*` vector still registered on the map. Previously, falling back to the handle’s layer when `indexOf` was −1 meant **`setLayerIndex` was skipped** and stylesheet tokens could attach to a **stale/detached `div`** while idle symbols drew on WME’s replacement layer — so highlights (same live refs) looked fine but default markers stayed under Places. **Google Places** is a native layer WME already stacks above venue fills; it was a useful control, not the root cause.',
+        v2026_04_03_20: '- Map Inspector / Places: **hover/click map-id** for ESRI_FEATURE no longer uses `h.layer === hit.layer` (fails when WME replaces the OL instance). Uses `openMapsMapId` / `OpenMaps_ESRI_FEATURE_<id>` / `openMapsResolveLayerOnOlMap` so overlapping maps do not thrash highlights. **Swept** overlay layers are sorted by **Active Maps (handles) order** so `setLayerIndex` does not reshuffle FeatureServer stacks each pin. **Hoist** OpenMaps overlay `div`s to the end of `map.viewPortDiv` when they are direct children (paint order tie-break). Overlay CSS selectors are prefixed with **`#<olMap.div.id>`** when present for higher specificity vs WME. **`moveend`** debounces a re-pin after pan.',
+        v2026_04_03_21: '- Map Inspector / Places: pinned overlay vector `div`s / `canvas` / `svg` use **`pointer-events: none !important`**. They were painted above WME Places but still **captured the DOM hit target**, so Places never received clicks (sibling layers do not see bubbling from another branch). ESRI picks still use **document capture** + map-pixel hit-testing (`trySelectEsriFeatureFromClick`); OpenLayers `mousemove` still runs on the map. Fixes Places staying unselectable until pan after pointer left the map / z-order fights.',
+        v2026_04_03_22: '- **WME SDK-first integration:** `getWmeSdk` (GreasyFork script id `570591`), bounded wait for OpenLayers/W.map (~90s) with a one-shot failure log, `Sidebar.registerScriptTab` with legacy `W.userscripts` fallback, map view updates via `Events` (`wme-map-move-end` / `wme-map-zoom-changed`) with `moveend` fallback, satellite imagery via `Map.isLayerVisible` / `setLayerVisibility` + `trackLayerEvents` when available, tooltips via Bootstrap 5 `Tooltip` (no jQuery). OpenLayers prototype z-index hooks and `unsafeWindow`+`GM_xmlhttpRequest` remain documented polyfills for CSP/sandbox and OL stacking.',
+        v2026_04_03_23: '- **Maintenance:** Region map comment after the script header; `//#region OpenMapsSdkBootstrap` (SDK helpers + OpenLayers wait + `onWmeReady` prefix through SDK bind) and `//#region OpenMapsBoot` (`onWmeInitialized`, `bootstrap`, entry call) for editor navigation—no runtime behavior change.',
+        v2026_04_03_24: '- **UI:** Hide Google Maps’ native “Search this area” chip on the map (WME Places / Google base map). It is not from OpenMaps; CSS plus a small DOM sweep covers common editor locales.',
+        v2026_04_03_25: '- **UI:** “Search this area” is WME’s React pill (`container--*`, `.w-icon-search`, `div.text`), not `.gm-style`. Hide it with `:has(...)` CSS and a `div.text` sweep; keep legacy Google control hiding.',
+        v2026_04_03_26: '- **Map Inspector:** Per-map list checkbox only expands or collapses rows under that map; it no longer calls Active Maps visibility (sidebar eye still controls the overlay).',
+        v2026_04_03_27: '- **UI:** “Search this area” chip: run hide sweep **immediately** on DOM mutations (not only after 80 ms), plus coalesced `requestAnimationFrame` passes and a final timeout; also sweep after **`wme-map-move-end`**, **`wme-map-zoom-changed`**, and OpenLayers **`moveend`** so the pill does not flash on the first pan after reload.',
+        v2026_04_03_28: '- **WMS (ArcGIS REST):** Map options include a checkbox to enable or disable REST viewport feature queries for Map Inspector independently of WMS tile visibility (tiles still use Active Maps + layer toggles).',
+        v2026_04_03_29: '- **ESRI_FEATURE:** Map options no longer show WMS-only “transparent background”, CSS visual filters, or pixel manipulations (they do not apply to FeatureServer vectors and could call `mergeNewParams` on a vector layer). Later builds also drop the opacity control for vectors and hide the bbox toggle for Universal (UN) maps.',
+        v2026_04_03_30: '- **Universal (region UN):** No “draw boundary box” option; bbox overlay stays off. **ESRI_FEATURE:** Opacity slider removed; vector layer always renders at full opacity (saved opacity is ignored for that type).',
+        v2026_04_03_31: '- **Fix:** Universal (UN) maps no longer show the bbox checkbox or an empty “Visual adjustments” block; ESRI_FEATURE maps no longer show the opacity slider there (engine already keeps vectors at full opacity).',
+        v2026_04_03_32: '- **Your maps:** Add **Google My Maps** by pasting a share/embed link or map id; KML is fetched (Tampermonkey) and drawn as a vector overlay. Entries persist in settings; accept **Google** terms per map. Same storage is intended for custom WMS / ArcGIS / XYZ later.',
+        v2026_04_03_33: '- **Your maps:** Clearer copy (no need to find a “KML link”); **edit / viewer / share** My Maps URLs with `mid=` are parsed via `URL` + hash fallback. Trim stray quotes/punctuation from pasted links.',
+        v2026_04_03_34: '- **Fix (satellite / My Maps):** Google My Maps and ESRI_FEATURE vectors are only **stack-pinned** (OpenLayers index + overlay z-index) when the row is active and the layer is visible. Hidden or out-of-area maps no longer re-enter the stack via the layer sweep. **Pan/zoom** re-pin is **debounced** (~220 ms) so WME satellite tiles are not disrupted by constant reordering. Overlay z-index rules clear when nothing needs pinning. **Aerial floor** for tile overlays also matches the `satellite_imagery` layer name if `earthengine-legacy` is absent.',
+        v2026_04_03_35: '- **Fix (satellite / My Maps):** Google My Maps KML vectors are **no longer** included in the ESRI-style overlay pin (top-of-`olMap` + `!important` z-index + viewport `div` hoist). They are ordered only via **`syncOpenMapsLayerIndices`** above aerial imagery, like tile overlays. The aggressive pin stack was still breaking WME satellite tile loading when My Maps was the only active layer.',
+        v2026_04_03_36: '- **Fix (satellite / My Maps):** **`syncOpenMapsLayerIndices`** no longer calls **`setLayerIndex`** on a My Map row while it is **hidden**, **out of area**, or the OL layer is **not visible** (the vector stayed on the map and was still reordered). **Layer-index math** uses only “participating” handles so slots stay correct. The global **`setZIndex` / `resetLayersZIndex`** reapply path runs only when an **ESRI_FEATURE** overlay pin or **Map Inspector** overlay stack actually needs it, so satellite and other WME layers are not dragged through overlay CSS work on every pan/zoom when only a (hidden) My Map is in Active Maps.',
+        v2026_04_03_37: '- **Fix (satellite / My Maps):** **`syncOpenMapsLayerIndices` no longer installs** the global OpenLayers **`Layer.setZIndex`** / **`Map.resetLayersZIndex`** hooks on every sync. Those hooks were still attached as soon as any OpenMaps row existed (e.g. hidden My Map), so **every** WME layer (including satellite) kept going through our wrapper. Hooks and **`moveend` re-pin** are installed only when **`openMapsOverlayPinStackHasWork()`** (ESRI_FEATURE pin or Map Inspector overlays). **`pinOpenMapsOverlayStackTop`** installs the same hooks the first time it actually pins a non-empty overlay stack.',
+        v2026_04_03_38: '- **Fix (satellite / My Maps):** Hidden/out-of-area Google My Maps layers are now **detached from `W.map` / `olMap`** (removed, not only `setVisibility(false)`), so merely having a My Map row in Active Maps cannot affect OpenLayers layer ordering or satellite tile flow. The layer is rebuilt only when the row becomes visible again.',
+        v2026_04_03_39: '- **Hotfix:** Roll back the v2026.04.03.38 My Maps detach path to restore startup stability. Keep v2026.04.03.37 behavior (no global OL hook install from `syncOpenMapsLayerIndices`; no ESRI-style pin for My Maps).',
+        v2026_04_03_40: '- **Hotfix rollback:** Step back one more level to the **v2026.04.03.36 runtime path** (restore hook/`moveend` registration flow from before v37) to recover script startup while satellite/My Maps debugging continues.',
+        v2026_04_03_41: '- **Startup fix:** Some bridge/Tampermonkey environments fire `wme-initialized` but never emit `wme-ready`. OpenMaps now keeps the normal `wme-ready` listener **and** starts a guarded fallback timer (single-shot launch) so startup cannot stall at “waiting for wme-ready signal…”.',
+        v2026_04_03_42: '- **Fix (satellite / My Maps):** Google My Maps vectors are **excluded from `syncOpenMapsLayerIndices` `setLayerIndex` entirely** (not only when hidden). Visible KML layers were still reordered above aerial on every sync/KML refresh, which could stop WME satellite tiles after pan/zoom. My Maps stays at WME/OpenLayers default stack position; tile/WMS/ESRI overlays still sync above aerial as before.',
+        v2026_04_04_01: '- **Fix (satellite / My Maps):** **`syncOpenMapsLayerIndices` no longer installs** global OpenLayers **`Layer.setZIndex`** / **`Map.resetLayersZIndex`** hooks every run (the v40 rollback had restored that). Satellite and other WME layers were still wrapped whenever any OpenMaps row existed. Hooks attach when **`pinOpenMapsOverlayStackTop`** pins a non-empty ESRI/inspector stack; **`addlayer` / debounced `moveend`** listeners register only when **`openMapsOverlayPinStackHasWork()`**. **`minForeignAbove`** now scans **`olMap.layers`** using **resolved OpenLayers layer refs** so My Maps vectors are not treated as foreign WME layers when `W.map.getLayers()` returns different object identities than `handles[].layer`.',
+        v2026_04_04_02: '- **Fix (satellite / My Maps):** Tile stacking now uses **`olMap.getLayerIndex`** for both the **aerial floor** and **`minForeignAbove`** (never mixed array loop index with `W.map.getLayerIndex`). When those numbers diverged, OpenMaps could pack tile layers into invalid slots and disturb Earth Engine / satellite tiling. **Google My Maps** vectors are **`removeLayer`’d** from `W.map`/`olMap` whenever the row is off (hidden, no sub-layer, out of area, or ToU not accepted)—not only `setVisibility(false)`—then re-added when shown. **KML load** no longer calls **`syncOpenMapsLayerIndices`** after every fetch.',
+        v2026_04_04_04: '- **Fix (satellite / My Maps):** WME roads and satellite maps turning blank shortly after a My Map loads is a classic **WebGL context loss** (Waze’s native map renderer crashes when the browser is overwhelmed). OpenMaps now **bypasses WME’s `W.map.addLayer` wrapper entirely** for heavy vector layers (My Maps / ESRI_FEATURE), adding them directly to the underlying OpenLayers engine. This stops WME’s React state from tracking thousands of foreign vectors. KML now requests **`Canvas` rendering** before falling back to SVG, and restricts loading to **1500** features maximum to protect WME memory limits.',
+        v2026_04_04_08: '- **Fix (satellite bug #5):** WME roads and satellite maps turning blank shortly after a My Map loads is a classic **WebGL context loss** (Waze’s native map renderer crashes when the browser is overwhelmed). OpenMaps now fully isolates `GOOGLE_MY_MAPS` `OpenLayers.Layer.Vector` state changes from Waze\'s native map by avoiding `W.map.addLayer` entirely, stripping native event listener bindings that could stall tile requests, and making KML loading lazy.',
+        v2026_04_04_14: '- **Fix (satellite / My Maps):** A My Map row in Active Maps no longer creates an OpenLayers vector layer until the map can actually display (Terms accepted, row visible, in area, at least one sub-layer on). Previously that vector existed even when hidden or ToU-locked, which matched reports of satellite tiles failing while My Maps was only listed. **Remove** uses the same silent `olMap` detach path as hide. Console shows script version via `console.info`.',
+        v2026_04_04_15: '- **Fix (satellite / My Maps):** KML uses **`extractStyles: false`** so OpenLayers does not spawn hundreds of external **icon** requests from My Maps styles (a common cause of browser connection pool starvation next to Waze’s Google satellite tiles). Feature cap lowered to **600**. My Maps vectors attach/detach with normal **`olMap.addLayer` / `removeLayer`** again so OpenLayers stays internally consistent. **Kill switch:** `localStorage.setItem(\'openmaps-disable-google-mymaps\',\'1\')` + reload skips all My Maps drawing; remove key to re-enable. Sidebar shows a red hint when off.',
+        v2026_04_04_16: '- **Google My Maps is opt-in (default off):** Drawing KML on the WME map stays disabled until `localStorage.setItem(\'openmaps-enable-google-mymaps\',\'1\')` + reload, because My Maps has repeatedly correlated with **satellite tiles stopping** and we could not make it reliable across environments. Saved My Map rows remain; paste/add is blocked until enabled. **`openmaps-disable-google-mymaps=1`** still forces drawing off (overrides enable). Console + sidebar explain the keys; EN+NL `user_maps_drawing_off_instructions`.',
+        v2026_04_04_18: '- **Google My Maps off in this build + clean restore:** `OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS` is **false** — My Maps KML is not restored into Active Maps while integration is off, so a leftover saved row no longer instantiates handles or touches OpenLayers after reload (one `saveMapState` after boot drops them from persisted active state). Paste/add is **disabled** when the feature is hard-retired; banner and cards use **`user_maps_feature_retired_hint`** vs. power-user **`user_maps_drawing_off_instructions`**. Advanced only: `unsafeWindow.__OPEN_MAPS_FORCE_GMM__` before script load + `openmaps-enable-google-mymaps`.',
+        v2026_04_04_19: '- **My Maps rollout stage 1:** `OPEN_MAPS_GMM_ROLLOUT_STAGE` **1** turns the feature on in the build again (not hard-retired). KML still needs `localStorage.setItem(\'openmaps-enable-google-mymaps\',\'1\')` + reload; **`openmaps-disable-google-mymaps=1`** still wins. Until you opt in, no My Maps handles are restored and nothing is drawn — same safety as before. Set **`OPEN_MAPS_GMM_ROLLOUT_STAGE = 0`** to fully retire My Maps in the build without removing code.',
+        v2026_04_04_20: '- **Fix (My Maps copy):** Opt-in banner, Add button, and card hints use **`openMapsGoogleMyMapsOptInBlockedMessageKey()`** — stage 1 (feature on) shows only **`user_maps_drawing_off_instructions`** (localStorage enable + reload). Mention of **`unsafeWindow.__OPEN_MAPS_FORCE_GMM__`** is reserved for **`user_maps_force_unlock_instructions`** when the feature is off in the build but force-unlocked; **`user_maps_feature_retired_hint`** when fully retired.',
+        v2026_04_04_21: '- **Troubleshooting:** `OPEN_MAPS_VERSION` is aligned with **`// @version`** again. Opt-in **`localStorage.setItem(\'openmaps-troubleshoot\',\'1\')`** + reload prints a JSON snapshot (handles by type, each My Map row: ToU, `hasOlVector`, sublayers). **`openMapsPrintTroubleshootStatus("label")`** on **`unsafeWindow`** for snapshots after pan/repro. GMM rollout comment block documents **`openmaps-gmm-diag`** and enable/disable keys.',
+        v2026_04_04_22: '- **Troubleshoot payload:** Removed misleading **`olTotalVsVisibleMismatch`** (WME normally has far fewer visible OL layers than total). Each My Map row adds **`eligibleForOlVector`** (same gate as `updateLayers`). **`handlesWithOpenLayersLayer`**, **`satelliteDebugHint`**, and **`noteBridgeVsBody`** (GM_info vs injected body) clarify when satellite stress is unlikely to be KML.',
+        v2026_04_04_23: '- **Troubleshoot:** **`satelliteDebugHint`** now splits **“My Maps in list but not eligible”** (hidden / ToU / sublayers / out of area — no KML expected) from **“eligible but no vector yet”** (possible load/attach in progress).',
+        v2026_04_04_24: '- **Troubleshoot:** When **`handlesWithOpenLayersLayer` is 0**, **`satelliteDebugHint`** no longer blames “other overlays”; it states that OpenMaps tile sync is inactive and suggests **disabling the userscript** to confirm causes outside OpenMaps. **`overlayPinStackHasWork`** is included for ESRI/inspector pin state.',
+        v2026_04_04_25: '- **Troubleshoot:** Exposes **`OpenMapsPrintTroubleshootStatus`** on **`unsafeWindow`** as an alias for **`openMapsPrintTroubleshootStatus`** (names are case-sensitive). Console reminder: function name starts with lowercase **open**.',
+        v2026_04_04_26: '- **Google My Maps:** When a row becomes **ineligible** (hidden, ToU, opt-out, no sub-layer), the KML **`OpenLayers.Layer.Vector` is destroyed** and **`self.layer` cleared** — not only removed from `olMap`. Avoids stale vectors, `moveTo` overrides, and listeners correlating with satellite issues while the card stays in Active Maps.',
+        v2026_04_04_27: '- **Diagnostics (`openmaps-gmm-diag`):** Heavy console tracing (`setLayerIndex` / `removeLayer` wraps, stack snapshots) is **gated** until an OpenLayers **layer or bbox** exists or **overlay-pin work** is active, so an inactive My Map row alone does not spam every sync. **Not implicated in satellite tile loading** — dev logging only.',
+        v2026_04_04_28: '- **Satellite investigation:** Troubleshoot JSON adds **`ruledOutNonSuspects`** (e.g. `openmaps-gmm-diag`) and **`satelliteInvestigationHypotheses`** — structured hypotheses + how to eliminate them. **`noteGmmDiagHooks`** removed in favor of neutral **`noteGmmDiag`** (diag ruled out as a satellite root cause).',
+        v2026_04_04_29: '- **Google My Maps / satellite:** Saved Active Maps rows with **Terms not accepted** and **hidden** are **skipped on restore** (definition remains in Your maps; re-add after accepting Terms). **`syncOpenMapsLayerIndices`** short-circuits when no handle has an OL layer and overlay-pin work is off, avoiding repeated `getLayers` / aerial scans. Targets “ghost” GMM handles with no vector still correlating with broken satellite.',
+        v2026_04_05_01: '- **Your maps:** **Upload KML** — pick a `.kml` file (plain XML); geometry is parsed with the same OpenLayers path as My Maps, stored in settings, and listed under Your maps. Does **not** require Google My Maps opt-in. **KMZ** not supported. Size cap ~2 MB text.',
+        v2026_04_05_02: '- **Google My Maps:** KML export URL now includes **`forcekml=1`** (same as classic [WME Open Other Maps](https://greasyfork.org/en/scripts/32758-wme-open-other-maps)), which can improve reliability of the downloaded KML from Google.',
+        v2026_04_05_03: '- **Upload KML:** Files that only contain a **`<NetworkLink>`** (common Google My Maps export stub) now **fetch the linked KML** via Tampermonkey and draw it; OpenLayers does not resolve network links by itself. **`@connect www.google.com`** added for that fetch.',
+        v2026_04_05_04: '- **Google My Maps / KML points:** Placemarks (especially **points** inside **`<Folder>`**s) are parsed with a **namespace-agnostic DOM walk** (same idea as classic [WME Open Other Maps](https://greasyfork.org/en/scripts/32758-wme-open-other-maps) `MyMapKML`), then **`OpenLayers.Format.KML`** is used only as a fallback. **Google My Maps** responses that are only a **`<NetworkLink>`** stub now follow the link like **uploaded KML**.',
+        v2026_04_05_05: '- **KML folders:** Each **`<Folder>`** becomes a **sub-layer** in Active Maps (eye toggles) and in **Map Inspector → Layers to inspect** (separate checkboxes). **Ungrouped** placemarks use a **Not in a folder** row. **Map Inspector** also lists **WMS / ArcGIS / FeatureServer / KML** sub-layers (and bounds) so you can include or exclude sources from the viewport scan.',
+        v2026_04_05_06: '- **Map Inspector:** Per-map **layer/source** toggles sit **under each map** in **Features by map** (no separate top filter block). **KML / My Maps:** Restoring Active Maps with **folder sub-layers** while the saved definition still only lists **`main`** no longer shows the “saved layer names removed” orphan warning — folder ids are **reconciled** into the map definition instead.',
+        v2026_04_05_07: '- **Map Inspector:** Under each map, features are grouped as **folders** (KML folders, WMS/ArcGIS sub-layers, bounds, etc.) with **nested feature rows** — not a separate flat “layers to inspect” checklist. **All / None / Match Active Maps** for viewport scan moved to the map row **⋮** menu. Each folder row still has a **checkbox** to include or exclude that source from scans.',
+        v2026_04_06_01: '- **Layer rows:** Origin is shown as **neutral text tags** (catalog / cloud / unknown, default, **Upload** for local files, **My Maps** for Google) instead of corner icons; **KML folder** colors on the map and in the **Map Inspector** list match each **sub-layer**; optional **KML placemark icon** appears in the layer chip when the file defines an `Icon` URL.',
+        v2026_04_06_02: '- **Map Inspector:** Folder checkboxes **show or hide** nested feature rows only; **viewport scanning** per layer stays under the map **⋮** menu (All / None / Match Active Maps). **Active Maps** sub-layers that are **on** in the sidebar always appear as folder headers **(0)** when empty. Sidebar layer visibility changes **refresh** the inspector viewport list.',
+        v2026_04_06_03: '- **Map Inspector:** Sidebar **sub-layer** toggles now reliably **trigger a fresh viewport scan** and list refresh. **KML folder** changes after reload or parse also **invalidate cached viewport hits** and rescan instead of showing stale results.',
+        v2026_04_06_04: '- **Map layers list:** Origin tags (**Catalog** / **Cloud** / **Upload** / **Default**, etc.) sit on a **second row under the layer title**, so the title uses the full width and tags stay **readable** (no squeezed ellipsis).',
+        v2026_04_06_05: '- **Upload KML:** After **hiding** the map with the eye and **showing** it again, geometry and **Map Inspector** work without **reload** — the KML fetch guard no longer latches if the first attach tick skipped loading.',
+        v2026_04_06_06: '- **Map Inspector:** Toggling a map **on/off** with the sidebar **eye** now runs the full layer engine (`updateLayers`), so the inspector **list and viewport scan** add or drop that map (and sub-layers) immediately.',
+        v2026_04_06_07: '- **KML / My Maps:** Hiding the vector (eye, last sub-layer off, or stack teardown) cleared features and bumped the load generation but left the **“fetch done”** latch set, so **show again** never reparsed KML — map and Map Inspector stayed empty until reload. The latch now **clears on layer hide** and on **failed network** KML fetches.',
+        v2026_04_06_08: '- **Map Inspector:** **`notifyHandlesChanged`** now runs **`runViewportIndex(true)`** immediately (and clears the move debounce), so toggling **Map layers** sub-rows refreshes the inspector **list and viewport vector hits** at once — not only after the debounced pan/zoom pass.',
+        v2026_04_06_09: '- **KML / My Maps:** **Map layers** folder eyes now **fully hide** geometry on the map (OL2 merged `display:none` with defaults so points/lines could still draw — use zero opacity/radius). **Map Inspector:** folder blocks are **plain rows** (no `<details>`): clicking the **heading** no longer **collapses** the block; only the **checkbox** shows or hides nested feature rows.',
+        v2026_04_06_10: '- **KML / My Maps + Map Inspector:** **Map layers** folder **hidden** in the sidebar is respected when building the inspector **viewport list** (KML used to index every placemark). Hidden folders no longer leave **stale** rows or **idle** map symbols from those hits.',
+        v2026_04_06_11: '- **Map layers ↔ Map Inspector:** Toggling a sub-layer **eye** now updates inspector **viewport scan inclusion** for that source (like **⋮ Match Active Maps** for one row), clears **selection/hover** for features in that layer so highlight symbols disappear, and **ArcGIS FeatureServer** vectors **reschedule** their bbox query when sub-layers change so turning a layer **on** reloads features.',
+        v2026_04_06_12: '- **KML / My Maps map symbols:** Hiding a **Map layers** folder used to leave points/lines visible because OpenLayers 2 draws from the layer **StyleMap** — per-feature `style` did not win. KML vectors now use a **StyleMap with context** that reads live sidebar visibility on every redraw, plus clearing stale `feature.style` after load/toggle.',
+        v2026_04_06_13: '- **KML / My Maps map symbols (fix):** WME’s OL **Canvas** path did not apply the context **StyleMap** reliably (symbols stayed painted while inspector hits stopped). KML placemarks now live in **`__openmapsKmlMasterFeatures`**; **hidden folders are `removeFeatures`** from the vector layer and **shown folders are re-`addFeatures`**, then per-feature `style` + minimal default **StyleMap**.',
+        v2026_04_07_01: '- **Map layers:** Sub-layer list shows summary counts `(visible/total)` in the header. Added an actions menu (`⋮`) next to the Map layers header with **Show all layers** and **Hide all layers** shortcuts.',
+        v2026_04_07_02: '- **KML parser fix:** Coordinates are now correctly transformed from EPSG:4326 to Waze\'s EPSG:900913 projection instead of relying on a missing EPSG:3857 transform.',
+        v2026_04_07_03: '- **KML / My Maps:** `LOCAL_KML` and `GOOGLE_MY_MAPS` rows are no longer treated as “out of viewport” (which blocked fetch/draw and left only the default **KML** sub-layer). Folder sub-layers are merged from the KML tree when the first parse omits ids; after load, **BBox** is updated from geometry and saved for uploaded KML.',
+        v2026_04_07_04: '- **KML visibility (OL2):** The vector layer’s invisible **StyleMap** was still used for drawing because OpenLayers only applied per-feature `style` when passed into `drawFeature`. KML/My Maps layers now forward **`feature.style`** so circle markers/lines/polygons actually render on Canvas/SVG.',
+        v2026_04_07_05: '- **KML / My Maps layers + symbols:** Parsed **folder sub-layers** are saved to **Your maps** (with bbox) so the sidebar matches after reload; **`updateLayers`** runs after each KML apply so the map and inspector resync immediately. **Map layers** UI retries if the sub-layer container is not ready yet; **Canvas/SVG** renderers also forward **`feature.style`** for OpenMaps KML vectors when the renderer bypasses `Layer.drawFeature`.',
+        v2026_04_07_06: '- **KML draw (OL2 Canvas):** Per-feature styles are applied **before** `addFeatures` so the first paint is not only the invisible layer StyleMap (markers/lines/polygons + Map Inspector viewport list were empty). Renderer hooks also resolve the layer from **`this.layer`** when `feature.layer` is not set yet.',
+        v2026_04_07_07: '- **KML + Map Inspector:** GMM diag logs **on-layer** feature counts (not parsed-only). **Folder headers** show **in view / loaded** from the KML master list; viewport indexing uses a **fallback extent** when `getMapExtent()` is null; **`openmaps-kml-diag`** can log **no viewport intersection** with bounds sample; **`updateLayers`** reapplies folder styles if the OL layer is empty while master still has placemarks.',
+        v2026_04_07_08: '- **I18n:** French and Portuguese strings for **Map Inspector** KML folder counts (**in view / loaded**).',
+        v2026_04_07_09: '- **KML / Map Inspector:** OpenLayers now gets **cloned** placemarks from **`__openmapsKmlMasterFeatures`** so WME/OL teardown of the vector layer cannot leave the master list unusable for re-`addFeatures`. **Legacy `main` sub-layer:** when folder rows replace the old single **main** row, new folders default **visible** (a hidden legacy `main` flag no longer blanks every folder). **Inspector** falls back to **master** geometry for viewport hits when the OL layer is still empty but the row should draw.',
+        v2026_04_07_10: '- **KML fix:** `MapHandle` now exposes **`this.map`** (the map definition). KML folder styles and master sync had been no-ops because helpers read **`mapHandle.map`**, which was never set.',
+        v2026_04_08_01: '- **Map Feature Styles:** Fix ESRI_FEATURE clickability bug by syncing layerKey logic in trySelectEsriFeatureFromClick with runViewportIndex. Add layerSpecificStyle to MapHandle, saveMapState, and buildEditPanel UI. Update appendOneLayerRow to toggle layer avatar hash colors based on layerSpecificStyle. Update openMapsEsriPointVectorStyle and parseFeaturesToOl to render round-in-round map symbols. Update Map Inspector styling helpers to reflect round-in-round logic when checked.'
       }
     },
     nl: {
@@ -364,6 +913,10 @@ async function onWmeReady() {
       map_already_selected: 'Deze kaart is al toegevoegd',
       hide_tooltips: 'Hulp verbergen',
       show_tooltips: 'Hulp weergeven',
+      sidebar_unlock_low_zoom: 'Zijbalk vrij onder zoom 12',
+      sidebar_wme_lock_respect: 'WME-vergrendeling onder z12',
+      sidebar_unlock_low_zoom_tooltip: 'Maakt de rechterzijbalk (lagen, scripts, …) bruikbaar als je verder bent uitgezoomd dan niveau 12. WME beperkt dat normaal. Zet uit als iets raar doet na een WME-update.',
+      sidebar_wme_lock_respect_tooltip: 'Herstelt het standaard WME-gedrag voor de rechterzijbalk onder zoomniveau 12.',
       expand: 'Klik om uit te breiden',
       collapse: 'Klik om te verbergen',
       hideshow_layer: 'Verberg/Toon kaart',
@@ -391,15 +944,24 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Wijzig de doorzichtigheid van de kaart',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Maak de achtergrond van de kaart transparent',
-      map_improvement_label: 'Kaartweergave verbeteren',
-      map_improvement_label_tooltip: 'Pas allerhande verbeteringen toe op de kaarttegels',
+      map_improvement_label: 'Pixelmanipulaties toepassen',
+      map_improvement_label_tooltip: 'Pas pixelbewerkingen toe op kaarttegels (hertekenen vereist; kan prestaties beïnvloeden).',
+      pixel_manipulations_title: 'Pixelmanipulaties',
+      pixel_manipulations_default: 'Standaard',
+      pixel_manipulations_override: 'Overschrijven',
+      pixel_manipulations_use_default: 'Catalogusstandaard gebruiken',
+      pixel_manipulations_select_none: 'Niets selecteren',
+      pixel_manipulations_use_default_tooltip: 'Catalogusstandaard gebruiken (overschrijving wissen)',
+      pixel_manipulations_select_none_tooltip: 'Niets selecteren (overschrijven naar een lege lijst)',
+      pixel_manipulations_tooltip: 'Geavanceerd: per-kaart overschrijvingen voor pixelbewerking van tegels. Werkt onafhankelijk van CSS-filters en transparantie. Toegepast na hertekenen; kan prestaties beïnvloeden.',
       map_layers_title: 'Kaartlagen',
+      map_layers_show_all: 'Toon alle lagen',
+      map_layers_hide_all: 'Verberg alle lagen',
       find_available_layers: 'Beschikbare lagen zoeken',
       find_available_layers_loading: 'Server bevragen…',
       layer_catalog_loading: 'Lagenlijst van server laden…',
       find_available_layers_loaded: 'Beschikbare lagen geladen',
       find_available_layers_retry: 'Ophalen mislukt (klik om opnieuw te proberen)',
-      sync_layers_tooltip: 'Lagenlijst van server synchroniseren',
       server_capabilities_tooltip: 'Servermogelijkheden bekijken (gecachet indien beschikbaar)',
       server_capabilities_title: 'Servermogelijkheden',
       server_capabilities_url_label: 'Server-URL:',
@@ -416,6 +978,10 @@ async function onWmeReady() {
       meta_type: 'Type',
       meta_region: 'Regio',
       meta_bbox: 'BBox',
+      zoom_meta_band: 'Zoombereik',
+      zoom_meta_floor: 'Ondergrens',
+      zoom_meta_view: 'Beeld',
+      zoom_meta_tooltip: 'Het zoombereik is waar deze kaart bedoeld is om op vol detail te tonen. “Ondergrens” is het minimale zoomniveau voor tegelverzoeken als je verder bent uitgezoomd. Boven het maximum van het bereik worden tegels opgerekt (overzoom). Buiten het bereik of onder de ondergrens kan de weergave onvolledig zijn.',
       draw_bbox_on_map: 'Begrenzingskader op de kaart tekenen',
       visual_adjustments: 'Visuele aanpassingen',
       slider_brightness: 'Helderheid',
@@ -427,6 +993,51 @@ async function onWmeReady() {
       invert_colors: 'Kleuren omkeren (donkere modus)',
       reset_visual_default: 'Standaard herstellen',
       map_options_toggle: 'Kaartdetails en lagen',
+      inspector_title: 'Kaartinspector',
+      inspector_features_grouped: 'Objecten per kaart',
+      inspector_map_group_toggle: 'Objectrijen voor deze kaart in de lijst uit- of inklappen (verbergt de overlay niet — gebruik Actieve kaarten)',
+      inspector_sources: 'Bronnen',
+      inspector_sources_tree: 'Lagen om te inspecteren',
+      inspector_folder_toggle_rows: 'Toon of verberg objectrijen onder deze kop. Viewport-scan per laag: gebruik het ⋮-menu van de kaart (Alles / Geen / Zoals Actieve kaarten).',
+      inspector_kml_folder_feature_counts: '{inView} / {total} · in beeld / geladen',
+      inspector_esri_viewport: 'ESRI (viewport-query)',
+      inspector_wms_arcgis_viewport: 'WMS (ArcGIS REST)',
+      inspector_wms_wfs_viewport: 'WMS (GeoServer WFS)',
+      wms_arcgis_rest_viewport_probe: 'REST-viewportobjecten (Map Inspector)',
+      wms_arcgis_rest_viewport_probe_tooltip: 'Uit: Map Inspector voert geen ArcGIS REST /query-verzoeken meer uit voor deze WMS. WMS-tegels volgen nog steeds Actieve kaarten en laagschakelaars. Handig om verkeer te sparen met de beelden aan.',
+      inspector_sources_all: 'Alles',
+      inspector_sources_none: 'Geen',
+      inspector_sources_visible: 'Zoals Actieve kaarten',
+      inspector_sources_visible_tooltip: 'Vink alleen lagen aan die in Actieve kaarten aan staan (oog + sublagen).',
+      kml_layer_root: 'Niet in een map',
+      inspector_search_placeholder: 'Lijst filteren…',
+      inspector_refresh: 'Vernieuwen',
+      inspector_list_empty: 'Geen objecten in beeld voor de actieve kaarten.',
+      inspector_list_truncated: 'Lijst afgekapt — zoom in voor een kleiner gebied.',
+      inspector_kind_vector: 'vector',
+      inspector_kind_esri: 'esri',
+      inspector_kind_wms: 'wms',
+      inspector_kind_wfs: 'wfs',
+      inspector_kind_query: 'query',
+      inspector_open_table: 'Datatabel',
+      inspector_open_data_table: 'Datatabel openen',
+      inspector_map_row_menu: 'Kaartacties',
+      inspector_table_title: 'Inspectorgegevens',
+      inspector_table_search: 'Rijen filteren…',
+      inspector_table_close: 'Sluiten',
+      inspector_query_ingest: 'Queryresultaten aan inspector toevoegen',
+      inspector_query_ingest_auto: 'Queryresultaten automatisch toevoegen',
+      inspector_auto_wms_gfi: 'Generieke WMS automatisch (midden viewport)',
+      inspector_auto_wms_gfi_tooltip: 'Voert GetFeatureInfo uit op het kaartcentrum bij pannen/zoomen voor WMS-lagen die hier niet via ArcGIS REST of GeoServer WFS lopen.',
+      inspector_list_empty_hint_auto: 'Gebruik de querytool voor een exacte klik, of zoom in.',
+      inspector_list_empty_hint_manual: '(Rasterkaarten: gebruik query “Toevoegen aan inspector” of automatisch toevoegen.)',
+      inspector_scan_progress: 'Scannen… {done}/{total}',
+      inspector_query_add_btn: 'Toevoegen aan inspector',
+      inspector_query_add_btn_tooltip: 'Huidige queryresultaten aan de Map Inspector-lijst toevoegen',
+      inspector_bbox_layer: 'Begrenzing',
+      inspector_clear_query_items: 'Geïmporteerde queryrijen wissen',
+      inspector_not_available: 'Kaartinspector is in deze sessie niet beschikbaar.',
+      inspector_layer_bounds: 'Begrenzing',
       zoom_to_map_area: 'Inzoomen op kaartgebied',
       visibility_locked_tou: 'Accepteer eerst de gebruiksvoorwaarden',
       tou_config_error: 'Configuratiefout',
@@ -460,6 +1071,26 @@ async function onWmeReady() {
       notice_dismiss: 'Sluiten',
       tou_gate_banner: '"{title}" is toegevoegd. Vouw de rij uit en accepteer de gebruiksvoorwaarden voordat je de kaart inschakelt.',
       add_map_pick_hint: 'Open de lijst of typ om te filteren.',
+      user_maps_section_title: 'Jouw kaarten',
+      user_maps_add_placeholder: 'Plak My Maps-link (Bewerken, Voorbeeld of Delen)…',
+      user_maps_add_button: 'Toevoegen',
+      user_maps_default_title: 'Google My Map',
+      user_maps_add_invalid: 'Geen kaart-id gevonden. Plak de volledige adresbalk-URL van Google My Maps tijdens bewerken of bekijken (met mid=…). Je hebt geen aparte “KML-link” nodig.',
+      user_maps_add_duplicate: 'Deze My Map staat al in je lijst.',
+      user_maps_add_error_network: 'Kaartgegevens downloaden mislukt. Controleer de link en probeer opnieuw.',
+      user_maps_add_error_parse: 'KML verwerken mislukt. De kaart gebruikt misschien elementen die deze editor nog niet leest.',
+      user_maps_kml_unsupported: 'Deze WME-build heeft geen KML-parser (OpenLayers.Format.KML).',
+      user_maps_hint: 'Gebruik dezelfde URL als in de adresbalk op google.com/maps/d/… (bijv. …/edit?mid=… of …/viewer?mid=…). OpenMaps haalt de geometrie automatisch bij Google. Accepteer de voorwaarden in de kaartdetails voordat je inschakelt.',
+      user_maps_feature_retired_hint: 'Google My Maps staat uit in deze scriptversie — het brak herhaaldelijk WME-satellietbeelden. Opgeslagen kaarten blijven in opslag maar worden niet getekend of niet teruggezet in de actieve lijst. Alleen gevorderde gebruikers: zet unsafeWindow.__OPEN_MAPS_FORCE_GMM__ = true vóór het script laadt, voer daarna in de console localStorage.setItem("openmaps-enable-google-mymaps","1") uit en herlaad.',
+      user_maps_force_unlock_instructions: 'My Maps staat uit in deze scriptbuild, maar je hebt ontgrendeld met unsafeWindow.__OPEN_MAPS_FORCE_GMM__. Voer op dit tabblad localStorage.setItem("openmaps-enable-google-mymaps","1") uit en herlaad WME. Verwijder openmaps-disable-google-mymaps als je die gezet hebt.',
+      user_maps_drawing_off_instructions: 'Om My Maps op de kaart te tekenen: voer op dit tabblad localStorage.setItem("openmaps-enable-google-mymaps","1") uit en herlaad WME. Als je eerder openmaps-disable-google-mymaps op 1 hebt gezet, verwijder die sleutel eerst.',
+      user_maps_kml_default_title: 'KML-overlay',
+      user_maps_kml_upload_button: 'KML uploaden',
+      user_maps_kml_upload_hint: 'Voeg geometrie toe uit een .kml-bestand op je computer (opgeslagen in OpenMaps-instellingen; zeer grote bestanden kunnen opslaglimieten raken). Stubbestanden die alleen via <NetworkLink> naar online-KML verwijzen, worden automatisch opgehaald als je de laag inschakelt. KMZ-archieven worden niet ondersteund — exporteer of pak uit naar KML.',
+      user_maps_kml_upload_not_kml: 'Kies een .kml-bestand (platte XML). KMZ wordt hier niet ondersteund.',
+      user_maps_kml_upload_too_large: 'Dit bestand is te groot om op te slaan (limiet ongeveer 2 MB tekst). Gebruik een kleinere KML of vereenvoudig de laag.',
+      user_maps_kml_upload_duplicate: 'Een geüploade laag met dezelfde inhoud staat al in je lijst.',
+      user_maps_kml_upload_read_error: 'Het bestand kon niet worden gelezen. Probeer opnieuw of kies een ander bestand.',
       active_maps_filter_placeholder: 'Filter actieve kaarten…',
       active_maps_filter_all: 'Alle',
       active_maps_filter_favorites: 'Favorieten',
@@ -480,10 +1111,17 @@ async function onWmeReady() {
       layer_origin_cloud: 'Van servercatalogus (cloud)',
       layer_origin_unknown: 'Niet in script of servercatalogus',
       layer_origin_default: 'Standaardlaag',
-      copy_layer_definition: 'Laagregel voor script kopiëren (layers: { … })',
-      copy_definition_menu: 'Definitie kopiëren',
-      layer_card_menu: 'Meer acties',
-      copy_layer_definition_done: 'Gekopieerd',
+      layer_tag_curated: 'Catalogus',
+      layer_tag_cloud: 'Cloud',
+      layer_tag_unknown: 'Onbekend',
+      layer_tag_default: 'Standaard',
+      layer_tag_user_upload: 'Upload',
+      layer_tag_google_mymaps: 'My Maps',
+      copy_map_definition_tooltip: 'Kaartdefinitie kopiëren',
+      copy_map_definition_menu_all_keep_defaults: 'Kopiëren (alle lagen, standaarden behouden)',
+      copy_map_definition_menu_all_make_enabled_default: 'Kopiëren (alle lagen, ingeschakelde lagen als standaard)',
+      copy_map_definition_menu_enabled_only_make_default: 'Kopiëren (alleen ingeschakelde lagen, als standaard)',
+      copy_done: 'Gekopieerd',
       tou_link_probe_checking: 'Controleren of de pagina met gebruiksvoorwaarden bereikbaar is…',
       tou_link_probe_ok: 'Pagina met gebruiksvoorwaarden is bereikbaar — gecontroleerd {when}.',
       tou_link_probe_fail: 'Pagina met gebruiksvoorwaarden kon niet worden geladen ({detail}).',
@@ -507,7 +1145,8 @@ async function onWmeReady() {
         HR: 'Kroatië',
         CZ: 'Tsjechië',
         UN: 'Universal',
-        EU: 'European Union'
+        EU: 'European Union',
+        user: 'Jouw kaarten'
       },
       update: {
         message: 'Nieuwe versie van WME Open Maps geïnstalleerd! Veranderingen:',
@@ -620,12 +1259,139 @@ async function onWmeReady() {
         v3_2_36: '- Orthophotos 2024 kaart toegevoegd (BE)\n- Toon standaard alleen verblijfsobjecten in BAG (NL)',
         v3_2_37: '- ČÚZK WMS-kaarten toegevoegd (CZ)',
         v3_2_38: '- ČÚZK WMS gemigreerd naar ags.cuzk.gov.cz (ortofoto, GeoNames, ZABAGED polohopis); overzichtskaart Přehledová mapa toegevoegd (CZ)',
-        v2026_03_29_05: '- Crash opgelost wanneer de serverlagenlijst klaar was terwijl alle WMS-sublagen uit stonden'
+        v2026_03_29_05: '- Crash opgelost wanneer de serverlagenlijst klaar was terwijl alle WMS-sublagen uit stonden',
+        v2026_03_31_01: '- Kaartdetails: rustige zoomregel (bereik, optionele WMS-ondergrens, huidig beeld) met korte helptooltip; geen extra kaartlisteners',
+        v2026_03_31_02: '- Kaartinspector: viewportlijst van vectorobjecten in geheugen (begrensd), details, markering/zoom, datatabel, optioneel queryresultaten importeren',
+        v2026_03_31_03: '- Kaartinspector: ESRI MapServer viewport-query (automatische lijst), laagboom, compacte pictogrammen, markering bij hover',
+        v2026_03_31_04: '- Kaartinspector: minimale randen (native pictogramknoppen), WMS-viewport via ArcGIS REST / GeoServer WFS',
+        v2026_04_01_01: '- Minder tegelbelasting: geen globale OpenLayers-herlaadpogingen voor tegels; overlaylagen buffer 0 en geen resize-transitie (helpt bij net::ERR_INSUFFICIENT_RESOURCES met veel kaarten)',
+        v2026_04_01_02: '- Kaartinspector: automatische WMS GetFeatureInfo op het midden van het zicht voor generieke bevraagbare lagen (optioneel); gedeelde HTML-tabelparser met query-import',
+        v2026_04_01_03: '- Kaartinspector: voortgang bij scannen (spinner, gedaan/totaal) tijdens viewport-verzoeken; vernieuw-pictogram draait tot klaar',
+        v2026_04_01_04: '- Kaartinspector: Details-paneel en overbodige zoom-/markeerknoppen verwijderd (selectie, markering op kaart en callout blijven)',
+        v2026_04_01_05: '- Kaartinspector: compactere objectlijst (kleinere tekst, padding, tussenruimte; hoger scrollgebied) zodat ongeveer twee keer zoveel rijen verticaal passen',
+        v2026_04_01_06: '- Kaartinspector: snellere kaart-markering bij hover tussen rijen (geen dubbele OpenLayers-updates; samenvoegen tot één tekening per animation frame)',
+        v2026_04_01_07: '- Kaartinspector: beperkt gelijktijdige viewport-laagverzoeken (wachtrij) en voortgang op basis van voltooide calls (blijft niet op 0/N hangen); kortere timeout per verzoek',
+        v2026_04_01_08: '- Kaartinspector: ESRI MapServer-, ArcGIS REST WMS- en GeoServer WFS-viewportverzoeken lopen nu allemaal via dezelfde begrensde wachtrij zodat de voortgang betrouwbaar oploopt',
+        v2026_04_01_09: '- Optionele omzeiling als WME de rechterzijbalk onder zoom 12 beperkt: standaard aan (pointer-events + inert); uit via de voettekst van Open Maps als je voorraad-WME wilt',
+        v2026_04_01_10: '- Catalogus: ArcGIS Online World Heritage Sites FeatureServer (punten) met Map Viewer-link (anders dan de laag UNESCO Sites Navigator)',
+        v2026_04_01_11: '- Catalogus: ArcGIS Online World_Heritage_UNESCO FeatureServer (punten) met Map Viewer-link (los van World_Heritage_Sites en UNESCO/ Sites Navigator)',
+        v2026_04_01_13: '- ESRI_FEATURE (ArcGIS FeatureServer-vectoren): geometrieparsing hersteld (gedeelde openMapsEsriGeometryToOpenLayers) en verouderde query-antwoorden bij pannen genegeerd',
+        v2026_04_01_14: '- Kaartinspector: groepsvak schakelt overlay zoals het oog bij Actieve kaarten; aantal per kaart; ⋮-menu (Open datatabel eerst); geen volledige viewport-herscan bijzelfde view-bucket (Vernieuwen dwingt); callout blijft open bij kaart pannen; callout 110% van inspecteurvenster; low-zoom zijbalk-unlock verwijderd',
+        v2026_04_02_01: '- Kaartopties: voeg een Map Inspector-backend tag toe voor WMS-URLs (ArcGIS REST vs GeoServer WFS) zodat editors begrijpen welke viewport-aanvragen zullen worden uitgevoerd.',
+        v2026_04_02_02: '- Kaartopties: maak de WMS inspector-backend indicator compact (extra “ArcGIS REST” / “GeoServer” tag direct na Type; geen extra label).',
+        v2026_04_02_03: '- ESRI_FEATURE (ArcGIS FeatureServer): puntmarkeringen volgen de kleur en schaal van de zijbalk-avatar (130% van 32px), witte rand en zachte schaduw; hover/inspector-markering met grotere halfdoorzichtige witte halo.',
+        v2026_04_02_04: '- ESRI_FEATURE: punten als native OpenLayers-cirkels (WME tekent data-URL externalGraphics vaak niet); FeatureServer-vectorlagen boven WME POI-overlays geplaatst zodat markeringen zichtbaar zijn; Map Inspector-markering blijft bovenop.',
+        v2026_04_02_05: '- ESRI_FEATURE: symboolgrootte 130% van de Map Inspector-avatar (16px); canvas-pictogrammen met schaduw; tweedelige markering (halfdoorzichtige halo onder marker, vaste witte ring erboven); kaart-hover markeert objecten.',
+        v2026_04_02_06: '- ESRI_FEATURE: punten weer altijd als native OpenLayers-cirkels (WME tekent canvas-data-URL externalGraphics vaak niet, waardoor markers onzichtbaar bleven als het pictogram wél werd gegenereerd).',
+        v2026_04_02_07: '- ESRI_FEATURE: dunnere witte rand; sterkere highlight-halo; kaart-hover werkt altijd (ook vóór vernieuwen van de inspectorlijst); gemarkeerd punt op een lift-laag boven andere punten; klik opent Map Inspector indien nodig en selecteert zoals de lijst.',
+        v2026_04_02_08: '- ESRI_FEATURE: lift-laag + verborgen bron verwijderd (markers konden onzichtbaar blijven na un-hover); tekenvolgorde-bump voor het gemarkeerde punt; sterkere witte halo.',
+        v2026_04_02_09: '- ESRI_FEATURE: highlight-halo ~95% dekkend; halo alleen onder actief symbool, actieve FeatureServer-laag boven andere ESRI-lagen tijdens markering; kaart-hover met pixel-radius fallback voor kleine punten.',
+        v2026_04_02_10: '- Kaartinspector: aparte hover- vs selectie-markering op kaart en in de lijst (beide tegelijk; selectie boven hover; elke ESRI-punt krijgt een eigen halo onder dat symbool).',
+        v2026_04_02_11: '- Kaartinspector: ESRI-halo\'s blijven onder symbolen (z-volgorde bij twee FeatureServer-lagen); witte hover-ring (geen blauwe rand); halo\'s alleen bij actieve hover/selectie; kaart-callout sluiten wist selectie.',
+        v2026_04_02_12: '- Kaartinspector: halo-lagen geforceerd onder FeatureServer-bron na herschikken; klik op kaart sluit feature-callout (verkeerde skip op olMap.div verwijderd).',
+        v2026_04_02_13: '- Kaartinspector: in-memory vector-feature refs opnieuw koppelen na pannen / ESRI_FEATURE-refresh zodat selectie-markering op het symbool blijft.',
+        v2026_04_02_14: '- Kaartinspector: kaart-callout alleen sluiten bij klik buiten; pannen/slepen sluit niet meer (drempel op pointer-verplaatsing).',
+        v2026_04_03_01: '- Kaartinspector: feature-callout blijft open tijdens pannen (OpenLayers move annuleert sluiten); inspecteurvenster deels buiten beeld sleepbaar; alleen de objectlijst scrollt (geen verticale balk op het hele venster); geen horizontale scrollbalk op de lijst.',
+        v2026_04_03_02: '- Kaartinspector: objectlijst weer zichtbaar (flex-lijst stort niet meer in op nulhoogte; minimaliseren zet body terug als flex-kolom).',
+        v2026_04_03_03: '- Kaartinspector: geselecteerde ESRI_FEATURE-laag altijd boven andere FeatureServer-overlays (fix vroege return wanneer halo-laag nog niet op de OL-kaartlijst staat).',
+        v2026_04_03_04: '- Kaartinspector: ESRI_FEATURE z-pin werkt ook als handle-laag-ref ≠ feature-ref (match op laagnaam); select/hover-bron voor elke ESRI-avatar-geometrie (niet alleen Point); vectorlaag omhoog ook zonder bbox-handle.',
+        v2026_04_03_05: '- Kaartinspector: geen volledige ESRI_FEATURE-kaartlagen meer herschikken bij hover/select; tijdelijk gekloonde puntsymbolen op lift-lagen boven overlays (ringen/halo\'s ongewijzigd).',
+        v2026_04_03_06: '- Kaartinspector: WMS/WFS/remote-query-geometrieën (alleen geometrie) gebruiken dezelfde avatar-gekleurde lift/halo/ring voor punten en ESRI-achtige lijn/vlak-markering als ESRI_FEATURE.',
+        v2026_04_03_07: '- Kaartinspector: alleen-geometrie-rijen (WMS/WFS/query) tonen altijd avatar-gekleurde symbolen op de kaart zolang de inspector open is, niet alleen bij lijst-hover of selectie.',
+        v2026_04_03_08: '- Kaartinspector: kaart-hover en klik werken op vaste WMS/WFS/query-symbolen (zelfde hit-testpad als ESRI_FEATURE-vectoren).',
+        v2026_04_03_09: '- Kaartinspector: kaartklik in document-capturefase vóór WME Places/POI-overlays, zodat inspector-symbolen en ESRI_FEATURE-punten selecteerbaar blijven als Places aan staat.',
+        v2026_04_03_10: '- Kaartinspector: inspector-markeringen, viewport-geometrieën en ESRI_FEATURE-lagen samen bovenaan de OpenLayers-stack (na Places); re-pin bij addlayer zodat symbolen boven Places blijven.',
+        v2026_04_03_11: '- Kaartinspector: hoge CSS z-index op OpenMaps/inspector/ESRI_FEATURE layer-divs zodat WME Places halfdoorzichtige vectoren niet boven onze symbolen tekenen (alleen OL-index volstaat niet in sommige WME-builds).',
+        v2026_04_03_12: '- Kaartinspector / Places: z-index-basis omhoog (~2^31-bereik) zodat **alle** ESRI_FEATURE-symbolen (niet alleen inspector lift/markering) boven Places blijven; overlay-stack opnieuw vastzetten na laden van FeatureServer-features.',
+        v2026_04_03_13: '- Kaartinspector: tekst in de object-detail-callout is selecteerbaar en kopieerbaar (map user-select overschreven).',
+        v2026_04_03_14: '- Kaartinspector / Places: overlay-laag-`z-index` vanaf **2147483647 naar beneden** (één stap per laag) zodat de **achterste** vastgepinde laag (normale ESRI_FEATURE-symbolen) niet op “basis+1” blijft in een band waar WME Places tussen tekent; zelfde `z-index` op canvas/SVG onder de layer-div met `!important`.',
+        v2026_04_03_15: '- Kaartinspector / Places: OpenLayers-lagen oplossen op **`layer.name`** als `olMap.layers.indexOf(handleLayer)` −1 is (WME wrapt of vervangt soms de instantie). Pinnen en CSS-`z-index` richten zich nu op de **actieve** kaartlaag.',
+        v2026_04_03_16: '- Kaartinspector / Places: ESRI_FEATURE-vectorlagen gebruiken een **unieke** OpenLayers-`layer.name` per kaartregel (`OpenMaps_ESRI_FEATURE_` + map-id) en `openMapsMapId` voor oplossen. Dubbele kaarttitels zorgen er niet meer voor dat `openMapsResolveLayerOnOlMap` de verkeerde laag raakt, zodat normale FeatureServer-symbolen dezelfde hoge `z-index` krijgen als inspector-overlays (boven WME Places).',
+        v2026_04_03_17: '- Kaartinspector / Places: OpenLayers **`layer.setZIndex`** zet `div.style.zIndex` **zonder** `!important` en **wist** daarmee onze vastgepinde overlay-`z-index` na `resetLayersZIndex` / redraw (normale ESRI-symbolen onder Places, inspector leek goed). **`OpenLayers.Layer.prototype.setZIndex`** en **`map.resetLayersZIndex`** zijn nu gehookt om direct daarna de overlay-`!important`-waarden opnieuw te zetten.',
+        v2026_04_03_18: '- Kaartinspector / Places: overlay-`z-index` wordt nu afgedwongen met **`!important`-regels in een geïnjecteerde stylesheet** (`.openmaps-ol-overlay-z[data-openmaps-ol-ztok]`), niet alleen inline. OpenLayers kan gewone inline `z-index` blijven zetten; **auteur-`!important` in een stylesheet wint van niet-important inline**, zodat normale ESRI_FEATURE-symbolen boven WME Places blijven. Ook **`OpenLayers.Map.prototype.resetLayersZIndex`** gehookt (niet alleen de live kaartinstantie) en her-toepassen alleen als de kaart **`W.map.getOLMap()`** is, zodat andere OpenLayers-kaarten op de pagina het regelset niet kunnen verstoren.',
+        v2026_04_03_19: '- Kaartinspector / Places: **pinnen en CSS-`z-index` richten zich nu alleen op lagen die echt op `olMap.layers` staan**, daarna een **sweep** naar elke `OpenMaps_ESRI_FEATURE_*`-vector op de kaart. Eerder zorgde terugvallen op de handle-laag bij `indexOf` −1 ervoor dat **`setLayerIndex` werd overgeslagen** en stylesheet-tokens op een **verouderde losgekoppelde `div`** terechtkwamen terwijl de normale symbolen op WME’s vervangende laag tekenden — vandaar dat markeringen (zelfde live refs) goed leken maar rustige punten onder Places bleven. **Google Places** is een native laag die WME al boven venue-vlakken zet; dat was een nuttige vergelijking, niet de oorzaak.',
+        v2026_04_03_20: '- Kaartinspector / Places: **hover/klik map-id** voor ESRI_FEATURE gebruikt niet langer `h.layer === hit.layer` (faalt als WME de OL-instantie vervangt). Gebruikt `openMapsMapId` / `OpenMaps_ESRI_FEATURE_<id>` / `openMapsResolveLayerOnOlMap` zodat overlappende kaarten de markering niet laten flikkeren. **Gesweep**te overlay-lagen worden gesorteerd op **Actieve kaarten (handles)**-volgorde zodat `setLayerIndex` de FeatureServer-stack niet elke pin herschikt. **Hoist** van OpenMaps-overlay-`div`s naar het einde van `map.viewPortDiv` als direct kind (tie-break bij teken-volgorde). CSS-selectors krijgen voorvoegsel **`#<olMap.div.id>`** indien aanwezig voor hogere specificiteit t.o.v. WME. **`moveend`** debouncet een her-pin na pannen.',
+        v2026_04_03_21: '- Kaartinspector / Places: vastgepinde vector-overlay-`div`s / `canvas` / `svg` krijgen **`pointer-events: none !important`**. Ze tekenden boven WME Places maar waren nog steeds de **DOM-hit target**, dus Places kreeg geen klikken (events **bubbelen niet** tussen sibling-lagen). ESRI-selectie blijft via **document-capture** + pixel-hit-test (`trySelectEsriFeatureFromClick`); OpenLayers `mousemove` op de kaart blijft werken. Lost op dat Places onselecteerbaar bleef tot pannen na verlaten van de kaart / z-order-gevechten.',
+        v2026_04_03_22: '- **WME SDK-first:** `getWmeSdk` (script-id `570591`), begrensde wacht (~90s) op OpenLayers/W.map met eenmalige foutlog, `Sidebar.registerScriptTab` met terugval op `W.userscripts`, kaart-events via SDK `Events` (`wme-map-move-end` / `wme-map-zoom-changed`) met `moveend`-fallback, satellietbeelden via `Map.isLayerVisible` / `setLayerVisibility` + `trackLayerEvents` indien beschikbaar, tooltips via Bootstrap 5 `Tooltip` (geen jQuery). OpenLayers-prototype z-index-hooks en `unsafeWindow`+`GM_xmlhttpRequest` blijven gedocumenteerde polyfills voor CSP/sandbox en OL-stacking.',
+        v2026_04_03_23: '- **Onderhoud:** Regiokaart-commentaar na de scriptheader; `//#region OpenMapsSdkBootstrap` (SDK-hulpfuncties + OpenLayers-wacht + `onWmeReady`-prefix tot SDK-koppeling) en `//#region OpenMapsBoot` (`onWmeInitialized`, `bootstrap`, startaanroep) voor navigatie in de editor—geen gedragswijziging.',
+        v2026_04_03_24: '- **UI:** Verbergt de native Google Maps-knop “Search this area” / “Zoek in dit gebied” op de kaart (WME Places / Google-basiskaart). Komt niet van OpenMaps; CSS plus een kleine DOM-sweep voor gangbare talen.',
+        v2026_04_03_25: '- **UI:** “Search this area” is WME’s React-pil (`container--*`, `.w-icon-search`, `div.text`), niet `.gm-style`. Verbergen met `:has(...)`-CSS en een `div.text`-sweep; oude Google-controlverberging blijft.',
+        v2026_04_03_26: '- **Kaartinspector:** Het selectievakje per kaart in de lijst klapt alleen rijen in of uit; het wijzigt niet meer de zichtbaarheid in Actieve kaarten (oog in de zijbalk blijft de overlay aansturen).',
+        v2026_04_03_27: '- **UI:** “Zoek in dit gebied”-chip: verberg-sweep **direct** bij DOM-mutaties (niet pas na 80 ms), plus samengevoegde `requestAnimationFrame`-rondes en een laatste timeout; ook sweep na **`wme-map-move-end`**, **`wme-map-zoom-changed`** en OpenLayers **`moveend`** zodat de pil niet even flitst bij de eerste verschuiving na herladen.',
+        v2026_04_03_28: '- **WMS (ArcGIS REST):** In kaartopties staat een vakje om REST-viewport-objectquery’s voor Map Inspector los van WMS-tegelzichtbaarheid aan of uit te zetten (tegels volgen Actieve kaarten + laagschakelaars).',
+        v2026_04_03_29: '- **ESRI_FEATURE:** Kaartopties tonen geen WMS-achtige “transparante achtergrond”, CSS-beeldfilters of pixelmanipulaties meer (niet van toepassing op FeatureServer-vectoren en riep `mergeNewParams` op vectorlagen aan). Latere builds schrappen ook de doorzichtigheidsschuif voor vectoren en verbergen het bbox-vak voor Universeel (UN).',
+        v2026_04_03_30: '- **Universeel (regio UN):** Geen optie “begrenzingskader tekenen”; bbox-overlay blijft uit. **ESRI_FEATURE:** Geen doorzichtigheidsschuif; vectorlaag altijd op volle opacity (opgeslagen waarde wordt voor dit type genegeerd).',
+        v2026_04_03_31: '- **Fix:** Universele (UN) kaarten tonen het bbox-vakje niet meer en geen lege “Visuele aanpassingen”; ESRI_FEATURE-kaarten tonen daar geen doorzichtigheidsschuif meer (engine houdt vectoren al op volle opacity).',
+        v2026_04_03_32: '- **Jouw kaarten:** Voeg **Google My Maps** toe met een deel-/embedlink of kaart-id; KML wordt opgehaald (Tampermonkey) en als vector-overlay getekend. Opgeslagen in instellingen; accepteer **Google**-voorwaarden per kaart. Zelfde opslag is bedoeld voor eigen WMS / ArcGIS / XYZ later.',
+        v2026_04_03_33: '- **Jouw kaarten:** Duidelijkere tekst (geen aparte “KML-link” nodig); **bewerken / viewer / delen**-URL’s met `mid=` worden via `URL` + hash-fallback geparsed. Afknippen van aanhalingstekens/rare leestekens aan geplakte links.',
+        v2026_04_03_34: '- **Fix (satelliet / My Maps):** Google My Maps- en ESRI_FEATURE-vectorlagen worden alleen **gestack-pind** (OpenLayers-index + overlay z-index) als de rij actief is en de laag zichtbaar is. Verborgen of buiten-gebied-kaarten komen niet meer via de laag-sweep terug in de stack. **Pan/zoom**-herpin is **gedebounced** (~220 ms) zodat WME-satelliettiles niet worden verstoord door voortdurend herschikken. Overlay z-index-regels worden gewist als er niets te pinnen is. **Aerial-vloer** voor tile-overlays matcht ook de laagnaam `satellite_imagery` als `earthengine-legacy` ontbreekt.',
+        v2026_04_03_35: '- **Fix (satelliet / My Maps):** Google My Maps KML-vectoren zitten **niet meer** in de ESRI-achtige overlay-pin (bovenkant `olMap` + `!important` z-index + viewport-`div`-hoist). Ze worden alleen via **`syncOpenMapsLayerIndices`** boven luchtfoto’s gezet, net als tile-overlays. De agressieve pin-stack verstoorde alsnog het laden van WME-satelliettiles als My Maps de enige actieve laag was.',
+        v2026_04_03_36: '- **Fix (satelliet / My Maps):** **`syncOpenMapsLayerIndices`** roept **`setLayerIndex` niet meer** aan op een My Maps-rij zolang die **verborgen**, **buiten gebied** is of de OL-laag **niet zichtbaar** is (de vector bleef op de kaart en werd alsnog herschikt). **Laag-index-math** gebruikt alleen “deelnemende” handles. Het globale **`setZIndex` / `resetLayersZIndex`**-herpad draait alleen als een **ESRI_FEATURE**-overlay-pin of **Map Inspector**-stack het echt nodig heeft, zodat satelliet en andere WME-lagen niet bij elke pan/zoom door overlay-CSS-work gaan als alleen een (verborgen) My Maps in Actieve kaarten staat.',
+        v2026_04_03_37: '- **Fix (satelliet / My Maps):** **`syncOpenMapsLayerIndices` installeert niet langer** bij elke sync de globale OpenLayers-hooks **`Layer.setZIndex`** / **`Map.resetLayersZIndex`**. Die hooks werden al gezet zodra er **een** OpenMaps-regel bestond (bijv. verborgen My Map), waardoor **elke** WME-laag (inclusief satelliet) door onze wrapper bleef gaan. Hooks en **`moveend`**-herpin worden alleen gezet als **`openMapsOverlayPinStackHasWork()`** (ESRI_FEATURE-pin of Map Inspector-overlays). **`pinOpenMapsOverlayStackTop`** zet dezelfde hooks de eerste keer dat er echt een niet-lege overlay-stack wordt gepind.',
+        v2026_04_03_38: '- **Fix (satelliet / My Maps):** Verborgen/buiten-gebied Google My Maps-lagen worden nu **losgekoppeld van `W.map` / `olMap`** (verwijderd, niet alleen `setVisibility(false)`), zodat alleen al een My Maps-regel in Actieve kaarten OpenLayers-laagvolgorde of satelliet-tegelstroom niet meer kan beïnvloeden. De laag wordt pas opnieuw opgebouwd wanneer de rij weer zichtbaar wordt.',
+        v2026_04_03_39: '- **Hotfix:** Zet het v2026.04.03.38 My Maps-loskoppelpad terug om opstartstabiliteit te herstellen. Gedrag van v2026.04.03.37 blijft: geen globale OL-hook-install vanuit `syncOpenMapsLayerIndices`; geen ESRI-achtige pin voor My Maps.',
+        v2026_04_03_40: '- **Hotfix rollback:** Nog een stap terug naar het **v2026.04.03.36 runtime-pad** (hook-/`moveend`-registratiestroom van voor v37 herstellen) om script-opstart te herstellen terwijl satelliet/My Maps-debugging doorgaat.',
+        v2026_04_03_41: '- **Opstartfix:** Sommige bridge-/Tampermonkey-omgevingen geven wel `wme-initialized`, maar nooit `wme-ready`. OpenMaps houdt nu de normale `wme-ready`-listener **en** start een bewaakte fallback-timer (eenmalige start), zodat opstarten niet kan blijven hangen op “waiting for wme-ready signal…”.',
+        v2026_04_03_42: '- **Fix (satelliet / My Maps):** Google My Maps-vectoren vallen **volledig buiten `setLayerIndex` in `syncOpenMapsLayerIndices`** (niet alleen als verborgen). Zichtbare KML-lagen werden nog steeds bij elke sync/KML-refresh boven luchtfoto herschikt, wat WME-satelliettiles na pan/zoom kon laten stoppen. My Maps blijft op de standaard OL-stackpositie; tegel/WMS/ESRI-overlays synchroniseren nog steeds boven luchtfoto.',
+        v2026_04_04_01: '- **Fix (satelliet / My Maps):** **`syncOpenMapsLayerIndices` installeert niet langer** bij **elke** run de globale OpenLayers-hooks **`Layer.setZIndex`** / **`Map.resetLayersZIndex`** (de v40-rollback had dat teruggebracht). Satelliet en andere WME-lagen gingen dan alsnog door onze wrapper zodra er **een** OpenMaps-regel was. Hooks worden gezet als **`pinOpenMapsOverlayStackTop`** een niet-lege ESRI/inspector-stack pint; **`addlayer` / gedebounced `moveend`** alleen als **`openMapsOverlayPinStackHasWork()`**. **`minForeignAbove`** loopt nu over **`olMap.layers`** met **opgeloste OL-laagrefs**, zodat My Maps-vectoren niet als “vreemde” WME-lagen tellen als `W.map.getLayers()` andere objectidentiteiten geeft dan `handles[].layer`.',
+        v2026_04_04_02: '- **Fix (satelliet / My Maps):** Tegel-stacking gebruikt nu **`olMap.getLayerIndex`** voor zowel de **luchtfoto-vloer** als **`minForeignAbove`** (nooit array-loopindex mengen met `W.map.getLayerIndex`). Als die uit elkaar liepen, konden tegellagen in ongeldige slots terechtkomen en Earth Engine / satelliet verstoren. **Google My Maps**-vectoren worden uit `W.map`/`olMap` gehaald met **`removeLayer`** zodra de rij uit staat (verborgen, geen sublaag, buiten gebied of ToU niet geaccepteerd)—niet alleen `setVisibility(false)`—en weer toegevoegd als de rij aan gaat. **KML-laden** roept **`syncOpenMapsLayerIndices` niet meer** aan na elke fetch.',
+        v2026_04_04_04: '- **Fix (satelliet / My Maps):** WME-wegen en satelliet die leeg worden kort na laden van My Maps, wijst sterk op een **WebGL-context crash** (Waze’s native maprenderer bezwijkt). OpenMaps **passeert WME’s `W.map.addLayer`-wrapper nu volledig** voor zware vectorlagen (My Maps / ESRI_FEATURE) en voegt ze direct toe aan de onderliggende OpenLayers-engine. Dit voorkomt dat WME’s React-state duizenden van onze ruwe vectoren probeert te verwerken. KML vraagt nu om **`Canvas`-rendering** in plaats van direct SVG, en beperkt KML tot **1500** features maximaal om WME’s geheugenlimieten te beschermen.',
+        v2026_04_04_08: '- **Fix (satelliet bug #5):** WME-wegen en satelliet die leeg worden kort na laden van My Maps, wijst sterk op een **WebGL-context crash** (Waze’s native maprenderer bezwijkt). OpenMaps isoleert `GOOGLE_MY_MAPS` `OpenLayers.Layer.Vector` state nu volledig van Waze\'s native map door `W.map.addLayer` te passeren, native event listeners los te koppelen en KML laden asynchroon te maken.',
+        v2026_04_04_14: '- **Fix (satelliet / My Maps):** Een My Map-regel in Actieve kaarten maakt geen OpenLayers-vectorlaag meer totdat de kaart echt getoond kan worden (voorwaarden geaccepteerd, regel zichtbaar, in gebied, minstens één sublaag aan). Eerder bestond die vector ook verborgen of met ToU-slot, wat overeenkwam met satelliettegels die uitvielen terwijl My Maps alleen in de lijst stond. **Verwijderen** gebruikt dezelfde stille `olMap`-detach als verbergen. Console toont scriptversie via `console.info`.',
+        v2026_04_04_15: '- **Fix (satelliet / My Maps):** KML gebruikt **`extractStyles: false`** zodat OpenLayers geen honderden externe **pictogram**-requests uit My Maps-stijlen start (vaak oorzaak van verzadiging van de browserverbindingenpool naast Waze’s Google-satelliettegels). Feature-limiet **600**. My Maps-vectoren koppelen/loskoppelen weer met normale **`olMap.addLayer` / `removeLayer`**. **Noodstop:** `localStorage.setItem(\'openmaps-disable-google-mymaps\',\'1\')` + herlaad schakelt alle My Maps-tekenwerk uit; sleutel wissen om weer aan te zetten. Zijbalk toont rode hint als uit.',
+        v2026_04_04_16: '- **Google My Maps is nu opt-in (standaard uit):** KML op de WME-kaart blijft uit tot `localStorage.setItem(\'openmaps-enable-google-mymaps\',\'1\')` + herlaad, omdat My Maps herhaaldelijk samenhing met **satelliettegels die stopten** en we het niet betrouwbaar konden krijgen. Opgeslagen My Map-regels blijven; plakken/toevoegen is geblokkeerd tot ingeschakeld. **`openmaps-disable-google-mymaps=1`** dwingt tekenwerk uit (wint van enable). Console + zijbalk leggen de sleutels uit; EN+NL `user_maps_drawing_off_instructions`.',
+        v2026_04_04_18: '- **Google My Maps uit in deze build + schone herstel:** `OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS` is **false** — My Maps-KML wordt niet teruggezet in Actieve kaarten zolang integratie uit staat, zodat een oude opgeslagen regel na herlaad geen handles meer maakt en OpenLayers niet raakt (`saveMapState` na opstart schrijft ze uit de actieve staat). Plakken/toevoegen is **uit** bij hard retire; banner en kaarten tonen **`user_maps_feature_retired_hint`** vs. power-user **`user_maps_drawing_off_instructions`**. Alleen gevorderd: `unsafeWindow.__OPEN_MAPS_FORCE_GMM__` vóór scriptload + `openmaps-enable-google-mymaps`.',
+        v2026_04_04_19: '- **My Maps rollout fase 1:** `OPEN_MAPS_GMM_ROLLOUT_STAGE` **1** zet de functie weer aan in de build (niet meer hard uit). KML vereist nog steeds `localStorage.setItem(\'openmaps-enable-google-mymaps\',\'1\')` + herlaad; **`openmaps-disable-google-mymaps=1`** wint nog steeds. Zonder opt-in geen My Maps-handles of tekenwerk — dezelfde veiligheid als eerder. Zet **`OPEN_MAPS_GMM_ROLLOUT_STAGE = 0`** om My Maps weer volledig uit de build te zetten zonder code te verwijderen.',
+        v2026_04_04_20: '- **Fix (My Maps-tekst):** Opt-inbanner, knop Toevoegen en kaarthints gebruiken **`openMapsGoogleMyMapsOptInBlockedMessageKey()`** — fase 1 (feature aan) toont alleen **`user_maps_drawing_off_instructions`** (localStorage aan + herlaad). Verwijzing naar **`unsafeWindow.__OPEN_MAPS_FORCE_GMM__`** hoort bij **`user_maps_force_unlock_instructions`** als de feature uit staat in de build maar geforceerd ontgrendeld is; **`user_maps_feature_retired_hint`** bij volledig uit.',
+        v2026_04_04_21: '- **Foutopsporing:** `OPEN_MAPS_VERSION` weer gelijk aan **`// @version`**. Opt-in **`localStorage.setItem(\'openmaps-troubleshoot\',\'1\')`** + herlaad print een JSON-momentopname (handles per type, per My Map: ToU, `hasOlVector`, sublagen). **`openMapsPrintTroubleshootStatus("label")`** op **`unsafeWindow`** voor momentopname na pan/repro. GMM-rolloutcommentaar vermeldt **`openmaps-gmm-diag`** en enable/disable-sleutels.',
+        v2026_04_04_22: '- **Troubleshoot-payload:** Misleidende **`olTotalVsVisibleMismatch`** verwijderd (WME heeft normaal veel minder zichtbare OL-lagen dan totaal). Per My Map-regel: **`eligibleForOlVector`** (zelfde poort als `updateLayers`). **`handlesWithOpenLayersLayer`**, **`satelliteDebugHint`** en **`noteBridgeVsBody`** (GM_info vs geïnjecteerde body) verduidelijken wanneer satellietstress waarschijnlijk niet door KML komt.',
+        v2026_04_04_23: '- **Troubleshoot:** **`satelliteDebugHint`** maakt nu onderscheid tussen **“My Map in lijst maar niet in aanmerking”** (verborgen / ToU / sublagen / buiten gebied — geen KML verwacht) en **“wel in aanmerking maar nog geen vector”** (mogelijk laden/koppelen bezig).',
+        v2026_04_04_24: '- **Troubleshoot:** Als **`handlesWithOpenLayersLayer` 0 is**, wijst **`satelliteDebugHint`** niet meer op “andere overlays”; er staat dat OpenMaps-tilesync inactief is en **userscript uitzetten** wordt voorgesteld om oorzaken buiten OpenMaps te bevestigen. **`overlayPinStackHasWork`** toont ESRI/inspector-pinstatus.',
+        v2026_04_04_25: '- **Troubleshoot:** **`OpenMapsPrintTroubleshootStatus`** op **`unsafeWindow`** als alias voor **`openMapsPrintTroubleshootStatus`** (hoofdlettergevoelig). Console: functienaam begint met kleine **open**.',
+        v2026_04_04_26: '- **Google My Maps:** Als een rij **niet meer in aanmerking** komt (verborgen, ToU, opt-out, geen sublaag), wordt de KML-**`OpenLayers.Layer.Vector` vernietigd** en **`self.layer` leeggemaakt** — niet alleen van `olMap` gehaald. Voorkomt oude vectoren, `moveTo`-overschrijvingen en listeners die satellietproblemen kunnen correleren terwijl de kaart in Actieve kaarten blijft.',
+        v2026_04_04_27: '- **Diagnostiek (`openmaps-gmm-diag`):** Zware console-tracing (`setLayerIndex` / `removeLayer`-wraps, stack-snapshots) is **begrensd** tot er een OpenLayers-**laag of bbox** is of **overlay-pinwerk** actief is, zodat een inactieve My Map-regel alleen geen spam per sync veroorzaakt. **Niet aangemerkt als oorzaak van satelliettegel-laden** — alleen ontwikkelaarslogging.',
+        v2026_04_04_28: '- **Satellietonderzoek:** Troubleshoot-JSON bevat **`ruledOutNonSuspects`** (o.a. `openmaps-gmm-diag`) en **`satelliteInvestigationHypotheses`** — hypothesen en hoe ze uit te sluiten. **`noteGmmDiagHooks`** vervangen door neutrale **`noteGmmDiag`** (diag uitgesloten als hoofdoorzaak satelliet).',
+        v2026_04_04_29: '- **Google My Maps / satelliet:** Opgeslagen Actieve-kaarten-rijen met **voorwaarden niet geaccepteerd** en **verborgen** worden bij herstel **overgeslagen** (definitie blijft onder Jouw kaarten; voeg opnieuw toe na accepteren). **`syncOpenMapsLayerIndices`** stopt vroeg als geen handle een OL-laag heeft en er geen overlay-pinwerk is. Richt op “spook”-GMM-handles zonder vector die alsnog samenhingen met kapotte satelliet.',
+        v2026_04_05_01: '- **Jouw kaarten:** **KML uploaden** — kies een `.kml`-bestand (platte XML); geometrie wordt met hetzelfde OpenLayers-pad als My Maps verwerkt, in instellingen opgeslagen en onder Jouw kaarten getoond. **Geen** Google My Maps-opt-in nodig. **KMZ** niet ondersteund. Limiet ~2 MB tekst.',
+        v2026_04_05_02: '- **Google My Maps:** KML-export-URL bevat nu **`forcekml=1`** (zelfde als klassiek [WME Open Other Maps](https://greasyfork.org/en/scripts/32758-wme-open-other-maps)), wat het ophalen van KML bij Google betrouwbaarder kan maken.',
+        v2026_04_05_03: '- **KML uploaden:** Bestanden met alleen een **`<NetworkLink>`** (typische Google My Maps-exportstub) halen nu de **gekoppelde KML** op via Tampermonkey en tekenen die; OpenLayers lost network links niet zelf op. **`@connect www.google.com`** toegevoegd voor die fetch.',
+        v2026_04_05_04: '- **Google My Maps / KML-punten:** Placemarks (vooral **punten** in **`<Folder>`**s) worden geparsed met een **namespace-agnostische DOM-walk** (zelfde idee als klassiek [WME Open Other Maps](https://greasyfork.org/en/scripts/32758-wme-open-other-maps) `MyMapKML`); **`OpenLayers.Format.KML`** alleen als fallback. Antwoorden van **Google My Maps** die alleen een **`<NetworkLink>`**-stub zijn volgen nu de link zoals **geüploade KML**.',
+        v2026_04_05_05: '- **KML-mappen:** Elke **`<Folder>`** wordt een **sub-laag** in Actieve kaarten (oog) en in **Map Inspector → Lagen om te inspecteren** (eigen vinkjes). Placemarks **zonder map** krijgen een regel **Niet in een map**. **Map Inspector** toont ook **WMS / ArcGIS / FeatureServer / KML**-sublagen (en grenzen) zodat je bronnen voor de viewport-scan aan- of uit kunt zetten.',
+        v2026_04_05_06: '- **Map Inspector:** Per-kaart **laag/bron**-vinkjes staan **onder elke kaart** bij **Objecten per kaart** (geen apart filterblok bovenaan). **KML / My Maps:** Herstel van Actieve kaarten met **map-sublagen** terwijl de opgeslagen definitie nog alleen **`main`** heeft toont niet langer de waarschuwing over **verwijderde** laagnamen — map-ids worden in de kaartdefinitie **samengevoegd**.',
+        v2026_04_05_07: '- **Map Inspector:** Onder elke kaart staan objecten gegroepeerd in **mappen** (KML-mappen, WMS/ArcGIS-sublagen, grenzen, enz.) met **geneste objectregels** — geen aparte platte checklist “lagen om te inspecteren”. **Alles / Geen / Zoals Actieve kaarten** voor viewport-scan staat nu in het **⋮**-menu van de kaartregel. Elke map heeft nog een **vinkje** om die bron wel of niet mee te nemen in scans.',
+        v2026_04_06_01: '- **Laagregels:** Herkomst als **neutrale teksttags** (catalogus / cloud / onbekend, standaard, **Upload** voor lokale bestanden, **My Maps** voor Google) i.p.v. hoekpictogrammen; **KML-mapkleuren** op de kaart en in de **Map Inspector**-lijst per **sublaag**; optioneel **KML-placemarkpictogram** in het laagvak als het bestand een `Icon`-URL heeft.',
+        v2026_04_06_02: '- **Map Inspector:** Map-checkboxes bij mappen **tonen of verbergen** alleen de geneste objectrijen; **viewport-scan** per laag blijft via het **⋮**-menu van de kaart (Alles / Geen / Zoals Actieve kaarten). **Actieve kaarten**-sublagen die in de zijbalk **aan** staan, verschijnen altijd als mapkop **(0)** als er niets in beeld is. Wijzigingen aan sublagen in de zijbalk **verversen** de inspector-viewportlijst.',
+        v2026_04_06_03: '- **Map Inspector:** Schakelen van **sublagen** in de zijbalk **start nu betrouwbaar een nieuwe viewport-scan** en vernieuwt de lijst. **KML-mapwijzigingen** na herladen of parsen **wissen ook de viewport-cache** en scannen opnieuw i.p.v. verouderde treffers te tonen.',
+        v2026_04_06_04: '- **Kaartlagenlijst:** Herkomsttags (**Catalogus** / **Cloud** / **Upload** / **Standaard**, enz.) staan op een **tweede regel onder de laagnaam**, zodat de titel de **volle breedte** heeft en de tags **leesbaar** blijven (geen afgeknipte ellips).',
+        v2026_04_06_05: '- **Geüploade KML:** Na **verbergen** met het oog en weer **tonen** werken geometrie en **Map Inspector** zonder **herladen** — de KML-laadbeveiliging blijft niet hangen als de eerste attach-tick het laden oversloeg.',
+        v2026_04_06_06: '- **Map Inspector:** Kaart **aan/uit** met het **oog** in de zijbalk triggert nu de volledige laagmotor (`updateLayers`), zodat de inspector **lijst en viewport-scan** die kaart (en sublagen) meteen toevoegen of weglaten.',
+        v2026_04_06_07: '- **KML / My Maps:** Verbergen van de vector (oog, laatste sublaag uit, of stack) wiste objecten en verhoogde de laadgeneratie maar liet de **“fetch klaar”**-vergrendeling staan, waardoor **opnieuw tonen** KML niet opnieuw parseerde — kaart en Map Inspector bleven leeg tot herladen. De vergrendeling wordt nu **gewist bij verbergen** en bij **mislukte netwerk**-KML-requests.',
+        v2026_04_06_08: '- **Map Inspector:** **`notifyHandlesChanged`** voert nu meteen **`runViewportIndex(true)`** uit (en wist de move-debounce), zodat **Map layers**-sublagen de inspector-**lijst en viewport-vectorhits** in één keer verversen — niet pas na een gedebounced pan/zoom.',
+        v2026_04_06_09: '- **KML / My Maps:** Ogen bij **Map layers**-mappen **verbergen** nu echt de geometrie (OL2 voegde `display:none` samen met defaults zodat punten/lijnen bleven). **Map Inspector:** mapblokken zijn **gewone rijen** (geen `<details>`): klikken op de **kop** **klapt niet**; alleen het **vakje** toont of verbergt geneste objectrijen.',
+        v2026_04_06_10: '- **KML / My Maps + Map Inspector:** **Verborgen** mappen in **Map layers** worden nu ook gebruikt bij de inspector-**viewportlijst** (KML nam eerder elke placemark mee). Verborgen mappen laten geen **verouderde** rijen of **idle** kaartsymbolen meer achter.',
+        v2026_04_06_11: '- **Map layers ↔ Map Inspector:** Het **oog** bij een sublaag werkt nu de inspector-**viewport-scan** voor die bron bij (zoals **⋮ Zoals Actieve kaarten** per rij), wist **selectie/hover** voor objecten in die laag zodat highlight-symbolen verdwijnen, en **ArcGIS FeatureServer**-vectoren plannen een **nieuwe bbox-query** als sublagen wisselen zodat **aan** weer objecten laadt.',
+        v2026_04_06_12: '- **KML / My Maps-symbolen:** Verbergen van een **Map layers**-map liet punten/lijnen zichtbaar omdat OpenLayers 2 van de laag-**StyleMap** tekent — per-object `style` won niet. KML-vectoren gebruiken nu een **StyleMap met context** die bij elke hertekening de zijbalk-zichtbaarheid leest, plus gewiste `feature.style` na laden/schakelen.',
+        v2026_04_06_13: '- **KML / My Maps-symbolen (fix):** WME OL **Canvas** paste de context-**StyleMap** niet betrouwbaar toe (symbolen bleven, hits niet). Placemarks staan in **`__openmapsKmlMasterFeatures`**; **verborgen mappen: `removeFeatures`**, **zichtbaar: opnieuw `addFeatures`**, daarna `style` per object + minimale standaard-**StyleMap**.',
+        v2026_04_07_01: '- **Kaartlagen:** Sublagenlijst toont samenvattende tellingen `(zichtbaar/totaal)` in de koptekst. Een actiemenu (`⋮`) is toegevoegd naast de koptekst van Kaartlagen met de opties **Toon alle lagen** en **Verberg alle lagen**.',
+        v2026_04_07_02: '- **KML parser fix:** Coördinaten worden nu correct getransformeerd van EPSG:4326 naar Waze\'s EPSG:900913 projectie, in plaats van te vertrouwen op een ontbrekende EPSG:3857 transformatie.',
+        v2026_04_07_03: '- **KML / My Maps:** `LOCAL_KML`- en `GOOGLE_MY_MAPS`-rijen worden niet meer als “buiten viewport” behandeld (dat blokkeerde ophalen/tekenen en liet alleen de standaard **KML**-sublaag zien). Sublagen worden uit de KML-boom samengevoegd als de eerste parse geen ids geeft; na laden wordt **BBox** uit geometrie bijgewerkt en opgeslagen voor geüploade KML.',
+        v2026_04_07_04: '- **KML-zichtbaarheid (OL2):** De onzichtbare **StyleMap** van de vectorlaag werd nog steeds gebruikt bij tekenen omdat OpenLayers per-object `style` alleen toepast als die aan `drawFeature` wordt doorgegeven. KML/My Maps-lagen geven nu **`feature.style`** door zodat cirkels/lijnen/vlakken op Canvas/SVG echt worden getekend.',
+        v2026_04_07_05: '- **KML / My Maps-lagen + symbolen:** Geparste **mapsub-lagen (mappen)** worden opgeslagen bij **Jouw kaarten** (met bbox) zodat de zijbalk na herladen klopt; **`updateLayers`** draait na elke KML-toepassing zodat kaart en inspector direct mee-actualiseren. **Kaartlagen**-UI probeert opnieuw als de sublaag-container nog niet klaar is; **Canvas/SVG**-renderers geven ook **`feature.style`** door voor OpenMaps-KML wanneer de renderer `Layer.drawFeature` omzeilt.',
+        v2026_04_07_06: '- **KML-tekenen (OL2 Canvas):** Stijlen per object worden **vóór** `addFeatures` gezet zodat de eerste tekenpass niet alleen de onzichtbare laag-StyleMap gebruikt (lege kaart + lege Map Inspector-viewport). Renderer-hooks lezen ook **`this.layer`** als `feature.layer` nog ontbreekt.',
+        v2026_04_07_07: '- **KML + Kaartinspector:** GMM-diag logt **telling op de OL-laag** (niet alleen geparst). **Mapkoppen** tonen **in beeld / geladen** uit de KML-masterlijst; viewport-index gebruikt een **fallback-extent** als `getMapExtent()` null is; **`openmaps-kml-diag`** kan loggen als er **geen viewport-kruising** is (met bounds-voorbeeld); **`updateLayers`** past mapstijlen opnieuw toe als de OL-laag leeg is terwijl de master nog placemarks heeft.',
+        v2026_04_07_08: '- **I18n:** Franse en Portugese teksten voor **Kaartinspector** KML-map tellingen (**in beeld / geladen**).',
+        v2026_04_07_09: '- **KML / Kaartinspector:** OpenLayers krijgt **geklonde** placemarks uit **`__openmapsKmlMasterFeatures`**, zodat WME/OL-afbraak van de vectorlaag de masterlijst niet onbruikbaar maakt voor opnieuw **`addFeatures`**. **Legacy `main`:** bij echte maprijen in plaats van één **main**-rij krijgen nieuwe mappen standaard **zichtbaar** (een verborgen legacy-`main`-vlag leegt niet meer alle mappen). **Inspector** gebruikt **master**-geometrie voor viewport-treffers als de OL-laag leeg blijft terwijl de rij wel moet tekenen.',
+        v2026_04_07_10: '- **KML-fix:** `MapHandle` exposeert nu **`this.map`** (de mapdefinitie). Mapstijlen/sync waren no-ops omdat helpers **`mapHandle.map`** lazen, wat nooit gezet was.',
+        v2026_04_08_01: '- **Kaartstijlen:** "Laagspecifieke stijlen gebruiken" vinkje toegevoegd (visuele aanpassingen) voor ESRI_FEATURE. Klikbaarheid opgelost.'
       }
     },
     fr: {
       tab_title: 'Open Maps',
       maps_title: 'Cartes Actives',
+      sidebar_unlock_low_zoom: 'Déverrouiller la barre latérale (z<12)',
+      sidebar_wme_lock_respect: 'Verrouillage WME sous zoom 12',
+      sidebar_unlock_low_zoom_tooltip: 'Permet d’utiliser la barre latérale droite (couches, scripts, etc.) en dessous du niveau de zoom 12. WME limite cela par défaut. Désactivez si le comportement devient étrange après une mise à jour.',
+      sidebar_wme_lock_respect_tooltip: 'Rétablit le comportement WME par défaut pour la barre latérale droite sous le zoom 12.',
       terms_section_title: 'Conditions d’utilisation',
       tou_section_status_accepted: 'Accepté',
       tou_section_status_required: 'Action requise',
@@ -641,13 +1407,33 @@ async function onWmeReady() {
       layer_origin_cloud: 'Catalogue serveur (cloud)',
       layer_origin_unknown: 'Absent du script et du catalogue',
       layer_origin_default: 'Couche par défaut',
-      copy_layer_definition: 'Copier l’entrée de couche pour le script (layers: { … })',
-      copy_definition_menu: 'Copier la définition',
-      layer_card_menu: 'Plus d’actions',
-      copy_layer_definition_done: 'Copié',
+      layer_tag_curated: 'Catalogue',
+      layer_tag_cloud: 'Cloud',
+      layer_tag_unknown: 'Inconnu',
+      layer_tag_default: 'Défaut',
+      layer_tag_user_upload: 'Import',
+      layer_tag_google_mymaps: 'My Maps',
+      inspector_kml_folder_feature_counts: '{inView} / {total} · dans la vue / chargées',
+      copy_map_definition_tooltip: 'Copier la définition de la carte',
+      copy_map_definition_menu_all_keep_defaults: 'Copier (toutes les couches, conserver les valeurs par défaut)',
+      copy_map_definition_menu_all_make_enabled_default: 'Copier (toutes les couches, définir les couches activées par défaut)',
+      copy_map_definition_menu_enabled_only_make_default: 'Copier (couches activées uniquement, les définir par défaut)',
+      copy_done: 'Copié',
+      map_layers_show_all: 'Afficher toutes les couches',
+      map_layers_hide_all: 'Masquer toutes les couches',
       tou_accept_disabled_tooltip: 'Ouvrez d’abord chaque lien de langue ci-dessus.',
       no_local_maps: 'Aucune carte disponible ici',
       opacity_label: 'Opacité',
+      map_improvement_label: 'Appliquer des manipulations de pixels',
+      map_improvement_label_tooltip: 'Applique un traitement au niveau des pixels (nécessite un redessin; peut impacter les performances).',
+      pixel_manipulations_title: 'Manipulations de pixels',
+      pixel_manipulations_default: 'Par défaut',
+      pixel_manipulations_override: 'Remplacer',
+      pixel_manipulations_use_default: 'Utiliser la valeur du catalogue',
+      pixel_manipulations_select_none: 'Ne rien sélectionner',
+      pixel_manipulations_use_default_tooltip: 'Utiliser la valeur du catalogue (effacer le remplacement)',
+      pixel_manipulations_select_none_tooltip: 'Ne rien sélectionner (remplacer par une liste vide)',
+      pixel_manipulations_tooltip: 'Avancé : remplacements par carte pour le traitement des pixels des tuiles. Indépendant des filtres CSS et de la transparence. S’applique après redessin et peut coûter en performances.',
       areas: {
         BE: 'Belgique',
         BR: 'Brésil',
@@ -660,10 +1446,26 @@ async function onWmeReady() {
         UN: 'Universal',
         EU: 'European Union'
       },
+      update: {
+        v2026_04_07_01: '- **Couches de carte :** La liste des sous-couches affiche les comptes de résumé `(visibles/total)` dans l’en-tête. Ajout d’un menu d’actions (`⋮`) à côté de l’en-tête des couches de carte avec les raccourcis **Afficher toutes les couches** et **Masquer toutes les couches**.',
+        v2026_04_07_02: '- **Correction du parseur KML :** Les coordonnées sont maintenant correctement transformées de EPSG:4326 vers la projection EPSG:900913 de Waze au lieu de s\'appuyer sur une transformation EPSG:3857 manquante.',
+        v2026_04_07_03: '- **KML / My Maps :** les entrées `LOCAL_KML` et `GOOGLE_MY_MAPS` ne sont plus traitées comme « hors viewport » (ce qui bloquait le chargement/le rendu et ne laissait que la sous-couche **KML** par défaut). Les sous-couches de dossiers sont fusionnées depuis l’arborescence KML si la première analyse omet les identifiants ; après chargement, la **BBox** est mise à jour à partir de la géométrie et enregistrée pour le KML téléversé.',
+        v2026_04_07_04: '- **Visibilité KML (OL2) :** le **StyleMap** invisible de la couche vecteur était encore utilisé au rendu car OpenLayers n’applique le `style` par entité que s’il est passé à `drawFeature`. Les couches KML / My Maps transmettent désormais **`feature.style`** pour que marqueurs/lignes/polygones s’affichent sur Canvas/SVG.',
+        v2026_04_07_05: '- **KML / My Maps — couches et symboles :** les **dossiers** sous-couches issus de l’analyse sont enregistrés dans **Vos cartes** (avec la bbox) pour que la barre latérale reste cohérente après rechargement ; **`updateLayers`** s’exécute après chaque application KML pour resynchroniser carte et inspecteur. L’UI **Couches de carte** réessaie si le conteneur n’est pas prêt ; les moteurs **Canvas/SVG** transmettent aussi **`feature.style`** pour les vecteurs KML OpenMaps lorsque le rendu contourne `Layer.drawFeature`.',
+        v2026_04_07_06: '- **Rendu KML (OL2 Canvas) :** les styles par entité sont appliqués **avant** `addFeatures` pour que le premier rendu n’utilise pas seulement le **StyleMap** invisible de la couche (carte vide + liste d’inspecteur vide). Les hooks utilisent aussi **`this.layer`** lorsque `feature.layer` n’est pas encore défini.',
+        v2026_04_07_07: '- **KML + inspecteur de carte :** le diag GMM journalise le **nombre de features sur la couche OL** (pas seulement le parse). Les **en-têtes de dossier** affichent **dans la vue / chargé** depuis la liste maître KML ; l’index viewport utilise une **emprise de repli** si `getMapExtent()` est nul ; **`openmaps-kml-diag`** peut journaliser **aucune intersection** avec un exemple de bornes ; **`updateLayers`** réapplique les styles dossier si la couche OL est vide alors que la liste maître contient encore des placemarks.',
+        v2026_04_07_08: '- **I18n :** libellés FR et PT-BR pour les totaux KML **dans la vue / chargées** dans l’inspecteur de carte.',
+        v2026_04_07_09: '- **KML / inspecteur :** OpenLayers reçoit des placemarks **clonés** depuis **`__openmapsKmlMasterFeatures`** pour éviter qu’une destruction OL/WME rende la liste maître inutilisable pour un nouvel **`addFeatures`**. **Ancienne sous-couche `main` :** quand des dossiers remplacent l’unique ligne **main**, les nouveaux dossiers sont **visibles** par défaut (un ancien `main` masqué ne vide plus tous les dossiers). **Inspecteur :** repli sur la géométrie **maître** pour le viewport si la couche OL est vide alors que la ligne doit s’afficher.',
+        v2026_04_07_10: '- **Correctif KML :** `MapHandle` expose désormais **`this.map`** (définition de carte). Les styles/sync KML ne faisaient rien car les helpers lisaient **`mapHandle.map`**, jamais défini.'
+      }
     },
     'pt-BR': {
       tab_title: 'Open Maps',
       maps_title: 'Ativar Mapas',
+      sidebar_unlock_low_zoom: 'Liberar barra lateral abaixo do zoom 12',
+      sidebar_wme_lock_respect: 'Usar bloqueio WME em zoom baixo',
+      sidebar_unlock_low_zoom_tooltip: 'Permite usar a barra lateral direita (camadas, scripts etc.) com zoom abaixo do nível 12. O WME costuma limitar isso. Desative se algo falhar após uma atualização.',
+      sidebar_wme_lock_respect_tooltip: 'Restaura o comportamento padrão do WME para a barra lateral direita com zoom abaixo do 12.',
       no_local_maps: 'Não foram encontrados mapas para esta área',
       expand: 'Clique para expandir',
       collapse: 'Clique para colapsar',
@@ -689,9 +1491,19 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Ajustar a transparência da camada',
       transparent_label: 'Transparência',
       transparent_label_tooltip: 'Fazer o mapa de plano de fundo transparente',
-      map_improvement_label: 'Melhorar a exibição do mapa',
-      map_improvement_label_tooltip: 'Aplique várias melhorias nos blocos de mapa',
+      map_improvement_label: 'Aplicar manipulações de pixels',
+      map_improvement_label_tooltip: 'Aplicar processamento de pixels nos tiles (requer redesenho; pode afetar o desempenho).',
+      pixel_manipulations_title: 'Manipulações de pixels',
+      pixel_manipulations_default: 'Padrão',
+      pixel_manipulations_override: 'Substituir',
+      pixel_manipulations_use_default: 'Usar padrão do catálogo',
+      pixel_manipulations_select_none: 'Selecionar nenhum',
+      pixel_manipulations_use_default_tooltip: 'Usar padrão do catálogo (limpar substituição)',
+      pixel_manipulations_select_none_tooltip: 'Selecionar nenhum (substituir por lista vazia)',
+      pixel_manipulations_tooltip: 'Avançado: substituições por mapa para processamento de pixels dos tiles. Funciona de forma independente de filtros CSS e transparência. Aplica após redesenho e pode custar desempenho.',
       map_layers_title: 'Camadas do mapa',
+      map_layers_show_all: 'Mostrar todas as camadas',
+      map_layers_hide_all: 'Ocultar todas as camadas',
       find_available_layers: 'Encontrar camadas disponíveis',
       find_available_layers_loading: 'Consultando o servidor…',
       layer_catalog_loading: 'A carregar lista de camadas do servidor…',
@@ -763,10 +1575,20 @@ async function onWmeReady() {
       layer_origin_cloud: 'Do catálogo do servidor (nuvem)',
       layer_origin_unknown: 'Fora do script ou do catálogo do servidor',
       layer_origin_default: 'Camada padrão',
-      copy_layer_definition: 'Copiar entrada da camada para o script (layers: { … })',
-      copy_definition_menu: 'Copiar definição',
-      layer_card_menu: 'Mais ações',
-      copy_layer_definition_done: 'Copiado',
+      layer_tag_curated: 'Catálogo',
+      layer_tag_cloud: 'Nuvem',
+      layer_tag_unknown: 'Desconhecido',
+      layer_tag_default: 'Padrão',
+      layer_tag_user_upload: 'Envio',
+      layer_tag_google_mymaps: 'My Maps',
+      inspector_kml_folder_feature_counts: '{inView} / {total} · na vista / carregadas',
+      copy_map_definition_tooltip: 'Copiar definição do mapa',
+      copy_map_definition_menu_all_keep_defaults: 'Copiar (todas as camadas, manter padrões)',
+      copy_map_definition_menu_all_make_enabled_default: 'Copiar (todas as camadas, tornar padrão as ativadas)',
+      copy_map_definition_menu_enabled_only_make_default: 'Copiar (somente camadas ativadas, torná-las padrão)',
+      copy_done: 'Copiado',
+      map_layers_show_all: 'Mostrar todas as camadas',
+      map_layers_hide_all: 'Ocultar todas as camadas',
       tou_link_probe_checking: 'A verificar se a página dos termos de uso está acessível…',
       tou_link_probe_ok: 'Página dos termos de uso acessível — verificada em {when}.',
       tou_link_probe_fail: 'A página dos termos de uso não pôde ser carregada ({detail}).',
@@ -791,6 +1613,18 @@ async function onWmeReady() {
         CZ: 'Tchéquia',
         UN: 'Universal',
         EU: 'European Union'
+      },
+      update: {
+        v2026_04_07_01: '- **Camadas do mapa:** A lista de subcamadas mostra as contagens de resumo `(visíveis/total)` no cabeçalho. Um menu de ações (`⋮`) foi adicionado ao lado do cabeçalho Camadas do mapa com os atalhos **Mostrar todas as camadas** e **Ocultar todas as camadas**.',
+        v2026_04_07_02: '- **Correção do analisador KML:** As coordenadas agora são transformadas corretamente de EPSG:4326 para a projeção EPSG:900913 do Waze, em vez de depender de uma transformação EPSG:3857 ausente.',
+        v2026_04_07_03: '- **KML / My Maps:** linhas `LOCAL_KML` e `GOOGLE_MY_MAPS` deixam de ser tratadas como “fora da viewport” (o que bloqueava busca/desenho e deixava só a subcamada padrão **KML**). Subcamadas de pastas são mescladas a partir da árvore KML quando a primeira análise omite ids; após o carregamento, a **BBox** é atualizada a partir da geometria e guardada para KML enviado.',
+        v2026_04_07_04: '- **Visibilidade KML (OL2):** o **StyleMap** invisível da camada vetorial ainda era usado no desenho porque o OpenLayers só aplica `style` por feição quando passado a `drawFeature`. Camadas KML / My Maps agora encaminham **`feature.style`** para círculos/linhas/polígonos renderizarem em Canvas/SVG.',
+        v2026_04_07_05: '- **KML / My Maps — camadas e símbolos:** as **pastas** analisadas são guardadas em **Os seus mapas** (com bbox) para a barra lateral coincidir após recarregar; **`updateLayers`** corre após cada aplicação KML para o mapa e o inspector sincronizarem. A UI **Camadas do mapa** volta a tentar se o contentor ainda não existir; **Canvas/SVG** também encaminham **`feature.style`** para vetores KML OpenMaps quando o renderer ignora `Layer.drawFeature`.',
+        v2026_04_07_06: '- **Desenho KML (OL2 Canvas):** estilos por feição são aplicados **antes** de `addFeatures` para a primeira pintura não usar só o **StyleMap** invisível da camada (mapa vazio + lista vazia no inspector). Os hooks do renderer também usam **`this.layer`** quando `feature.layer` ainda não está definido.',
+        v2026_04_07_07: '- **KML + Map Inspector:** o diag GMM regista contagens **na camada OL** (não só as parseadas). **Cabeçalhos de pasta** mostram **na vista / carregadas** a partir da lista mestra KML; a indexação da viewport usa uma **extensão de recurso** quando `getMapExtent()` é null; **`openmaps-kml-diag`** pode registar **sem interseção na viewport** com exemplo de bounds; **`updateLayers`** volta a aplicar estilos de pasta se a camada OL estiver vazia mas a lista mestra ainda tiver placemarks.',
+        v2026_04_07_08: '- **I18n:** textos em francês e português para as contagens KML **na vista / carregadas** no Map Inspector.',
+        v2026_04_07_09: '- **KML / Map Inspector:** o OpenLayers passa a receber placemarks **clonados** de **`__openmapsKmlMasterFeatures`**, para que o desmonte OL/WME da camada vetorial não deixe a lista mestra inutilizável para novo **`addFeatures`**. **Subcamada legada `main`:** quando pastas substituem a única linha **main**, as novas pastas ficam **visíveis** por omissão (um `main` antigo oculto já não esvazia todas as pastas). **Inspector:** recurso à geometria **mestra** para o viewport se a camada OL estiver vazia mas a linha deva desenhar.',
+        v2026_04_07_10: '- **Correção KML:** `MapHandle` expõe agora **`this.map`** (definição do mapa). Estilos/sync KML não corriam porque os helpers liam **`mapHandle.map`**, que nunca era definido.'
       }
     }
   };
@@ -869,6 +1703,150 @@ async function onWmeReady() {
           '26': { queryable: true, title: 'Core Network' },
           '28': { queryable: true, title: 'Airports' },
           '32': { queryable: true, title: 'EFTA Core Roads' }
+      }
+    },
+    // WWF SIGHT MapServer: .../WMSServer returns HTTP 400 for WMS GetCapabilities/GetMap (WMS not usable here); use ESRI below.
+    {
+      id: 9920,
+      title: 'UNESCO Natural & Mixed World Heritage (WWF SIGHT)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI',
+      url: 'https://wwf-sight-maps.org/arcgis/rest/services/Global/World_Heritage_Sites/MapServer',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [1, 22],
+      format: 'png32',
+      transparent: true,
+      area: 'UN',
+      tile_size: 256,
+      abstract: 'WWF SIGHT service scope is natural and mixed World Heritage (polygons), not the full cultural-property inventory. For broader WH symbology use EEA Maratlas or UNESCO Sites Navigator points.',
+      attribution: 'UNESCO World Heritage Centre / WWF SIGHT',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage Sites' }
+      }
+    },
+
+    
+    {
+      id: 9921,
+      title: 'UNESCO World Heritage (EEA Maratlas) — ArcGIS REST',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI',
+      url: 'https://maratlas.discomap.eea.europa.eu/arcgis/rest/services/Maratlas/world_heritage/MapServer',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.715278, -54.594722, 178.834533, 71.188889],
+      zoomRange: [1, 22],
+      format: 'png32',
+      transparent: true,
+      area: 'UN',
+      tile_size: 256,
+      abstract: 'EEA Maratlas WH map: labels plus point layers split across scale ranges (many sublayers). Defaults enable label + all site point leaves so coverage matches the service at each zoom; hide groups you do not need in the layer list.',
+      attribution: 'UNESCO World Heritage Centre / EEA',
+      queryable: true,
+      // Leaf MapServer ids only (omit group ids 1,4,7,…) so symbols are not drawn twice; include 0 for labels.
+      default_layers: ['0', '2', '3', '5', '6', '8', '9', '11', '12', '14', '15', '17', '18', '20', '21', '23', '24', '26', '27'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage (labels)' }
+      }
+    },
+    {
+      id: 9922,
+      title: 'UNESCO World Heritage (EEA Maratlas) — WMS',
+      touId: 'unesco',
+      favicon: false,
+      type: 'WMS',
+      url: 'https://maratlas.discomap.eea.europa.eu/arcgis/services/Maratlas/world_heritage/MapServer/WMSServer',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.715278, -54.594722, 178.834533, 71.188889],
+      zoomRange: [1, 22],
+      format: 'image/png',
+      transparent: true,
+      area: 'UN',
+      tile_size: 256,
+      abstract: 'Same Maratlas content as ArcGIS REST: WMS exposes one layer id per scale band. All are enabled by default so sites appear at any zoom (server still applies scale rules per layer).',
+      attribution: 'UNESCO World Heritage Centre / EEA',
+      queryable: true,
+      default_layers: ['1', '2', '4', '5', '7', '8', '10', '11', '13', '14', '16', '17', '19', '20', '22', '23', '25', '26', '27'],
+      layers: {
+          '2': { queryable: true, title: 'World Heritage Sites' }
+      }
+    },
+    {
+      id: 9923,
+      title: 'UNESCO Sites Navigator — Sites (FeatureServer points)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI_FEATURE',
+      // ArcGIS Online hosted FeatureServer (public query). Layer 0 only.
+      url: 'https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/UNESCO/FeatureServer/0',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [3, 22],
+      // Was 10: WME is often used around z6–9; no features rendered below minVectorZoom.
+      minVectorZoom: 3,
+      maxFeatures: 750,
+      transparent: true,
+      area: 'UN',
+      abstract: 'Point per listed property (ArcGIS hosted layer). Paste URL must end with …/FeatureServer/0 (no trailing quote). Loads from zoom 3 up; viewport query returns at most maxFeatures points—zoom in for full local coverage.',
+      attribution: 'UNESCO World Heritage Centre / ArcGIS (Sites Navigator)',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'UNESCO Sites (points)' }
+      }
+    },
+    {
+      id: 9924,
+      title: 'World Heritage Sites — ArcGIS Online (FeatureServer points)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI_FEATURE',
+      url: 'https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_Sites/FeatureServer/0',
+      getExternalUrl: () => 'https://www.arcgis.com/apps/mapviewer/index.html?url=https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_Sites/FeatureServer&source=sd',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [3, 22],
+      minVectorZoom: 3,
+      maxFeatures: 750,
+      transparent: true,
+      area: 'UN',
+      abstract: 'Point layer hosted on ArcGIS Online (World_Heritage_Sites service). Same query limits as other FeatureServer overlays: zoom 3+, at most maxFeatures per viewport—zoom in locally. Distinct dataset from “UNESCO Sites Navigator” in this catalog.',
+      attribution: 'UNESCO World Heritage Centre / ArcGIS Online',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage Sites (points)' }
+      }
+    },
+    {
+      id: 9925,
+      title: 'World Heritage UNESCO — ArcGIS Online (FeatureServer points)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI_FEATURE',
+      url: 'https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_UNESCO/FeatureServer/0',
+      getExternalUrl: () => 'https://www.arcgis.com/apps/mapviewer/index.html?url=https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_UNESCO/FeatureServer&source=sd',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [3, 22],
+      minVectorZoom: 3,
+      maxFeatures: 750,
+      transparent: true,
+      area: 'UN',
+      abstract: 'Point layer on ArcGIS Online (World_Heritage_UNESCO service). Same viewport limits as other FeatureServer entries (zoom 3+, maxFeatures cap). Separate from World_Heritage_Sites and from the UNESCO/ Sites Navigator FeatureServer in this catalog.',
+      attribution: 'UNESCO World Heritage Centre / ArcGIS Online',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage UNESCO (points)' }
       }
     },
     {
@@ -3349,7 +4327,9 @@ async function onWmeReady() {
   const TOU_REGISTRY = {
     'al-asig': { name: 'ASIG Geoportal Terms of Use', links: { 'en': 'https://geoportal.asig.gov.al/en/info/terms', 'sq': 'https://geoportal.asig.gov.al/sq/info/kusht' }, selector: '.page-content' },
     'waze-internal': { name: 'Waze Terms of Service', links: { 'en': 'https://www.waze.com/legal/tos' }, selector: 'main' },
+    'google-mymaps': { name: 'Google Maps / My Maps — Terms', links: { 'en': 'https://www.google.com/intl/en/help/terms_maps/' }, selector: 'main' },
     'eu-tentec': { name: 'European Commission Legal Notice', links: { 'en': 'https://commission.europa.eu/legal-notice_en' }, selector: 'main' },
+    'unesco': { name: 'UNESCO World Heritage Centre — Licenses & Conditions', links: { 'en': 'https://whc.unesco.org/en/licenses/' }, selector: 'main' },
     'us-wvu': { name: 'West Virginia GIS Clearinghouse Terms', links: { 'en': 'https://www.mapwv.gov/terms.html' }, selector: 'body' },
     'us-usgs': { name: 'USGS Public Domain Policy', links: { 'en': 'https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits' }, selector: '.main-content' },
     'us-vgin': { name: 'Virginia VGIN Data Usage Terms', links: { 'en': 'https://vgin.vdem.virginia.gov/pages/cl-vgin-data-usage' }, selector: 'main' },
@@ -3547,6 +4527,12 @@ async function onWmeReady() {
       if (!settings.state.favoriteMapIds) {
         settings.state.favoriteMapIds = [];
       }
+      if (!settings.state.userMaps) {
+        settings.state.userMaps = [];
+      }
+      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
+        settings.inspectorAutoWmsGetFeatureInfo = true;
+      }
       return settings;
     },
     'put': function(obj) {
@@ -3565,6 +4551,23 @@ async function onWmeReady() {
   var Tooltips = (function() {
     var elements = [];
     var defaultOpts = { trigger: 'hover', container: 'body', placement: 'top' };
+
+    function bsTooltipCtor() {
+      return (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) ? bootstrap.Tooltip : null;
+    }
+
+    function disposeBsTooltip(el) {
+      var T = bsTooltipCtor();
+      if (T) {
+        try {
+          var inst = T.getInstance(el);
+          if (inst) inst.dispose();
+        } catch (errD) { /* ignore */ }
+      }
+      el.removeAttribute('data-bs-original-title');
+      el.removeAttribute('data-original-title');
+    }
+
     return {
       'add': function(element, text, force, tooltipOpts) {
         var opts = Object.assign({}, defaultOpts, tooltipOpts || {});
@@ -3577,10 +4580,7 @@ async function onWmeReady() {
           elements.push(element);
           return;
         }
-        try {
-          $(element).tooltip('destroy');
-        } catch (err) {}
-        element.removeAttribute('data-original-title');
+        disposeBsTooltip(element);
         if (!force) {
           var i = elements.indexOf(element);
           if (i !== -1) elements.splice(i, 1);
@@ -3588,24 +4588,43 @@ async function onWmeReady() {
           elements.push(element);
         }
         var titleStr = useHtml ? String(text).replace(/\n/g, '<br>') : text;
-        if (useHtml) {
-          element.removeAttribute('title');
-          $(element).tooltip(Object.assign({}, opts, { title: titleStr }));
-        } else {
-          element.title = titleStr;
-          $(element).tooltip(opts);
+        var T = bsTooltipCtor();
+        if (!T) {
+          if (useHtml) element.removeAttribute('title');
+          else element.title = titleStr;
+          return;
+        }
+        try {
+          if (useHtml) element.removeAttribute('title');
+          else element.title = titleStr;
+          new T(element, {
+            title: titleStr,
+            html: useHtml,
+            trigger: opts.trigger,
+            container: opts.container,
+            placement: opts.placement,
+            sanitize: false
+          });
+        } catch (errInit) {
+          if (useHtml) element.removeAttribute('title');
+          else element.title = titleStr;
         }
       },
       'remove': function(element) {
-        try {
-          $(element).tooltip('destroy');
-        } catch (err) {}
-        element.removeAttribute('data-original-title');
+        disposeBsTooltip(element);
         element.title = '';
         var toRemoveIdx = elements.findIndex(function(el) { return el == element; });
         if (toRemoveIdx !== -1) {
           elements.splice(toRemoveIdx, 1);
         }
+      },
+      'hide': function(element) {
+        var T = bsTooltipCtor();
+        if (!T) return;
+        try {
+          var inst = T.getInstance(element);
+          if (inst) inst.hide();
+        } catch (errH) { /* ignore */ }
       },
       /** Hide + destroy Bootstrap tooltips under root (e.g. before removing a map card). Only touches nodes that may have instances — not every descendant. */
       'teardownSubtree': function(root) {
@@ -3631,16 +4650,14 @@ async function onWmeReady() {
           if (regEl && typeof root.contains === 'function' && root.contains(regEl)) add(regEl);
         }
         list.forEach(function(el) {
-          var $el = $(el);
-          try {
-            $el.tooltip('hide');
-          } catch (err1) {}
-          try {
-            $el.tooltip('destroy');
-          } catch (err2) {}
-          try {
-            $el.tooltip('dispose');
-          } catch (err3) {}
+          var Th = bsTooltipCtor();
+          if (Th) {
+            try {
+              var ti = Th.getInstance(el);
+              if (ti) ti.hide();
+            } catch (err1) { /* ignore */ }
+          }
+          disposeBsTooltip(el);
           el.removeAttribute('data-original-title');
           el.removeAttribute('data-bs-original-title');
           var idx = elements.indexOf(el);
@@ -3655,13 +4672,13 @@ async function onWmeReady() {
         Settings.set('tooltips', !isEnabled);
         if (isEnabled) {
           elements.forEach(function(element) {
-            $(element).tooltip('destroy');
+            disposeBsTooltip(element);
             element.title = '';
           });
         } else {
           elements.forEach(function(element) {
             element.title = element.dataset.title;
-            $(element).tooltip(Object.assign({}, defaultOpts));
+            Tooltips.add(element, element.dataset.title, false, {});
           });
         }
       }
@@ -3707,23 +4724,4255 @@ async function onWmeReady() {
   }
   //#endregion
 
-  // Adjust map tile reload attempts (by default set to 0). This also makes OpenLayers attempt to load tiles a second time in other layers
-  OpenLayers.IMAGE_RELOAD_ATTEMPTS = 1;
+  // OpenLayers default is 0. Setting 1 retries failed tile images once globally (including WME basemap),
+  // which doubles load on errors and can worsen Chrome net::ERR_INSUFFICIENT_RESOURCES when many
+  // overlay layers compete for connections/decodes. Keep at 0.
+  OpenLayers.IMAGE_RELOAD_ATTEMPTS = 0;
 
   // List of map handles
   var handles = [];
 
+  /** Set by initOpenMapsInspector: ingest query results, refresh sources, etc. */
+  var openMapsInspectorApi = null;
+
+  /**
+   * Same palette + hash as active-map avatars in the sidebar (see buildMainCard).
+   * @param {string} title
+   * @returns {string} hex color
+   */
+  function openMapsMapAvatarColorFromTitle(title) {
+    if (!title || typeof title !== 'string') return '#0099ff';
+    var hash = 0;
+    for (var i = 0; i < title.length; i++) {
+      hash = title.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    var wazeColors = ['#0099ff', '#8663df', '#20c063', '#ff9600', '#ff6699', '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000', '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'];
+    return wazeColors[Math.abs(hash) % wazeColors.length];
+  }
+
+  /**
+   * Stable fill color for a KML / My Maps folder (or `__root__`) within one map row — matches map + folder across sidebar, canvas, and inspector.
+   * @param {string} mapTitle
+   * @param {string} folderId
+   * @returns {string} hex
+   */
+  function openMapsKmlFolderFillHex(mapTitle, folderId) {
+    var mt = mapTitle && typeof mapTitle === 'string' ? mapTitle : '';
+    var fid = folderId != null && folderId !== '' ? String(folderId) : '__root__';
+    return openMapsMapAvatarColorFromTitle(mt + '\x1e' + fid);
+  }
+
+  /**
+   * Map layers sidebar eye for a KML folder id (`__root__` or path like `0/1`).
+   * @param {{ mapLayers?: Array<{ name: *, visible: boolean }> }} mapHandle
+   * @param {*} folderKey feature `openMapsKmlFolderId` or omitted for root
+   * @returns {boolean} false only when a matching `mapLayers` row exists and is hidden
+   */
+  function openMapsKmlSidebarLayerVisible(mapHandle, folderKey) {
+    var want = folderKey != null && folderKey !== '' ? String(folderKey) : '__root__';
+    var mls = mapHandle && mapHandle.mapLayers ? mapHandle.mapLayers : [];
+    for (var i = 0; i < mls.length; i++) {
+      var ml = mls[i];
+      if (ml && ml.name != null && String(ml.name) === want) return !!ml.visible;
+    }
+    return true;
+  }
+
+  /** @returns {boolean} */
+  function openMapsLayerNameIsKmlVectorOverlay(olLayerName) {
+    var s = olLayerName != null ? String(olLayerName) : '';
+    return s.indexOf('OpenMaps_GOOGLE_MY_MAPS_') === 0 || s.indexOf('OpenMaps_LOCAL_KML_') === 0;
+  }
+
+  /** Re-apply after `OpenLayers.Layer.Vector` recreate (e.g. eligibility teardown). Idempotent per layer instance. */
+  function openMapsPatchKmlVectorDrawFeature(layer) {
+    if (!layer || layer.__openmapsKmlLayerDrawFeaturePatched) return;
+    var originalKmlDrawFeature = layer.drawFeature;
+    layer.drawFeature = function(feature, style) {
+      if ((style === undefined || style === null) && feature && feature.style) {
+        style = feature.style;
+      }
+      return originalKmlDrawFeature.call(this, feature, style);
+    };
+    layer.__openmapsKmlLayerDrawFeaturePatched = true;
+  }
+
+  var __openmapsKmlRendererHooksInstalled = false;
+
+  /** Canvas/SVG renderers may call `drawFeature` without going through `Layer.drawFeature`; scope to OpenMaps KML layer names only. */
+  function openMapsInstallKmlRendererDrawFeatureHooksOnce() {
+    if (__openmapsKmlRendererHooksInstalled) return;
+    if (typeof OpenLayers === 'undefined' || !OpenLayers.Renderer) return;
+    function patchRendererProto(proto) {
+      if (!proto || typeof proto.drawFeature !== 'function' || proto.__openmapsKmlRendererDrawFeaturePatched) return;
+      var orig = proto.drawFeature;
+      proto.drawFeature = function(feature, style) {
+        try {
+          var lyr = feature && feature.layer;
+          if (!lyr && this && this.layer) lyr = this.layer;
+          var nm = lyr && lyr.name != null ? String(lyr.name) : '';
+          if (openMapsLayerNameIsKmlVectorOverlay(nm) && (style === undefined || style === null) && feature && feature.style) {
+            style = feature.style;
+          }
+        } catch (eR) { /* ignore */ }
+        return orig.call(this, feature, style);
+      };
+      proto.__openmapsKmlRendererDrawFeaturePatched = true;
+    }
+    try {
+      if (OpenLayers.Renderer.Canvas && OpenLayers.Renderer.Canvas.prototype) patchRendererProto(OpenLayers.Renderer.Canvas.prototype);
+      if (OpenLayers.Renderer.SVG && OpenLayers.Renderer.SVG.prototype) patchRendererProto(OpenLayers.Renderer.SVG.prototype);
+    } catch (eO) { /* ignore */ }
+    __openmapsKmlRendererHooksInstalled = true;
+  }
+
+  /** Opt-in: `localStorage.setItem('openmaps-kml-diag','1')` + reload, or `unsafeWindow.__OPEN_MAPS_KML_DIAG__ = true` before script. */
+  var OPEN_MAPS_KML_DIAG_STORAGE_KEY = 'openmaps-kml-diag';
+  var openMapsKmlDiagHelpLogged = false;
+
+  function openMapsKmlDiagEnabled() {
+    try {
+      if (typeof unsafeWindow !== 'undefined' && unsafeWindow.__OPEN_MAPS_KML_DIAG__) return true;
+    } catch (eU) { /* ignore */ }
+    try {
+      return localStorage.getItem(OPEN_MAPS_KML_DIAG_STORAGE_KEY) === '1';
+    } catch (eL) {
+      return false;
+    }
+  }
+
+  function openMapsKmlDiagLog(tag, detail) {
+    if (!openMapsKmlDiagEnabled()) return;
+    try {
+      console.info('[OpenMaps KML diag]', tag, detail !== undefined ? detail : '');
+    } catch (eC) { /* ignore */ }
+  }
+
+  function openMapsKmlDiagPrintHelpOnce() {
+    if (!openMapsKmlDiagEnabled() || openMapsKmlDiagHelpLogged) return;
+    openMapsKmlDiagHelpLogged = true;
+    openMapsKmlDiagLog('HOWTO', 'openMapsKmlDiagDumpAllHandles("after load") — disable: localStorage.removeItem("' + OPEN_MAPS_KML_DIAG_STORAGE_KEY + '"); location.reload()');
+  }
+
+  /**
+   * Human-readable reasons when KML vectors refuse to draw (mirrors {@link openMapsKmlVectorRowShouldDraw}).
+   * @returns {{ ok: boolean, reasons: string[] }}
+   */
+  function openMapsKmlDiagShouldDrawBreakdown(mapHandle) {
+    var reasons = [];
+    if (!mapHandle || !mapHandle.map) {
+      reasons.push('missing handle or map');
+      return { ok: false, reasons: reasons };
+    }
+    if (!openMapsMapTypeIsKmlVectorOverlay(mapHandle.map.type)) {
+      reasons.push('map.type is not LOCAL_KML/GOOGLE_MY_MAPS: ' + String(mapHandle.map.type));
+      return { ok: false, reasons: reasons };
+    }
+    var visCount = 0;
+    (mapHandle.mapLayers || []).forEach(function(l) {
+      if (l && l.visible) visCount++;
+    });
+    if (visCount === 0) reasons.push('no visible Map layers sub-row (all folder eyes off or mapLayers empty)');
+    if (mapHandle.hidden) reasons.push('Active Maps row hidden (main eye)');
+    if (mapHandle.outOfArea) reasons.push('handle.outOfArea');
+    if (!isTouAccepted(mapHandle.map.touId)) reasons.push('Terms of use not accepted for touId=' + String(mapHandle.map.touId));
+    if (mapHandle.map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
+      reasons.push('Google My Maps integration disabled (localStorage opt-in)');
+    }
+    var ok = openMapsKmlVectorRowShouldDraw(mapHandle);
+    return { ok: ok, reasons: reasons };
+  }
+
+  /**
+   * Call from devtools after enabling `openmaps-kml-diag`. Summarizes every KML/GMM handle (layer stack, counts, gates).
+   * @param {string} [reason]
+   */
+  function openMapsKmlDiagDumpAllHandles(reason) {
+    openMapsKmlDiagPrintHelpOnce();
+    if (!openMapsKmlDiagEnabled()) {
+      try {
+        console.info('[OpenMaps KML diag] Enable: localStorage.setItem("' + OPEN_MAPS_KML_DIAG_STORAGE_KEY + '","1"); location.reload()');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+    var rows = [];
+    var olm = null;
+    try {
+      olm = (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+    } catch (eOl) { /* ignore */ }
+    for (var hi = 0; hi < handles.length; hi++) {
+      var h = handles[hi];
+      if (!h || !h.map || !openMapsMapTypeIsKmlVectorOverlay(h.map.type)) continue;
+      var onMap = null;
+      try {
+        if (h.layer && olm && olm.layers) onMap = olm.layers.indexOf(h.layer);
+      } catch (eIx) { onMap = -2; }
+      var bd = openMapsKmlDiagShouldDrawBreakdown(h);
+      var rendererId = '';
+      try {
+        if (h.layer && h.layer.renderer && h.layer.renderer.CLASS_NAME) rendererId = String(h.layer.renderer.CLASS_NAME);
+      } catch (eR) { /* ignore */ }
+      rows.push({
+        mapId: h.mapId,
+        mapType: h.map.type,
+        hidden: h.hidden,
+        outOfArea: h.outOfArea,
+        mapLayersPreview: (h.mapLayers || []).slice(0, 24).map(function(ml) {
+          return ml && ml.name != null ? { name: String(ml.name), visible: !!ml.visible } : null;
+        }),
+        shouldDraw: bd.ok,
+        shouldDrawDetail: bd.reasons,
+        hasOlLayer: !!h.layer,
+        olLayerName: h.layer && h.layer.name != null ? String(h.layer.name) : null,
+        olLayerOnMapIndex: onMap,
+        olLayerVisibility: h.layer && typeof h.layer.getVisibility === 'function' ? h.layer.getVisibility() : null,
+        olRenderer: rendererId,
+        olFeatureCount: h.layer && h.layer.features ? h.layer.features.length : 0,
+        masterFeatureCount: Array.isArray(h.__openmapsKmlMasterFeatures) ? h.__openmapsKmlMasterFeatures.length : 0,
+        kmlFetchTriggered: !!h.__openmapsGmmKmlFetchTriggered,
+        removedFromOlStack: h.__openmapsGmmRemovedFromOlStack === true
+      });
+    }
+    openMapsKmlDiagLog('dumpAllHandles: ' + String(reason || 'manual'), rows);
+  }
+
+  /**
+   * Same gating as `updateLayers` KML branch: when false, the vector must stay empty (do not re-add from master).
+   * @param {{ map: Object, mapLayers: Array, hidden: boolean, outOfArea: boolean }} mapHandle
+   */
+  function openMapsKmlVectorRowShouldDraw(mapHandle) {
+    if (!mapHandle || !mapHandle.map || !openMapsMapTypeIsKmlVectorOverlay(mapHandle.map.type)) return false;
+    var visCount = 0;
+    (mapHandle.mapLayers || []).forEach(function(l) {
+      if (l && l.visible) visCount++;
+    });
+    if (visCount === 0) return false;
+    if (mapHandle.hidden || mapHandle.outOfArea) return false;
+    if (!isTouAccepted(mapHandle.map.touId)) return false;
+    if (mapHandle.map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) return false;
+    return true;
+  }
+
+  /**
+   * Assign OpenLayers symbolizer for one KML feature (folder color + geometry kind).
+   * Call **before** `addFeatures` so OL2 Canvas/SVG does not first-paint with the invisible layer StyleMap only.
+   */
+  function openMapsApplyKmlStyleToFeature(mapHandle, f) {
+    if (!mapHandle || !mapHandle.map || !f || !f.geometry || !openMapsMapTypeIsKmlVectorOverlay(mapHandle.map.type)) return;
+    var title = mapHandle.map.title && typeof mapHandle.map.title === 'string' ? mapHandle.map.title : '';
+    f.style = null;
+    var fid = f.attributes && f.attributes.openMapsKmlFolderId != null ? String(f.attributes.openMapsKmlFolderId) : '__root__';
+    var fillHex = openMapsKmlFolderFillHex(title, fid);
+    var pack = openMapsEsriFeatureAvatarMarkerPack(fillHex);
+    var gcn = f.geometry.CLASS_NAME;
+    if (gcn === 'OpenLayers.Geometry.Point' || gcn === 'OpenLayers.Geometry.MultiPoint') {
+      f.style = openMapsEsriPointVectorStyle(pack);
+    } else if (gcn === 'OpenLayers.Geometry.LineString' || gcn === 'OpenLayers.Geometry.MultiLineString' || gcn === 'OpenLayers.Geometry.LinearRing') {
+      f.style = {
+        strokeColor: pack.fillHex,
+        strokeWidth: Math.max(2, Math.round(pack.polyStrokeW * 1.6)),
+        strokeOpacity: 1,
+        fillOpacity: 0
+      };
+    } else {
+      f.style = {
+        fillColor: pack.fillHex,
+        fillOpacity: 0.75,
+        strokeColor: '#ffffff',
+        strokeOpacity: 1,
+        strokeWidth: pack.polyStrokeW,
+        pointRadius: Math.max(4, Math.round(pack.symbolR)),
+        graphicName: 'circle'
+      };
+    }
+  }
+
+  /** Per-feature styles for features currently on the KML vector layer (all belong to visible folders). */
+  function openMapsPaintKmlFeaturesOnLayer(mapHandle) {
+    if (!mapHandle || !mapHandle.map || !mapHandle.layer || !openMapsMapTypeIsKmlVectorOverlay(mapHandle.map.type)) return;
+    var feats = mapHandle.layer.features || [];
+    for (var i = 0; i < feats.length; i++) {
+      openMapsApplyKmlStyleToFeature(mapHandle, feats[i]);
+    }
+    try {
+      mapHandle.layer.redraw(true);
+    } catch (eRd) { /* ignore */ }
+  }
+
+  /**
+   * Count placemarks per folder id from the KML master list (geometry present, sidebar folder eye on).
+   * Used by Map Inspector folder headers so "(0)" is not confused with "nothing loaded".
+   * @param {{ mapLayers?: Array, __openmapsKmlMasterFeatures?: Array }} mapHandle
+   * @returns {Object<string, number>}
+   */
+  function openMapsKmlMasterVisibleCountsByFolder(mapHandle) {
+    var out = Object.create(null);
+    var master = mapHandle && mapHandle.__openmapsKmlMasterFeatures;
+    if (!master || !master.length) return out;
+    for (var i = 0; i < master.length; i++) {
+      var f = master[i];
+      if (!f || !f.geometry) continue;
+      var fid = f.attributes && f.attributes.openMapsKmlFolderId != null ? String(f.attributes.openMapsKmlFolderId) : '__root__';
+      if (!openMapsKmlSidebarLayerVisible(mapHandle, fid)) continue;
+      out[fid] = (out[fid] || 0) + 1;
+    }
+    return out;
+  }
+
+  /**
+   * Map Inspector / KML: when `getMapExtent()` is null, use map maxExtent or Web Mercator world so KML rows can still index.
+   * @param {OpenLayers.Bounds|null|undefined} primary
+   * @returns {OpenLayers.Bounds|null}
+   */
+  function openMapsKmlInspectorIntersectExtent(primary) {
+    if (primary) return primary;
+    try {
+      var olm = typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function' ? W.map.getOLMap() : null;
+      if (olm && typeof olm.getMaxExtent === 'function') {
+        var mx = olm.getMaxExtent();
+        if (mx && typeof mx.clone === 'function') return mx.clone();
+      }
+    } catch (eM) { /* ignore */ }
+    try {
+      return new OpenLayers.Bounds(-20037508.34, -20037508.34, 20037508.34, 20037508.34);
+    } catch (eB) { /* ignore */ }
+    return null;
+  }
+
+  /**
+   * Deep copy a KML template feature for the OpenLayers layer only. Master entries in
+   * `__openmapsKmlMasterFeatures` stay off the layer so WME/OL `removeAllFeatures` / renderer teardown
+   * cannot invalidate templates we need for the next `addFeatures`.
+   * @param {OpenLayers.Feature.Vector} fTemplate
+   * @returns {OpenLayers.Feature.Vector|null}
+   */
+  function openMapsCloneKmlFeatureForOlLayer(fTemplate) {
+    if (!fTemplate || !fTemplate.geometry) return null;
+    try {
+      var g = typeof fTemplate.geometry.clone === 'function' ? fTemplate.geometry.clone() : null;
+      if (!g) return null;
+      var attrs = {};
+      if (fTemplate.attributes && typeof fTemplate.attributes === 'object') {
+        if (typeof OpenLayers !== 'undefined' && OpenLayers.Util && typeof OpenLayers.Util.extend === 'function') {
+          OpenLayers.Util.extend(attrs, fTemplate.attributes);
+        } else {
+          for (var ak in fTemplate.attributes) {
+            if (Object.prototype.hasOwnProperty.call(fTemplate.attributes, ak)) attrs[ak] = fTemplate.attributes[ak];
+          }
+        }
+      }
+      return new OpenLayers.Feature.Vector(g, attrs);
+    } catch (eC) {
+      return null;
+    }
+  }
+
+  /**
+   * Keep OL `layer.features` in sync with **Map layers** folder eyes: hidden folders are removed from the layer
+   * so Canvas/SVG cannot leave ghost graphics; master list retains all placemarks for re-show.
+   * @param {{ map: Object, layer: Object, mapLayers: Array, __openmapsKmlMasterFeatures?: Array }} mapHandle
+   * @returns {{ wantLen: number, masterLen: number, onLayerCount: number, addFeaturesThrew?: boolean, early?: string }|null}
+   */
+  function openMapsApplyKmlFolderFeatureStyles(mapHandle) {
+    openMapsKmlDiagPrintHelpOnce();
+    if (!mapHandle || !mapHandle.map || !mapHandle.layer || !openMapsMapTypeIsKmlVectorOverlay(mapHandle.map.type)) {
+      openMapsKmlDiagLog('applyFolderStyles: early exit', {
+        hasHandle: !!mapHandle,
+        hasMap: !!(mapHandle && mapHandle.map),
+        hasLayer: !!(mapHandle && mapHandle.layer),
+        mapType: mapHandle && mapHandle.map ? mapHandle.map.type : null
+      });
+      return { wantLen: 0, masterLen: 0, onLayerCount: 0, early: 'noHandleOrLayer' };
+    }
+    if (!openMapsKmlVectorRowShouldDraw(mapHandle)) {
+      openMapsKmlDiagLog('applyFolderStyles: shouldDraw false', openMapsKmlDiagShouldDrawBreakdown(mapHandle));
+      try {
+        if (mapHandle.layer.features && mapHandle.layer.features.length) mapHandle.layer.removeAllFeatures();
+      } catch (eEmp) { /* ignore */ }
+      return { wantLen: 0, masterLen: Array.isArray(mapHandle.__openmapsKmlMasterFeatures) ? mapHandle.__openmapsKmlMasterFeatures.length : 0, onLayerCount: 0, early: 'shouldDraw' };
+    }
+    var master = mapHandle.__openmapsKmlMasterFeatures;
+    if (!master || !master.length) {
+      openMapsKmlDiagLog('applyFolderStyles: no master features', {
+        mapId: mapHandle.map && mapHandle.map.id,
+        masterLen: master ? master.length : 0
+      });
+      try {
+        mapHandle.layer.redraw(true);
+      } catch (eR0) { /* ignore */ }
+      return { wantLen: 0, masterLen: 0, onLayerCount: 0, early: 'noMaster' };
+    }
+    var want = [];
+    for (var mi = 0; mi < master.length; mi++) {
+      var feat = master[mi];
+      if (!feat || !feat.geometry) continue;
+      var fk = feat.attributes && feat.attributes.openMapsKmlFolderId != null ? feat.attributes.openMapsKmlFolderId : '__root__';
+      if (openMapsKmlSidebarLayerVisible(mapHandle, fk)) want.push(feat);
+    }
+    try {
+      mapHandle.layer.removeAllFeatures();
+    } catch (eR1) { /* ignore */ }
+    if (!want.length && master.length) {
+      openMapsKmlDiagLog('applyFolderStyles: want empty but master has features (folder visibility / folder id mismatch?)', {
+        mapId: mapHandle.map && mapHandle.map.id,
+        masterLen: master.length,
+        mapLayersPreview: (mapHandle.mapLayers || []).map(function(ml) {
+          return ml && ml.name != null ? String(ml.name) + '=' + (ml.visible ? 'on' : 'off') : '';
+        }).slice(0, 16)
+      });
+    }
+    var addThrew = false;
+    if (want.length) {
+      var wantOl = [];
+      for (var wj = 0; wj < want.length; wj++) {
+        var tmpl = want[wj];
+        var cl = openMapsCloneKmlFeatureForOlLayer(tmpl);
+        if (cl) {
+          openMapsApplyKmlStyleToFeature(mapHandle, cl);
+          wantOl.push(cl);
+        }
+      }
+      if (wantOl.length < want.length) {
+        try {
+          openMapsKmlDiagLog('applyFolderStyles: clone shortfall', {
+            mapId: mapHandle.map && mapHandle.map.id,
+            wantLen: want.length,
+            clonedLen: wantOl.length
+          });
+        } catch (eCs) { /* ignore */ }
+      }
+      try {
+        if (wantOl.length) mapHandle.layer.addFeatures(wantOl);
+      } catch (eA1) {
+        addThrew = true;
+        try {
+          openMapsKmlDiagLog('applyFolderStyles: addFeatures threw', {
+            mapId: mapHandle.map && mapHandle.map.id,
+            err: eA1 && eA1.message ? String(eA1.message) : String(eA1)
+          });
+        } catch (eL2) { /* ignore */ }
+      }
+    }
+    openMapsPaintKmlFeaturesOnLayer(mapHandle);
+    try {
+      var fc = mapHandle.layer && mapHandle.layer.features ? mapHandle.layer.features.length : 0;
+      var samp = null;
+      if (mapHandle.layer && mapHandle.layer.features && mapHandle.layer.features[0] && mapHandle.layer.features[0].geometry) {
+        var g0 = mapHandle.layer.features[0].geometry;
+        var b0 = null;
+        try { b0 = g0.getBounds ? g0.getBounds() : null; } catch (eB) { /* ignore */ }
+        samp = {
+          geomClass: g0.CLASS_NAME,
+          bounds: b0 ? { left: b0.left, bottom: b0.bottom, right: b0.right, top: b0.top } : null,
+          hasStyle: !!mapHandle.layer.features[0].style
+        };
+      }
+      openMapsKmlDiagLog('applyFolderStyles: done', {
+        mapId: mapHandle.map && mapHandle.map.id,
+        masterLen: master.length,
+        wantLen: want.length,
+        onLayerFeatureCount: fc,
+        addFeaturesThrew: addThrew,
+        firstFeatureSample: samp
+      });
+    } catch (eL) { /* ignore */ }
+    return {
+      wantLen: want.length,
+      masterLen: master.length,
+      onLayerCount: mapHandle.layer && mapHandle.layer.features ? mapHandle.layer.features.length : 0,
+      addFeaturesThrew: addThrew
+    };
+  }
+
+  /** Map Inspector list row color dot (`.openmaps-inspector-avatar` in CSS). */
+  var OPENMAPS_INSPECTOR_LIST_AVATAR_PX = 16;
+
+  /**
+   * Sizing for ESRI_FEATURE markers: same hue as map avatars; symbol radius = 130% of the **list** avatar radius
+   * (16px diameter in CSS), white outline +10% (relative to base outline).
+   * @param {string} fillHex
+   * @returns {Object}
+   */
+  function openMapsEsriFeatureAvatarMarkerPack(fillHex) {
+    var hex = (fillHex && typeof fillHex === 'string') ? fillHex : '#0099ff';
+    var listAvatarR = OPENMAPS_INSPECTOR_LIST_AVATAR_PX / 2;
+    var symbolR = listAvatarR * 1.3;
+    var whiteW = Math.max(1, Math.round(symbolR * 0.055));
+    var highlightR = symbolR * 1.6 + whiteW * 0.1;
+    var hlStroke = Math.max(2, Math.round(Math.max(whiteW, 2) * 1.05));
+    return {
+      fillHex: hex,
+      symbolR: symbolR,
+      whiteW: whiteW,
+      highlightR: highlightR,
+      hlStroke: hlStroke,
+      polyStrokeW: Math.max(2, whiteW)
+    };
+  }
+
+  /** OpenLayers `layer.name` for ESRI_FEATURE: unique per map row (`map.title` can duplicate across catalog entries). */
+  function openMapsEsriFeatureVectorOlName(mapId) {
+    return 'OpenMaps_ESRI_FEATURE_' + String(mapId);
+  }
+
+  /** OpenLayers `layer.name` for GOOGLE_MY_MAPS (unique per row; mirrors ESRI_FEATURE naming). */
+  function openMapsGoogleMyMapsLayerOlName(mapId) {
+    return 'OpenMaps_GOOGLE_MY_MAPS_' + String(mapId);
+  }
+
+  /** OpenLayers `layer.name` for user-uploaded KML (`LOCAL_KML`). */
+  function openMapsLocalKmlLayerOlName(mapId) {
+    return 'OpenMaps_LOCAL_KML_' + String(mapId);
+  }
+
+  /** Map types that share the deferred KML vector overlay path (not WME `addLayer`; no `setLayerIndex` sync). */
+  function openMapsMapTypeIsKmlVectorOverlay(mapType) {
+    return mapType === 'GOOGLE_MY_MAPS' || mapType === 'LOCAL_KML';
+  }
+
+  /** Max persisted KML string length per uploaded file (UTF-16 code units); avoids blowing script storage. */
+  var OPEN_MAPS_LOCAL_KML_MAX_CHARS = 2 * 1024 * 1024;
+
+  /** Max hops when resolving uploaded KML that only contains `<NetworkLink>` wrappers (e.g. Google My Maps “export” stub). */
+  var OPEN_MAPS_LOCAL_KML_NETWORKLINK_MAX_DEPTH = 6;
+
+  /**
+   * Collect `http(s)` hrefs from `<NetworkLink><Link><href>…` (OGC KML 2.2). OpenLayers.Format.KML does not fetch these.
+   * @returns {string[]}
+   */
+  function openMapsExtractKmlNetworkLinkHttpHrefs(kmlText) {
+    var out = [];
+    var seen = Object.create(null);
+    try {
+      var doc = new DOMParser().parseFromString(String(kmlText || ''), 'text/xml');
+      if (doc.getElementsByTagName('parsererror').length) return out;
+      var kmlNs = 'http://www.opengis.net/kml/2.2';
+      var nlinks = doc.getElementsByTagNameNS(kmlNs, 'NetworkLink');
+      if (!nlinks || !nlinks.length) nlinks = doc.getElementsByTagName('NetworkLink');
+      for (var i = 0; i < nlinks.length; i++) {
+        var nl = nlinks[i];
+        var linkEls = nl.getElementsByTagNameNS(kmlNs, 'Link');
+        if (!linkEls || !linkEls.length) linkEls = nl.getElementsByTagName('Link');
+        for (var j = 0; j < linkEls.length; j++) {
+          var le = linkEls[j];
+          var hrefCol = le.getElementsByTagNameNS(kmlNs, 'href');
+          if (!hrefCol || !hrefCol.length) hrefCol = le.getElementsByTagName('href');
+          for (var k = 0; k < hrefCol.length; k++) {
+            var href = (hrefCol[k].textContent || '').replace(/^\s+|\s+$/g, '');
+            if (/^https?:\/\//i.test(href) && !seen[href]) {
+              seen[href] = true;
+              out.push(href);
+            }
+          }
+        }
+      }
+    } catch (eNl) { /* ignore */ }
+    return out;
+  }
+
+  /**
+   * Google My Maps (and some exports) nest placemarks in `<Folder>`s; stock `OpenLayers.Format.KML` in WME often
+   * misses point geometry compared to classic [WME Open Other Maps](https://greasyfork.org/en/scripts/32758-wme-open-other-maps)
+   * which uses `OpenLayers.Format.MyMapKML`. We walk all `<Placemark>` elements with namespace-agnostic local names
+   * and build `OpenLayers.Feature.Vector` geometries (Point, LineString, Polygon, MultiGeometry) in EPSG:4326, then
+   * callers transform to the map projection.
+   */
+  function openMapsKmlLocalName(el) {
+    if (!el || el.nodeType !== 1) return '';
+    return el.localName || (el.nodeName && String(el.nodeName).split(':').pop()) || '';
+  }
+
+  function openMapsKmlCoordChunkToPoints(chunk) {
+    var pts = [];
+    var s = String(chunk || '').replace(/^\s+|\s+$/g, '');
+    if (!s) return pts;
+    var tuples = s.split(/\s+/);
+    for (var ti = 0; ti < tuples.length; ti++) {
+      if (!tuples[ti]) continue;
+      var p = tuples[ti].split(',');
+      if (p.length < 2) continue;
+      var lon = parseFloat(p[0]);
+      var lat = parseFloat(p[1]);
+      if (isNaN(lon) || isNaN(lat)) continue;
+      var pt = new OpenLayers.Geometry.Point(lon, lat);
+      if (p.length > 2) {
+        var zz = parseFloat(p[2]);
+        if (!isNaN(zz)) pt.z = zz;
+      }
+      pts.push(pt);
+    }
+    return pts;
+  }
+
+  function openMapsKmlFirstCoordinatesText(geomEl) {
+    for (var c = geomEl.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType !== 1) continue;
+      if (openMapsKmlLocalName(c) === 'coordinates') return (c.textContent || '').replace(/^\s+|\s+$/g, '');
+    }
+    return '';
+  }
+
+  function openMapsKmlParseLinearRingOrLine(el, asRing) {
+    var raw = openMapsKmlFirstCoordinatesText(el);
+    var pts = openMapsKmlCoordChunkToPoints(raw);
+    if (pts.length < (asRing ? 3 : 2)) return null;
+    return asRing ? new OpenLayers.Geometry.LinearRing(pts) : new OpenLayers.Geometry.LineString(pts);
+  }
+
+  function openMapsKmlParsePoint(el) {
+    var pts = openMapsKmlCoordChunkToPoints(openMapsKmlFirstCoordinatesText(el));
+    return pts.length ? pts[0] : null;
+  }
+
+  function openMapsKmlParsePolygon(polyEl) {
+    var rings = [];
+    for (var c = polyEl.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType !== 1) continue;
+      var nm = openMapsKmlLocalName(c);
+      if (nm !== 'outerBoundaryIs' && nm !== 'innerBoundaryIs') continue;
+      var lr = null;
+      for (var d = c.firstChild; d; d = d.nextSibling) {
+        if (d.nodeType === 1 && openMapsKmlLocalName(d) === 'LinearRing') {
+          lr = openMapsKmlParseLinearRingOrLine(d, true);
+          break;
+        }
+      }
+      if (lr) rings.push(lr);
+    }
+    if (!rings.length) return null;
+    return new OpenLayers.Geometry.Polygon(rings);
+  }
+
+  function openMapsKmlParseMultiGeometry(mgEl) {
+    var parts = [];
+    for (var c = mgEl.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType !== 1) continue;
+      var nm = openMapsKmlLocalName(c);
+      var g = null;
+      if (nm === 'Point') g = openMapsKmlParsePoint(c);
+      else if (nm === 'LineString') g = openMapsKmlParseLinearRingOrLine(c, false);
+      else if (nm === 'Polygon') g = openMapsKmlParsePolygon(c);
+      else if (nm === 'MultiGeometry') g = openMapsKmlParseMultiGeometry(c);
+      if (g) parts.push(g);
+    }
+    if (!parts.length) return null;
+    if (parts.length === 1) return parts[0];
+    return new OpenLayers.Geometry.Collection(parts);
+  }
+
+  /** First `Icon` → `href` http(s) URL on a Placemark (namespace-agnostic), for sidebar chips only (not drawn on map). */
+  function openMapsKmlPlacemarkIconHref(pmEl) {
+    if (!pmEl) return null;
+    var kmlNs = 'http://www.opengis.net/kml/2.2';
+    var hrefEls = pmEl.getElementsByTagNameNS ? pmEl.getElementsByTagNameNS(kmlNs, 'href') : null;
+    if (!hrefEls || !hrefEls.length) hrefEls = pmEl.getElementsByTagName('href');
+    if (!hrefEls || !hrefEls.length) return null;
+    for (var i = 0; i < hrefEls.length; i++) {
+      var h = hrefEls[i];
+      var p = h.parentNode;
+      var ok = false;
+      while (p && p !== pmEl) {
+        if (openMapsKmlLocalName(p) === 'Icon') {
+          ok = true;
+          break;
+        }
+        p = p.parentNode;
+      }
+      if (!ok) continue;
+      var url = (h.textContent || '').replace(/^\s+|\s+$/g, '');
+      if (!url) continue;
+      if (/^https?:\/\//i.test(url) || url.indexOf('//') === 0) return url;
+    }
+    return null;
+  }
+
+  function openMapsKmlPlacemarkToGeometry(pm) {
+    var childEls = [];
+    for (var c = pm.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1) childEls.push(c);
+    }
+    function pick(tag) {
+      for (var i = 0; i < childEls.length; i++) {
+        if (openMapsKmlLocalName(childEls[i]) === tag) return childEls[i];
+      }
+      return null;
+    }
+    var mg = pick('MultiGeometry');
+    if (mg) return openMapsKmlParseMultiGeometry(mg);
+    var poly = pick('Polygon');
+    if (poly) return openMapsKmlParsePolygon(poly);
+    var line = pick('LineString');
+    if (line) return openMapsKmlParseLinearRingOrLine(line, false);
+    var pt = pick('Point');
+    if (pt) return openMapsKmlParsePoint(pt);
+    return null;
+  }
+
+  function openMapsKmlChildText(pm, tag) {
+    for (var c = pm.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1 && openMapsKmlLocalName(c) === tag) return (c.textContent || '').replace(/^\s+|\s+$/g, '');
+    }
+    return '';
+  }
+
+  function openMapsKmlFindDocumentElement(doc) {
+    if (!doc || !doc.documentElement) return null;
+    var kmlNs = 'http://www.opengis.net/kml/2.2';
+    var docs = doc.getElementsByTagNameNS(kmlNs, 'Document');
+    if (!docs || !docs.length) docs = doc.getElementsByTagName('Document');
+    if (docs && docs.length) return docs[0];
+    var root = doc.documentElement;
+    if (openMapsKmlLocalName(root) === 'kml') {
+      for (var c = root.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 1 && openMapsKmlLocalName(c) === 'Document') return c;
+      }
+    }
+    return root;
+  }
+
+  /** Convert KML ABGR color (aabbggrr) to #rrggbb (ignores alpha). */
+  function openMapsKmlAbgrToHex(abgr) {
+    var s = String(abgr || '').replace(/^\s+|\s+$/g, '');
+    if (!s) return null;
+    s = s.replace(/^0x/i, '').replace(/^#/, '');
+    if (!/^[0-9a-fA-F]{8}$/.test(s)) return null;
+    // aabbggrr → rrggbb
+    var rr = s.slice(6, 8);
+    var gg = s.slice(4, 6);
+    var bb = s.slice(2, 4);
+    return ('#' + rr + gg + bb).toLowerCase();
+  }
+
+  function openMapsKmlTextFirstLocalChild(el, localName) {
+    if (!el) return null;
+    for (var c = el.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1 && openMapsKmlLocalName(c) === localName) return c;
+    }
+    return null;
+  }
+
+  function openMapsKmlTextAllLocalChildren(el, localName) {
+    var out = [];
+    if (!el) return out;
+    for (var c = el.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 1 && openMapsKmlLocalName(c) === localName) out.push(c);
+    }
+    return out;
+  }
+
+  function openMapsKmlTextNormalizeStyleUrl(su) {
+    var s = String(su || '').replace(/^\s+|\s+$/g, '');
+    if (!s) return '';
+    // common: "#styleId"
+    if (s[0] === '#') s = s.slice(1);
+    // ignore remote style urls for now
+    if (!s) return '';
+    if (s.indexOf('http://') === 0 || s.indexOf('https://') === 0) return '';
+    return s;
+  }
+
+  function openMapsKmlTextIsUsableIconHref(href) {
+    var s = String(href || '').replace(/^\s+|\s+$/g, '');
+    if (!s) return false;
+    if (/^data:/i.test(s)) return true;
+    if (/^https?:\/\//i.test(s)) return true;
+    if (s.indexOf('//') === 0) return true;
+    return false;
+  }
+
+  /**
+   * Walk KML Document/Folder elements (namespace-agnostic) and return stable folder ids + titles.
+   * Uses the same folder indexing scheme as {@link openMapsKmlTextParseFull}: folder ids are paths like `0/1`.
+   * This is used to keep folder sub-layers available even when geometry parsing falls back to OpenLayers.Format.KML.
+   * @returns {{ folderOrder: string[], folderTitles: Object, hasRootPlacemarks: boolean, layerIds: string[] }}
+   */
+  function openMapsKmlTextExtractFolderTree(textG) {
+    var empty = { folderOrder: [], folderTitles: {}, hasRootPlacemarks: false, layerIds: [] };
+    var doc = null;
+    try {
+      doc = new DOMParser().parseFromString(String(textG || ''), 'text/xml');
+    } catch (e0) {
+      return empty;
+    }
+    if (!doc || doc.getElementsByTagName('parsererror').length) return empty;
+    var folderOrder = [];
+    var folderTitles = Object.create(null);
+    var seenFolders = Object.create(null);
+    var hasRootPlacemarks = false;
+
+    function recordFolder(fid, title) {
+      if (seenFolders[fid]) return;
+      seenFolders[fid] = true;
+      folderOrder.push(fid);
+      folderTitles[fid] = (title && String(title).trim()) ? String(title).trim() : ('Folder ' + fid);
+    }
+
+    function walkContainer(containerEl, pathPrefix) {
+      if (!containerEl) return;
+      var children = [];
+      for (var c = containerEl.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 1) children.push(c);
+      }
+      var folderIdx = 0;
+      for (var i = 0; i < children.length; i++) {
+        var ch = children[i];
+        var nm = openMapsKmlLocalName(ch);
+        if (nm === 'Placemark') {
+          if (pathPrefix === '') hasRootPlacemarks = true;
+        } else if (nm === 'Folder') {
+          var fid = pathPrefix === '' ? String(folderIdx) : (pathPrefix + '/' + folderIdx);
+          folderIdx++;
+          recordFolder(fid, openMapsKmlChildText(ch, 'name'));
+          walkContainer(ch, fid);
+        }
+      }
+    }
+
+    var docEl = openMapsKmlFindDocumentElement(doc);
+    if (docEl) walkContainer(docEl, '');
+
+    var layerIds = [];
+    if (hasRootPlacemarks) layerIds.push('__root__');
+    for (var fo = 0; fo < folderOrder.length; fo++) {
+      if (layerIds.indexOf(folderOrder[fo]) === -1) layerIds.push(folderOrder[fo]);
+    }
+    empty.folderOrder = folderOrder;
+    empty.folderTitles = folderTitles;
+    empty.hasRootPlacemarks = hasRootPlacemarks;
+    empty.layerIds = layerIds;
+    return empty;
+  }
+
+  /**
+   * Walk KML Document/Folder/Placemark (namespace-agnostic). Assigns `openMapsKmlFolderId` on each feature
+   * (`__root__` for placemarks directly under Document, else folder path like `0` or `0/1`).
+   * @returns {{ features: Array, folderOrder: string[], folderTitles: Object, hasRootPlacemarks: boolean, layerIds: string[], folderIconHrefs: Object, folderColorHexes: Object }}
+   */
+  function openMapsKmlTextParseFull(textG, proj4326, proj3857) {
+    var empty = { features: [], folderOrder: [], folderTitles: {}, hasRootPlacemarks: false, layerIds: [], folderIconHrefs: {}, folderColorHexes: {} };
+    if (typeof OpenLayers === 'undefined' || !OpenLayers.Geometry || !OpenLayers.Feature || !OpenLayers.Feature.Vector) return empty;
+    var doc = new DOMParser().parseFromString(String(textG || ''), 'text/xml');
+    if (!doc || doc.getElementsByTagName('parsererror').length) return empty;
+    var outFeatures = [];
+    var folderOrder = [];
+    var folderTitles = Object.create(null);
+    var folderIconHrefs = Object.create(null);
+    var folderColorHexes = Object.create(null);
+    var hasRootPlacemarks = false;
+    var seenFolders = Object.create(null);
+
+    // KML style resolution: StyleMap(normal) → Style → { iconHref?, colorHex? }
+    var styleById = Object.create(null);
+    var styleMapNormalById = Object.create(null);
+    try {
+      var docEl0 = openMapsKmlFindDocumentElement(doc);
+      if (docEl0) {
+        var styleEls = docEl0.getElementsByTagName ? docEl0.getElementsByTagName('Style') : [];
+        for (var si = 0; si < styleEls.length; si++) {
+          var st = styleEls[si];
+          if (!st || st.nodeType !== 1) continue;
+          var sid = st.getAttribute ? st.getAttribute('id') : '';
+          sid = sid ? String(sid) : '';
+          if (!sid) continue;
+          var iconHref = null;
+          var iconStyleEl = openMapsKmlTextFirstLocalChild(st, 'IconStyle');
+          if (iconStyleEl) {
+            var iconEl = openMapsKmlTextFirstLocalChild(iconStyleEl, 'Icon');
+            if (iconEl) {
+              var hrefEl = openMapsKmlTextFirstLocalChild(iconEl, 'href');
+              if (hrefEl && hrefEl.textContent) iconHref = String(hrefEl.textContent).trim();
+            }
+          }
+          var colorHex = null;
+          if (iconStyleEl) {
+            var cEl = openMapsKmlTextFirstLocalChild(iconStyleEl, 'color');
+            if (cEl && cEl.textContent) colorHex = openMapsKmlAbgrToHex(cEl.textContent);
+          }
+          if (!colorHex) {
+            var lineStyleEl = openMapsKmlTextFirstLocalChild(st, 'LineStyle');
+            if (lineStyleEl) {
+              var lc = openMapsKmlTextFirstLocalChild(lineStyleEl, 'color');
+              if (lc && lc.textContent) colorHex = openMapsKmlAbgrToHex(lc.textContent);
+            }
+          }
+          if (!colorHex) {
+            var polyStyleEl = openMapsKmlTextFirstLocalChild(st, 'PolyStyle');
+            if (polyStyleEl) {
+              var pc = openMapsKmlTextFirstLocalChild(polyStyleEl, 'color');
+              if (pc && pc.textContent) colorHex = openMapsKmlAbgrToHex(pc.textContent);
+            }
+          }
+          styleById[sid] = { iconHref: iconHref, colorHex: colorHex };
+        }
+        var smEls = docEl0.getElementsByTagName ? docEl0.getElementsByTagName('StyleMap') : [];
+        for (var smi = 0; smi < smEls.length; smi++) {
+          var sm = smEls[smi];
+          if (!sm || sm.nodeType !== 1) continue;
+          var smid = sm.getAttribute ? sm.getAttribute('id') : '';
+          smid = smid ? String(smid) : '';
+          if (!smid) continue;
+          var pairs = openMapsKmlTextAllLocalChildren(sm, 'Pair');
+          for (var pi = 0; pi < pairs.length; pi++) {
+            var pr = pairs[pi];
+            if (!pr) continue;
+            var keyTxt = openMapsKmlChildText(pr, 'key');
+            if (String(keyTxt || '').trim() !== 'normal') continue;
+            var su = openMapsKmlChildText(pr, 'styleUrl');
+            var norm = openMapsKmlTextNormalizeStyleUrl(su);
+            if (norm) styleMapNormalById[smid] = norm;
+            break;
+          }
+        }
+      }
+    } catch (eSty) { /* ignore */ }
+
+    function resolvePlacemarkStyle(pmEl) {
+      if (!pmEl) return null;
+      var styleUrl = openMapsKmlChildText(pmEl, 'styleUrl');
+      var sid0 = openMapsKmlTextNormalizeStyleUrl(styleUrl);
+      if (!sid0) return null;
+      var sid = styleMapNormalById[sid0] || sid0;
+      return styleById[sid] || null;
+    }
+
+    function recordFolder(fid, title) {
+      if (seenFolders[fid]) return;
+      seenFolders[fid] = true;
+      folderOrder.push(fid);
+      folderTitles[fid] = (title && String(title).trim()) ? String(title).trim() : ('Folder ' + fid);
+    }
+
+    function walkContainer(containerEl, pathPrefix) {
+      if (!containerEl) return;
+      var children = [];
+      for (var c = containerEl.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 1) children.push(c);
+      }
+      var folderIdx = 0;
+      for (var i = 0; i < children.length; i++) {
+        var ch = children[i];
+        var nm = openMapsKmlLocalName(ch);
+        if (nm === 'Placemark') {
+          var geom = openMapsKmlPlacemarkToGeometry(ch);
+          if (!geom) continue;
+          try {
+            if (proj4326 && proj3857 && typeof geom.transform === 'function') geom.transform(proj4326, proj3857);
+          } catch (eTr) { /* ignore */ }
+          var folderId = pathPrefix === '' ? '__root__' : pathPrefix;
+          if (folderId === '__root__') hasRootPlacemarks = true;
+          // Record first usable folder icon/color from Placemark style
+          if (folderIconHrefs[folderId] == null || folderColorHexes[folderId] == null) {
+            var st0 = resolvePlacemarkStyle(ch);
+            if (st0) {
+              if (folderIconHrefs[folderId] == null && st0.iconHref && openMapsKmlTextIsUsableIconHref(st0.iconHref)) {
+                folderIconHrefs[folderId] = String(st0.iconHref).trim();
+              }
+              if (folderColorHexes[folderId] == null && st0.colorHex) {
+                folderColorHexes[folderId] = String(st0.colorHex);
+              }
+            }
+          }
+          var attrs = {
+            name: openMapsKmlChildText(ch, 'name'),
+            description: openMapsKmlChildText(ch, 'description'),
+            openMapsKmlFolderId: folderId
+          };
+          outFeatures.push(new OpenLayers.Feature.Vector(geom, attrs));
+        } else if (nm === 'Folder') {
+          var fid = pathPrefix === '' ? String(folderIdx) : (pathPrefix + '/' + folderIdx);
+          folderIdx++;
+          recordFolder(fid, openMapsKmlChildText(ch, 'name'));
+          walkContainer(ch, fid);
+        }
+      }
+    }
+
+    var docEl = openMapsKmlFindDocumentElement(doc);
+    if (docEl) walkContainer(docEl, '');
+
+    var layerIds = [];
+    if (hasRootPlacemarks) layerIds.push('__root__');
+    for (var fo = 0; fo < folderOrder.length; fo++) {
+      if (layerIds.indexOf(folderOrder[fo]) === -1) layerIds.push(folderOrder[fo]);
+    }
+
+    return {
+      features: outFeatures,
+      folderOrder: folderOrder,
+      folderTitles: folderTitles,
+      hasRootPlacemarks: hasRootPlacemarks,
+      layerIds: layerIds,
+      folderIconHrefs: folderIconHrefs,
+      folderColorHexes: folderColorHexes
+    };
+  }
+
+  function openMapsKmlTextToVectorFeatures(textG, proj4326, proj3857) {
+    return openMapsKmlTextParseFull(textG, proj4326, proj3857).features;
+  }
+
+  /** Union of feature bounds in EPSG:4326 for KML/My Maps metadata (sidebar BBox, out-of-area). */
+  function openMapsKmlComputeBbox4326FromFeatures(feats, projMap) {
+    if (!feats || !feats.length || !projMap) return null;
+    var proj4326 = new OpenLayers.Projection('EPSG:4326');
+    var acc = null;
+    for (var i = 0; i < feats.length; i++) {
+      var f = feats[i];
+      if (!f || !f.geometry) continue;
+      try {
+        var gb = f.geometry.getBounds();
+        if (!gb) continue;
+        var b = gb.clone();
+        b.transform(projMap, proj4326);
+        if (!acc) acc = b;
+        else acc.extend(b);
+      } catch (eBb) { /* ignore */ }
+    }
+    if (!acc) return null;
+    return [acc.left, acc.bottom, acc.right, acc.top];
+  }
+
+  /** Hide/show KML vectors per sidebar folder row (`mapLayers[].visible`) and refresh per-folder symbology. */
+  function openMapsSyncKmlFolderFeatureStyles(mapHandle) {
+    openMapsApplyKmlFolderFeatureStyles(mapHandle);
+  }
+
+  /** Remove KML vector from `olMap` so a hidden / ToU-blocked row cannot leave a stale OL layer above aerial. */
+  function openMapsGoogleMyMapsLayerRemoveFromMap(layer) {
+    if (!layer) return;
+    try {
+      var olm = (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+      if (olm && olm.layers && olm.layers.indexOf(layer) >= 0 && typeof olm.removeLayer === 'function') {
+        olm.removeLayer(layer);
+        try { openMapsGmmDiagOnGmmMapMutate('removeFromMap', layer); } catch (eD) { /* ignore */ }
+      }
+    } catch (e1) { /* ignore */ }
+  }
+
+  function openMapsGoogleMyMapsLayerAddToMap(layer) {
+    if (!layer) return;
+    try {
+      var olm = (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+      if (olm && olm.layers && olm.layers.indexOf(layer) === -1 && typeof olm.addLayer === 'function') {
+        olm.addLayer(layer);
+        try { openMapsGmmDiagOnGmmMapMutate('addToMap', layer); } catch (eD) { /* ignore */ }
+      }
+    } catch (e1) { /* ignore */ }
+  }
+
+  /**
+   * Phase 1 — My Maps OpenLayers stack tracing (opt-in). **Not treated as a cause of satellite imagery failure** — console-only hooks for layer-order debugging.
+   * Enable: `localStorage.setItem('openmaps-gmm-diag','1')` then reload WME. Disable: removeItem + reload.
+   * Or pre-load: `unsafeWindow.__OPEN_MAPS_GMM_DIAG__ = true` before the script runs.
+   * Opt-in (default off): `localStorage.setItem('openmaps-enable-google-mymaps','1')` then reload.
+   * Hard off (overrides enable): `openmaps-disable-google-mymaps=1`.
+   */
+  var OPEN_MAPS_GMM_DIAG_STORAGE_KEY = 'openmaps-gmm-diag';
+  var openMapsGmmDiagHelpLogged = false;
+
+  function openMapsGmmDiagEnabled() {
+    try {
+      if (typeof unsafeWindow !== 'undefined' && unsafeWindow.__OPEN_MAPS_GMM_DIAG__) return true;
+    } catch (eU) { /* ignore */ }
+    try {
+      return localStorage.getItem(OPEN_MAPS_GMM_DIAG_STORAGE_KEY) === '1';
+    } catch (eL) {
+      return false;
+    }
+  }
+
+  function openMapsGmmDiagLog(tag, detail) {
+    try {
+      console.info('[OpenMaps GMM diag]', tag, detail !== undefined ? detail : '');
+    } catch (eC) { /* ignore */ }
+  }
+
+  function openMapsGmmDiagPrintHelpOnce() {
+    if (!openMapsGmmDiagEnabled() || openMapsGmmDiagHelpLogged) return;
+    openMapsGmmDiagHelpLogged = true;
+    openMapsGmmDiagLog(
+      'HOWTO',
+      'Reproduce the bug, save the console. Disable: localStorage.removeItem("' + OPEN_MAPS_GMM_DIAG_STORAGE_KEY + '"); location.reload()'
+    );
+  }
+
+  function openMapsGmmDiagOlStackSnapshot(olMap, label) {
+    if (!openMapsGmmDiagEnabled() || !olMap || !olMap.layers) return;
+    var rows = [];
+    var max = Math.min(olMap.layers.length, 80);
+    for (var i = 0; i < max; i++) {
+      var L = olMap.layers[i];
+      var nm = (L && L.name != null) ? String(L.name) : '';
+      var ix = -1;
+      try {
+        ix = typeof olMap.getLayerIndex === 'function' ? olMap.getLayerIndex(L) : i;
+      } catch (eIx) { ix = i; }
+      var vis = null;
+      try {
+        vis = L && typeof L.getVisibility === 'function' ? L.getVisibility() : null;
+      } catch (eV) { vis = null; }
+      rows.push({
+        arrayIdx: i,
+        stackIx: ix,
+        name: nm.slice(0, 120),
+        cls: L && L.CLASS_NAME ? L.CLASS_NAME : '',
+        vis: vis
+      });
+    }
+    openMapsGmmDiagLog('OL stack: ' + label, {
+      total: olMap.layers.length,
+      shown: max,
+      layers: rows
+    });
+  }
+
+  function openMapsGmmDiagIsOurOpenMapsLayerName(nameStr) {
+    if (!nameStr) return false;
+    return nameStr.indexOf('OpenMaps_') === 0 || nameStr.indexOf('BBOX_') === 0;
+  }
+
+  function openMapsGmmDiagMaybeWrapOlMapSetLayerIndex(olMap) {
+    if (!openMapsGmmDiagEnabled() || !olMap || olMap.__openmapsGmmDiagSlIx) return;
+    olMap.__openmapsGmmDiagSlIx = true;
+    var inner = olMap.setLayerIndex;
+    if (typeof inner !== 'function') return;
+    olMap.setLayerIndex = function(layer, idx) {
+      var nm = '';
+      try {
+        nm = layer && layer.name != null ? String(layer.name) : '';
+      } catch (eN) { nm = ''; }
+      if (!openMapsGmmDiagIsOurOpenMapsLayerName(nm)) {
+        openMapsGmmDiagLog('setLayerIndex → non-OpenMaps layer', {
+          name: nm,
+          idx: idx,
+          cls: layer && layer.CLASS_NAME ? layer.CLASS_NAME : ''
+        });
+      }
+      return inner.apply(this, arguments);
+    };
+  }
+
+  function openMapsGmmDiagMaybeWrapOlMapRemoveLayer(olMap) {
+    if (!openMapsGmmDiagEnabled() || !olMap || olMap.__openmapsGmmDiagRm) return;
+    olMap.__openmapsGmmDiagRm = true;
+    var inner = olMap.removeLayer;
+    if (typeof inner !== 'function') return;
+    olMap.removeLayer = function(layer) {
+      var nm = '';
+      try {
+        nm = layer && layer.name != null ? String(layer.name) : '';
+      } catch (eN) { nm = ''; }
+      if (!openMapsGmmDiagIsOurOpenMapsLayerName(nm)) {
+        openMapsGmmDiagLog('removeLayer → non-OpenMaps layer', {
+          name: nm,
+          cls: layer && layer.CLASS_NAME ? layer.CLASS_NAME : ''
+        });
+      }
+      return inner.apply(this, arguments);
+    };
+  }
+
+  function openMapsGmmDiagMaybeWrapWMapRemoveLayer() {
+    if (!openMapsGmmDiagEnabled() || typeof W === 'undefined' || !W.map || W.map.__openmapsGmmDiagWRm) return;
+    W.map.__openmapsGmmDiagWRm = true;
+    var wm = W.map;
+    var inner = wm.removeLayer;
+    if (typeof inner !== 'function') return;
+    wm.removeLayer = function(layer) {
+      var nm = '';
+      try {
+        nm = layer && layer.name != null ? String(layer.name) : '';
+      } catch (eN) { nm = ''; }
+      if (!openMapsGmmDiagIsOurOpenMapsLayerName(nm)) {
+        openMapsGmmDiagLog('W.map.removeLayer → non-OpenMaps layer', {
+          name: nm,
+          cls: layer && layer.CLASS_NAME ? layer.CLASS_NAME : ''
+        });
+      }
+      return inner.apply(this, arguments);
+    };
+  }
+
+  function openMapsGmmDiagOnGmmMapMutate(op, layer) {
+    if (!openMapsGmmDiagEnabled()) return;
+    var olm = (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+    openMapsGmmDiagLog('GMM ' + op, {
+      layerName: layer && layer.name != null ? String(layer.name) : null,
+      olLayerCount: olm && olm.layers ? olm.layers.length : null
+    });
+    openMapsGmmDiagOlStackSnapshot(olm, 'after ' + op);
+  }
+
+  /** Default OpenLayers style for an ESRI_FEATURE point (shared by layer + lift clone). */
+  function openMapsEsriPointVectorStyle(pack) {
+    if (pack.innerHex) {
+      return {
+        graphicName: 'circle',
+        pointRadius: Math.max(4, Math.round(pack.symbolR)),
+        fillColor: pack.innerHex,
+        fillOpacity: 0.98,
+        strokeColor: pack.fillHex,
+        strokeWidth: Math.max(2, Math.round(pack.symbolR * 0.35)),
+        strokeOpacity: 1
+      };
+    }
+    return {
+      graphicName: 'circle',
+      pointRadius: Math.max(4, Math.round(pack.symbolR)),
+      fillColor: pack.fillHex,
+      fillOpacity: 0.92,
+      strokeColor: '#ffffff',
+      strokeWidth: pack.whiteW,
+      strokeOpacity: 1
+    };
+  }
+
+  /**
+   * Map Inspector overlay style for an ESRI_FEATURE clone (lines/polygons; points use halo+ring layers).
+   * @param {OpenLayers.Geometry|null} geom
+   * @param {string} avatarFill
+   * @returns {Object}
+   */
+  function openMapsEsriInspectorHighlightStyle(geom, avatarFill) {
+    var pack = openMapsEsriFeatureAvatarMarkerPack(avatarFill);
+    if (!geom || !geom.CLASS_NAME) {
+      return { strokeColor: '#ffffff', strokeWidth: pack.hlStroke, fillOpacity: 0.35, fillColor: pack.fillHex, strokeOpacity: 0.8 };
+    }
+    var cn = geom.CLASS_NAME;
+    if (cn === 'OpenLayers.Geometry.Point' || cn === 'OpenLayers.Geometry.MultiPoint') {
+      return null;
+    }
+    if (cn === 'OpenLayers.Geometry.LineString' || cn === 'OpenLayers.Geometry.MultiLineString' || cn === 'OpenLayers.Geometry.LinearRing') {
+      return {
+        strokeColor: '#ffffff',
+        strokeWidth: Math.max(4, Math.round(pack.polyStrokeW * 2.5)),
+        strokeOpacity: 0.8,
+        fillOpacity: 0
+      };
+    }
+    return {
+      fillColor: pack.fillHex,
+      fillOpacity: 0.42,
+      strokeColor: '#ffffff',
+      strokeWidth: Math.max(3, Math.round(pack.polyStrokeW * 2)),
+      strokeOpacity: 0.8
+    };
+  }
+
+  /**
+   * Idle map style for geometry-only Map Inspector rows (WMS/WFS/query) drawn under hover/selection overlays.
+   * @param {OpenLayers.Geometry|null} geom
+   * @param {string} avatarFill
+   * @returns {Object|null} null for point/multipoint (caller uses {@link openMapsEsriPointVectorStyle}).
+   */
+  function openMapsInspectorViewportGeomBaseStyle(geom, avatarFill) {
+    var pack = openMapsEsriFeatureAvatarMarkerPack(avatarFill);
+    if (!geom || !geom.CLASS_NAME) {
+      return {
+        strokeColor: pack.fillHex,
+        strokeWidth: Math.max(2, pack.polyStrokeW),
+        strokeOpacity: 0.55,
+        fillColor: pack.fillHex,
+        fillOpacity: 0.22
+      };
+    }
+    var cn = geom.CLASS_NAME;
+    if (cn === 'OpenLayers.Geometry.Point' || cn === 'OpenLayers.Geometry.MultiPoint') {
+      return null;
+    }
+    if (cn === 'OpenLayers.Geometry.LineString' || cn === 'OpenLayers.Geometry.MultiLineString' || cn === 'OpenLayers.Geometry.LinearRing') {
+      return {
+        strokeColor: pack.fillHex,
+        strokeWidth: Math.max(2, Math.round(pack.polyStrokeW * 1.6)),
+        strokeOpacity: 0.72,
+        fillOpacity: 0
+      };
+    }
+    return {
+      fillColor: pack.fillHex,
+      fillOpacity: 0.22,
+      strokeColor: pack.fillHex,
+      strokeWidth: Math.max(2, pack.polyStrokeW),
+      strokeOpacity: 0.5
+    };
+  }
+
+  /**
+   * Map Inspector: viewport-lite vector enumeration, list/details, optional WMS/ESRI query import.
+   * UI is a collapsible `details` block in the Open Maps sidebar (after the active maps list).
+   */
+  function initOpenMapsInspector(sidebarTab) {
+    if (typeof OpenLayers === 'undefined' || !W.map || typeof W.map.getOLMap !== 'function') return;
+    var olMap = W.map.getOLMap();
+    if (!olMap) return;
+
+    var MAX_ITEMS = 500;
+    var MAX_PER_LAYER = 200;
+    var MAX_TABLE_COLS = 40;
+    var DEBOUNCE_MS = 350;
+
+    var viewportItemsById = new Map();
+    var queryItemsById = new Map();
+    var viewportListIds = [];
+    var queryListIds = [];
+    var featureRefById = new Map();
+    var selectedId = null;
+    /** Per-map: expand (true) or collapse (false) feature rows under that map in the inspector list. Keys are String(mapId). */
+    var mapGroupShown = Object.create(null);
+    /** Skip full viewport rescan when zoom + quantized view center unchanged (Refresh forces a full run). */
+    var lastInspectorViewportBucket = null;
+    /** Coalesce ESRI_FEATURE layer.replace → inspector vector ref updates. */
+    var inspectorVectorStaleTimer = null;
+    var moveTimer = null;
+    var mapClickRegistered = false;
+    var inspectorMapClickCaptureRegistered = false;
+    var highlightSelectLayer = null;
+    var highlightSelectHaloLayer = null;
+    var highlightSelectLiftLayer = null;
+    var highlightHoverLayer = null;
+    var highlightHoverHaloLayer = null;
+    var highlightHoverLiftLayer = null;
+    /** Geometry-only viewport rows (WMS/WFS/query): persistent symbols while inspector is open. */
+    var inspectorViewportGeomLayer = null;
+    /** Stable inspector item id under the map pointer when not using list hover (see getEffectiveHoverHighlightId). */
+    var mapHoverHighlightId = null;
+    /** Last list-hover target from row mouseenter / leave (may equal selectedId when between rows). */
+    var listHoverHighlightId = null;
+    /** Coalesce list hover → map highlight to one OpenLayers update per frame. */
+    var inspectorHoverHLRaf = null;
+    var inspectorHoverHLPending = null;
+    /** Coalesce map pointer moves → ESRI feature hover highlight. */
+    var mapEsriHoverRaf = null;
+    var mapEsriHoverPendingEvt = null;
+    /** Empty string = no ESRI feature under pointer; non-empty = cache key for last hover hit. */
+    var mapEsriHoverLastKey = '';
+    var truncated = false;
+    var viewportGen = 0;
+    /** Per viewport scan generation: remote layer request bookkeeping for progress UI. */
+    var inspectorRemoteScheduled = Object.create(null);
+    var inspectorRemoteCompleted = Object.create(null);
+    var inspectorViewportXhrQueue = [];
+    var inspectorViewportXhrRunning = 0;
+    var INSPECTOR_VIEWPORT_XHR_PARALLEL = 6;
+    var INSPECTOR_VIEWPORT_XHR_TIMEOUT_MS = 25000;
+    var geometryById = new Map();
+    var inspectorCalloutEl = null;
+    var inspectorCalloutLonLat = null;
+
+    var inspectorRoot = document.createElement('details');
+    inspectorRoot.className = 'openmaps-inspector-details';
+    inspectorRoot.style.cssText = 'margin:0; border:0; padding:0; background:transparent;';
+    var summary = document.createElement('summary');
+    summary.style.cssText = 'font-weight:600; cursor:pointer; padding:0; color:#3c4043; outline:none;';
+    summary.textContent = I18n.t('openmaps.inspector_title');
+    inspectorRoot.appendChild(summary);
+
+    var card = document.createElement('div');
+    card.className = 'openmaps-inspector-panel';
+    inspectorRoot.appendChild(card);
+
+    /** Map Inspector: per-map / per-layer inclusion for viewport scan (`undefined` = include). */
+    var inspectorSourceInclude = Object.create(null);
+    /** Per folder row: show nested feature rows in the list (`undefined` = show). Independent of viewport scan (⋮ menu). */
+    var inspectorFolderChildrenVisible = Object.create(null);
+    function inspectorSourceStorageKey(mapId, layerKey) {
+      return String(mapId) + '::' + String(layerKey);
+    }
+    function isInspectorSourceIncluded(mapId, layerKey) {
+      return inspectorSourceInclude[inspectorSourceStorageKey(mapId, layerKey)] !== false;
+    }
+    function isInspectorFolderChildrenVisible(mapId, layerKey) {
+      return inspectorFolderChildrenVisible[inspectorSourceStorageKey(mapId, layerKey)] !== false;
+    }
+
+    var featuresHd = document.createElement('div');
+    featuresHd.className = 'openmaps-inspector-hd';
+    featuresHd.textContent = I18n.t('openmaps.inspector_features_grouped');
+    card.appendChild(featuresHd);
+
+    function nativeIconBtn(iconClass, tipKey, extraClass) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'openmaps-inspector-ibtn' + (extraClass ? ' ' + extraClass : '');
+      b.innerHTML = '<i class="fa ' + iconClass + '" aria-hidden="true"></i>';
+      b.setAttribute('aria-label', I18n.t('openmaps.' + tipKey));
+      b.title = I18n.t('openmaps.' + tipKey);
+      return b;
+    }
+    var filterRow = document.createElement('div');
+    filterRow.className = 'openmaps-inspector-filter-outer';
+    var searchWrap = document.createElement('div');
+    searchWrap.className = 'openmaps-inspector-search-wrap';
+    var searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'openmaps-inspector-filter-min';
+    searchInput.placeholder = I18n.t('openmaps.inspector_search_placeholder');
+    searchInput.setAttribute('aria-label', I18n.t('openmaps.inspector_search_placeholder'));
+    var refreshBtn = nativeIconBtn('fa-refresh', 'inspector_refresh');
+    searchWrap.appendChild(searchInput);
+    searchWrap.appendChild(refreshBtn);
+    filterRow.appendChild(searchWrap);
+    card.appendChild(filterRow);
+
+    var listHost = document.createElement('div');
+    listHost.className = 'openmaps-inspector-list openmaps-inspector-sep';
+    card.appendChild(listHost);
+    /** While true, list-driven hover id wins over map-driven hover for dual highlights. */
+    var inspectorPointerOverList = false;
+    listHost.addEventListener('pointerenter', function() {
+      inspectorPointerOverList = true;
+      applyInspectorDualHighlights();
+    });
+    listHost.addEventListener('pointerleave', function(ev) {
+      try {
+        if (ev.relatedTarget && listHost.contains(ev.relatedTarget)) return;
+      } catch (ePE) { /* ignore */ }
+      inspectorPointerOverList = false;
+      applyInspectorDualHighlights();
+    });
+
+    var statusLine = document.createElement('div');
+    statusLine.className = 'openmaps-inspector-status';
+    card.appendChild(statusLine);
+
+    var queryRow = document.createElement('div');
+    queryRow.className = 'openmaps-inspector-query-row openmaps-inspector-sep';
+    queryRow.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
+    var ingestLabel = document.createElement('label');
+    ingestLabel.className = 'openmaps-inspector-ingest-label';
+    var ingestCheck = document.createElement('input');
+    ingestCheck.type = 'checkbox';
+    ingestCheck.checked = Settings.get().inspectorQueryIngest === true;
+    ingestCheck.addEventListener('change', function() {
+      Settings.set('inspectorQueryIngest', !!ingestCheck.checked);
+    });
+    ingestLabel.appendChild(ingestCheck);
+    ingestLabel.appendChild(document.createTextNode(I18n.t('openmaps.inspector_query_ingest_auto')));
+    var autoWmsGfiLabel = document.createElement('label');
+    autoWmsGfiLabel.className = 'openmaps-inspector-ingest-label';
+    var autoWmsGfiCheck = document.createElement('input');
+    autoWmsGfiCheck.type = 'checkbox';
+    autoWmsGfiCheck.checked = Settings.get().inspectorAutoWmsGetFeatureInfo !== false;
+    autoWmsGfiCheck.addEventListener('change', function() {
+      Settings.set('inspectorAutoWmsGetFeatureInfo', !!autoWmsGfiCheck.checked);
+      if (isInspectorWinOpen()) {
+        lastInspectorViewportBucket = null;
+        scheduleViewportRefresh();
+      }
+    });
+    autoWmsGfiLabel.appendChild(autoWmsGfiCheck);
+    autoWmsGfiLabel.appendChild(document.createTextNode(I18n.t('openmaps.inspector_auto_wms_gfi')));
+    autoWmsGfiLabel.title = I18n.t('openmaps.inspector_auto_wms_gfi_tooltip');
+    var clearQueryBtn = nativeIconBtn('fa-trash', 'inspector_clear_query_items');
+    clearQueryBtn.style.cssText = 'align-self:flex-start; padding:0;';
+    queryRow.appendChild(ingestLabel);
+    queryRow.appendChild(autoWmsGfiLabel);
+    queryRow.appendChild(clearQueryBtn);
+    card.appendChild(queryRow);
+
+    // Floating window wrapper (requested UX): keep a small launcher in the sidebar,
+    // but render the inspector itself as a draggable overlay on the map.
+    var inspectorLauncher = document.createElement('button');
+    inspectorLauncher.type = 'button';
+    inspectorLauncher.className = 'openmaps-inspector-launcher-btn';
+    inspectorLauncher.innerHTML = '<i class="fa fa-list-alt" aria-hidden="true"></i>';
+    inspectorLauncher.title = I18n.t('openmaps.inspector_title');
+    inspectorLauncher.setAttribute('aria-label', I18n.t('openmaps.inspector_title'));
+    inspectorLauncher.style.cssText = 'width:100%; margin:8px 0 4px 0;';
+    sidebarTab.appendChild(inspectorLauncher);
+
+    var win = document.createElement('div');
+    win.className = 'openmaps-inspector-window';
+    win.style.cssText = 'display:none; position:fixed; z-index:100560; right:18px; top:110px; width:300px; max-width:min(92vw, 380px); max-height:90vh; background:#fff; border:none; border-radius:3px; box-shadow:0 1px 3px rgba(60,64,67,0.12),0 4px 12px rgba(60,64,67,0.12); overflow:hidden; flex-direction:column;';
+
+    var winHead = document.createElement('div');
+    winHead.className = 'openmaps-inspector-window-head';
+    var winTitle = document.createElement('div');
+    winTitle.className = 'openmaps-inspector-window-title';
+    winTitle.textContent = I18n.t('openmaps.inspector_title');
+    var winBtns = document.createElement('div');
+    winBtns.style.cssText = 'display:flex; align-items:center; gap:0;';
+    var winMin = nativeIconBtn('fa-toggle-up', 'query_window_minimize', 'openmaps-inspector-ibtn--win');
+    var winClose = nativeIconBtn('fa-window-close', 'query_window_close', 'openmaps-inspector-ibtn--win');
+    winMin.setAttribute('aria-label', I18n.t('openmaps.query_window_minimize'));
+    winMin.title = I18n.t('openmaps.query_window_minimize');
+    winClose.setAttribute('aria-label', I18n.t('openmaps.query_window_close'));
+    winClose.title = I18n.t('openmaps.query_window_close');
+    winBtns.appendChild(winMin);
+    winBtns.appendChild(winClose);
+    winHead.appendChild(winTitle);
+    winHead.appendChild(winBtns);
+    win.appendChild(winHead);
+
+    var winBody = document.createElement('div');
+    winBody.className = 'openmaps-inspector-window-body';
+    winBody.style.cssText = 'padding:0 8px 6px; flex:1 1 auto; min-height:0; overflow:hidden; display:flex; flex-direction:column; background:#fff;';
+    win.appendChild(winBody);
+
+    function isInspectorWinOpen() {
+      return win && win.style.display !== 'none';
+    }
+
+    // Put the actual inspector content into the floating window body.
+    inspectorRoot.style.margin = '0';
+    inspectorRoot.style.border = '0';
+    inspectorRoot.style.borderRadius = '0';
+    inspectorRoot.style.padding = '0';
+    inspectorRoot.style.background = 'transparent';
+    summary.style.display = 'none'; // header already exists in window chrome
+    inspectorRoot.open = true; // always open inside window
+    winBody.appendChild(inspectorRoot);
+
+    // Attach to Waze map container for sane stacking
+    (document.getElementById('WazeMap') || document.body).appendChild(win);
+
+    function getWinState() {
+      var s = Settings.get();
+      return (s && s.inspectorWindow && typeof s.inspectorWindow === 'object') ? s.inspectorWindow : null;
+    }
+    function putWinState(patch) {
+      var s = Settings.get();
+      if (!s.inspectorWindow || typeof s.inspectorWindow !== 'object') s.inspectorWindow = {};
+      Object.assign(s.inspectorWindow, patch || {});
+      Settings.put(s);
+    }
+    function applyWinState() {
+      var st = getWinState();
+      if (!st) return;
+      if (typeof st.left === 'number') win.style.left = st.left + 'px';
+      if (typeof st.top === 'number') win.style.top = st.top + 'px';
+      if (typeof st.width === 'number') win.style.width = Math.max(280, Math.min(520, st.width)) + 'px';
+      if (st.minimized === true) {
+        winBody.style.display = 'none';
+        var ico = winMin.querySelector('i');
+        if (ico) { ico.classList.remove('fa-toggle-up'); ico.classList.add('fa-toggle-down'); }
+      }
+    }
+    applyWinState();
+
+    function openWin() {
+      win.style.display = 'flex';
+      syncMapGroupDefaults();
+      scheduleViewportRefresh();
+    }
+    function closeWin() {
+      win.style.display = 'none';
+      lastInspectorViewportBucket = null;
+      cancelScheduledInspectorHoverHL();
+      if (inspectorVectorStaleTimer) {
+        clearTimeout(inspectorVectorStaleTimer);
+        inspectorVectorStaleTimer = null;
+      }
+      selectedId = null;
+      clearHighlight();
+      try {
+        if (inspectorViewportGeomLayer && inspectorViewportGeomLayer.removeAllFeatures) inspectorViewportGeomLayer.removeAllFeatures();
+      } catch (eVgClose) { /* ignore */ }
+      hideInspectorCallout({ clearSelection: true });
+    }
+    inspectorLauncher.addEventListener('click', function() {
+      if (win.style.display === 'none') openWin();
+      else closeWin();
+    });
+    winClose.addEventListener('click', function() { closeWin(); });
+    winMin.addEventListener('click', function() {
+      var minimized = winBody.style.display !== 'none';
+      winBody.style.display = minimized ? 'none' : 'flex';
+      var ico = winMin.querySelector('i');
+      if (ico) {
+        ico.classList.toggle('fa-toggle-up', !minimized);
+        ico.classList.toggle('fa-toggle-down', minimized);
+      }
+      putWinState({ minimized: minimized });
+    });
+
+    // Simple draggable header (no dependencies)
+    (function enableDrag() {
+      var dragging = false;
+      var sx = 0, sy = 0, sl = 0, st = 0;
+      function onMove(ev) {
+        if (!dragging) return;
+        var dx = ev.clientX - sx;
+        var dy = ev.clientY - sy;
+        var nl = sl + dx;
+        var nt = st + dy;
+        var vw = window.innerWidth, vh = window.innerHeight;
+        var r = win.getBoundingClientRect();
+        var w = r.width || 320;
+        var h = r.height || 240;
+        var keep = 40;
+        nl = Math.min(vw - keep, Math.max(keep - w, nl));
+        nt = Math.min(vh - keep, Math.max(keep - h, nt));
+        win.style.left = nl + 'px';
+        win.style.top = nt + 'px';
+        win.style.right = 'auto';
+      }
+      function onUp() {
+        if (!dragging) return;
+        dragging = false;
+        document.removeEventListener('mousemove', onMove, true);
+        document.removeEventListener('mouseup', onUp, true);
+        var rect = win.getBoundingClientRect();
+        putWinState({ left: rect.left, top: rect.top, width: rect.width });
+      }
+      winHead.addEventListener('mousedown', function(ev) {
+        // Ignore clicks on buttons
+        if (ev.target && ev.target.closest && (ev.target.closest('wz-button') || ev.target.closest('button'))) return;
+        dragging = true;
+        var rect = win.getBoundingClientRect();
+        sx = ev.clientX; sy = ev.clientY;
+        sl = rect.left; st = rect.top;
+        win.style.left = sl + 'px';
+        win.style.top = st + 'px';
+        win.style.right = 'auto';
+        document.addEventListener('mousemove', onMove, true);
+        document.addEventListener('mouseup', onUp, true);
+      });
+    })();
+
+    function isVectorLayer(layer) {
+      return !!(layer && layer.CLASS_NAME === 'OpenLayers.Layer.Vector');
+    }
+
+    function geomIntersectsExtent(geom, extent) {
+      if (!geom || !extent) return false;
+      try {
+        var b = geom.getBounds();
+        return !!(b && extent.intersectsBounds(b));
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function labelFromFeature(feature) {
+      var attrs = feature.attributes || {};
+      var keys = ['name', 'title', 'label', 'NAME', 'Naam', 'naam'];
+      for (var i = 0; i < keys.length; i++) {
+        var v = attrs[keys[i]];
+        if (v != null && String(v).trim() !== '') return String(v).trim();
+      }
+      if (feature.fid != null) return String(feature.fid);
+      if (feature.id != null) return String(feature.id);
+      return '—';
+    }
+
+    function labelFromAttrs(attrs) {
+      if (!attrs || typeof attrs !== 'object') return '—';
+      var keys = ['name', 'title', 'label', 'NAME', 'Naam', 'naam'];
+      for (var i = 0; i < keys.length; i++) {
+        var v = attrs[keys[i]];
+        if (v != null && String(v).trim() !== '') return String(v).trim();
+      }
+      return '—';
+    }
+
+    function geoserverOwsBaseFromWmsUrl(u) {
+      if (!u || typeof u !== 'string') return null;
+      var path = u.split('?')[0].replace(/\/+$/, '');
+      if (path.toLowerCase().indexOf('geoserver') === -1) return null;
+      var m = path.match(/^(.*\/)wms$/i);
+      if (m) return m[1] + 'ows';
+      return null;
+    }
+
+    function stableFeatureId(mapId, layerKey, feature, idx) {
+      var raw = feature.fid != null ? feature.fid : (feature.id != null ? feature.id : '');
+      var tail = raw !== '' ? String(raw).replace(/\W/g, '_').slice(0, 80) : ('i' + idx);
+      return 'om-inspector-v-' + mapId + '-' + layerKey + '-' + tail;
+    }
+
+    function syncMapGroupDefaults() {
+      handles.forEach(function(h) {
+        var k = String(h.mapId);
+        if (typeof mapGroupShown[k] === 'undefined') mapGroupShown[k] = true;
+      });
+    }
+
+    function inspectorViewportExtentBucket(ext) {
+      if (!ext || !olMap) return '';
+      var z;
+      try {
+        z = typeof olMap.getZoom === 'function' ? olMap.getZoom() : (W.map && W.map.getZoom ? W.map.getZoom() : 0);
+      } catch (e0) {
+        z = 0;
+      }
+      var cx = (ext.left + ext.right) / 2;
+      var cy = (ext.bottom + ext.top) / 2;
+      var step = 3500;
+      return String(z) + ':' + Math.round(cx / step) + ':' + Math.round(cy / step);
+    }
+
+    function inspectorHandleForMapId(mapIdStr) {
+      for (var ih = 0; ih < handles.length; ih++) {
+        if (String(handles[ih].mapId) === String(mapIdStr)) return handles[ih];
+      }
+      return null;
+    }
+
+    function inspectorMapGroupExpanded(mid) {
+      return mapGroupShown[mid] !== false;
+    }
+
+    function syncInspectorCalloutPanelWidth() {
+      if (!inspectorCalloutEl || !inspectorCalloutEl._panel) return;
+      try {
+        var r = win.getBoundingClientRect();
+        if (r.width) inspectorCalloutEl._panel.style.width = Math.round(r.width * 1.1) + 'px';
+      } catch (eW) {}
+    }
+
+    function kindLabelForItem(it) {
+      var k = it.kind;
+      if (k === 'query') return I18n.t('openmaps.inspector_kind_query');
+      if (k === 'esri') return I18n.t('openmaps.inspector_kind_esri');
+      if (k === 'wms') return I18n.t('openmaps.inspector_kind_wms');
+      if (k === 'wfs') return I18n.t('openmaps.inspector_kind_wfs');
+      return I18n.t('openmaps.inspector_kind_vector');
+    }
+
+    function mapTitleForInspector(mapId) {
+      var m = maps.get(mapId);
+      if (!m && mapId != null && mapId !== '') {
+        var n = Number(mapId);
+        if (!isNaN(n)) m = maps.get(n);
+      }
+      if (!m && mapId != null) m = maps.get(String(mapId));
+      return m && m.title ? m.title : String(mapId);
+    }
+
+    /** List / highlight dot color: per KML folder when applicable, else map title hash. */
+    function openMapsInspectorFillHexForItem(it) {
+      if (!it) return '#0099ff';
+      var title = it.mapId != null ? mapTitleForInspector(it.mapId) : '';
+      var m = it.mapId != null ? maps.get(it.mapId) : null;
+      var isKml = m && openMapsMapTypeIsKmlVectorOverlay(m.type);
+      if (m && (isKml || m.type === 'ESRI_FEATURE' || m.type === 'WMS')) {
+        var h = inspectorHandleForMapId(it.mapId);
+        if (isKml || (h && h.layerSpecificStyle)) {
+          if (it.inspectorLayerKey != null && it.inspectorLayerKey !== '') {
+            var layerName = it.inspectorLayerKey;
+            if (!isKml && m.layers && m.layers[layerName]) {
+              layerName = m.layers[layerName].title;
+            }
+            return openMapsKmlFolderFillHex(m.title || title, String(layerName));
+          }
+        }
+      }
+      return openMapsMapAvatarColorFromTitle(title);
+    }
+
+    /** Outer circle color for embedded symbols: map/source color (hash of map title). */
+    function openMapsInspectorOuterHexForItem(it) {
+      if (!it) return '#0099ff';
+      var title = it.mapId != null ? mapTitleForInspector(it.mapId) : '';
+      return openMapsMapAvatarColorFromTitle(title);
+    }
+
+    /** Inner (embedded) symbol spec: per-layer color and optional icon (KML only). */
+    function openMapsInspectorInnerSpecForItem(it) {
+      var colorHex = openMapsInspectorFillHexForItem(it);
+      var iconHref = null;
+      if (!it) return { colorHex: colorHex, iconHref: iconHref };
+      var mid = it.mapId;
+      var m = mid != null ? maps.get(mid) : null;
+      if (m && openMapsMapTypeIsKmlVectorOverlay(m.type)) {
+        var layerKey = it.inspectorLayerKey != null ? String(it.inspectorLayerKey) : '';
+        if (layerKey) {
+          try {
+            var lm = m.layers && m.layers[layerKey] ? m.layers[layerKey] : null;
+            if (lm && lm.openMapsKmlColorHex && /^#[0-9a-fA-F]{6}$/.test(String(lm.openMapsKmlColorHex))) {
+              colorHex = String(lm.openMapsKmlColorHex).toLowerCase();
+            } else {
+              colorHex = openMapsKmlFolderFillHex(m.title || mapTitleForInspector(mid), layerKey);
+            }
+            if (lm && lm.openMapsKmlIconHref && openMapsKmlTextIsUsableIconHref(lm.openMapsKmlIconHref)) {
+              iconHref = String(lm.openMapsKmlIconHref).trim();
+            }
+          } catch (eKmlSpec) { /* ignore */ }
+        }
+      }
+      return { colorHex: colorHex, iconHref: iconHref };
+    }
+
+    /** Layer / folder keys for Map Inspector grouping, in Active Maps sub-layer order (plus bbox, then `main` for simple maps). */
+    function inspectorLayerKeysInDisplayOrder(mid) {
+      var h = inspectorHandleForMapId(mid);
+      var m = maps.get(mid);
+      var out = [];
+      var seen = Object.create(null);
+      function push(k) {
+        if (k == null || k === '' || seen[k]) return;
+        seen[k] = 1;
+        out.push(String(k));
+      }
+      if (!h || !m) return out;
+      if (h.bboxLayer && m.area !== 'UN' && !openMapsMapTypeIsKmlVectorOverlay(m.type)) {
+        push('__bbox__');
+      }
+      var typesWithSublayers = { WMS: 1, ESRI: 1, ESRI_FEATURE: 1, GOOGLE_MY_MAPS: 1, LOCAL_KML: 1 };
+      if (h.mapLayers && h.mapLayers.length && typesWithSublayers[m.type]) {
+        for (var si = 0; si < h.mapLayers.length; si++) {
+          if (h.mapLayers[si]) push(h.mapLayers[si].name);
+        }
+      } else {
+        push('main');
+      }
+      return out;
+    }
+
+    function inspectorMergeUnknownLayerKeys(ordered, byLayer) {
+      var seen = Object.create(null);
+      var oi;
+      for (oi = 0; oi < ordered.length; oi++) seen[ordered[oi]] = 1;
+      var extras = [];
+      Object.keys(byLayer).forEach(function(k) {
+        if (!seen[k]) extras.push(k);
+      });
+      extras.sort();
+      var out = ordered.slice();
+      for (var ei = 0; ei < extras.length; ei++) out.push(extras[ei]);
+      return out;
+    }
+
+    function inspectorResolveItemLayerKey(it, mapTitle) {
+      if (it && it.inspectorLayerKey != null && it.inspectorLayerKey !== '') return String(it.inspectorLayerKey);
+      var src = it && it.source ? String(it.source) : '';
+      if (mapTitle && src.indexOf(mapTitle + ' · ') === 0) {
+        var rest = src.slice((mapTitle + ' · ').length);
+        return rest || '__default__';
+      }
+      return '__default__';
+    }
+
+    function inspectorResolveItemLayerLabel(it, mid, layerKey) {
+      if (it && it.inspectorLayerLabel) return String(it.inspectorLayerLabel);
+      var m = maps.get(mid);
+      if (m && m.layers && m.layers[layerKey] && m.layers[layerKey].title) return m.layers[layerKey].title;
+      if (layerKey === '__bbox__') return I18n.t('openmaps.inspector_bbox_layer');
+      if (layerKey === 'main') return I18n.t('openmaps.map_layers_title');
+      return layerKey;
+    }
+
+    function inspectorMapHasConfigurableLayerScan(mid) {
+      var h = inspectorHandleForMapId(mid);
+      var m = maps.get(mid);
+      if (!h || !m) return false;
+      var typesWithSublayers = { WMS: 1, ESRI: 1, ESRI_FEATURE: 1, GOOGLE_MY_MAPS: 1, LOCAL_KML: 1 };
+      var hasBbox = !!(h.bboxLayer && m.area !== 'UN' && !openMapsMapTypeIsKmlVectorOverlay(m.type));
+      var hasMl = !!(h.mapLayers && h.mapLayers.length && typesWithSublayers[m.type]);
+      return hasBbox || hasMl;
+    }
+
+    /**
+     * Sub-layer / folder keys that are enabled in the Active Maps sidebar (eye on), in stable order — used to always show MI folder headers even at (0) hits.
+     */
+    function inspectorListableLayerKeys(mid) {
+      var h = inspectorHandleForMapId(mid);
+      var m = maps.get(mid);
+      var out = [];
+      var seen = Object.create(null);
+      function push(k) {
+        if (k == null || k === '' || seen[k]) return;
+        seen[k] = 1;
+        out.push(String(k));
+      }
+      if (!h || !m) return out;
+      if (h.bboxLayer && m.area !== 'UN' && !openMapsMapTypeIsKmlVectorOverlay(m.type) && h.displayBbox) {
+        push('__bbox__');
+      }
+      var typesWithSublayers = { WMS: 1, ESRI: 1, ESRI_FEATURE: 1, GOOGLE_MY_MAPS: 1, LOCAL_KML: 1 };
+      if (h.mapLayers && h.mapLayers.length && typesWithSublayers[m.type]) {
+        for (var si = 0; si < h.mapLayers.length; si++) {
+          var ml = h.mapLayers[si];
+          if (ml && ml.visible) push(ml.name);
+        }
+      } else {
+        push('main');
+      }
+      return out;
+    }
+
+    function forEachInspectorSourceForMap(mid, cb) {
+      var h = inspectorHandleForMapId(mid);
+      var m = maps.get(mid);
+      if (!h || !m) return;
+      if (h.bboxLayer && m.area !== 'UN' && !openMapsMapTypeIsKmlVectorOverlay(m.type)) {
+        cb('__bbox__', I18n.t('openmaps.inspector_bbox_layer'));
+      }
+      if (!h.mapLayers || !h.mapLayers.length) return;
+      var typesWithSublayers = { WMS: 1, ESRI: 1, ESRI_FEATURE: 1, GOOGLE_MY_MAPS: 1, LOCAL_KML: 1 };
+      if (!typesWithSublayers[m.type]) return;
+      for (var si = 0; si < h.mapLayers.length; si++) {
+        var ml = h.mapLayers[si];
+        if (!ml) continue;
+        var lt = (m.layers && m.layers[ml.name] && m.layers[ml.name].title) ? m.layers[ml.name].title : ml.name;
+        cb(ml.name, lt);
+      }
+    }
+
+    function inspectorBulkSourcesForMap(mid, mode) {
+      var pre = String(mid) + '::';
+      if (mode === 'all') {
+        Object.keys(inspectorSourceInclude).forEach(function(k) {
+          if (k.indexOf(pre) === 0) delete inspectorSourceInclude[k];
+        });
+      } else if (mode === 'none') {
+        forEachInspectorSourceForMap(mid, function(layerKey) {
+          inspectorSourceInclude[inspectorSourceStorageKey(mid, layerKey)] = false;
+        });
+      } else if (mode === 'match') {
+        var h = inspectorHandleForMapId(mid);
+        forEachInspectorSourceForMap(mid, function(layerKey) {
+          var inc = false;
+          if (layerKey === '__bbox__') inc = !!(h && h.displayBbox);
+          else if (h && h.mapLayers) {
+            for (var vi = 0; vi < h.mapLayers.length; vi++) {
+              var mlv = h.mapLayers[vi];
+              if (mlv && mlv.name != null && String(mlv.name) === String(layerKey)) {
+                inc = !!mlv.visible;
+                break;
+              }
+            }
+          }
+          inspectorSourceInclude[inspectorSourceStorageKey(mid, layerKey)] = inc;
+        });
+      }
+      lastInspectorViewportBucket = null;
+      scheduleViewportRefresh();
+    }
+
+    function inspectorRemoteNoteComplete(gen) {
+      inspectorRemoteCompleted[gen] = (inspectorRemoteCompleted[gen] || 0) + 1;
+      if (gen === viewportGen) paintInspectorStatusLine();
+    }
+
+    function pumpInspectorViewportXhrQueue() {
+      while (inspectorViewportXhrRunning < INSPECTOR_VIEWPORT_XHR_PARALLEL && inspectorViewportXhrQueue.length > 0) {
+        var job = inspectorViewportXhrQueue.shift();
+        var gen = job.gen;
+        var opts;
+        try {
+          opts = job.makeOpts();
+        } catch (e) {
+          inspectorRemoteNoteComplete(gen);
+          continue;
+        }
+        if (!opts || !opts.url) {
+          inspectorRemoteNoteComplete(gen);
+          continue;
+        }
+        inspectorViewportXhrRunning++;
+        var timeoutMs = opts.timeout != null ? opts.timeout : INSPECTOR_VIEWPORT_XHR_TIMEOUT_MS;
+        var oload = opts.onload;
+        var oerr = opts.onerror;
+        var oto = opts.ontimeout;
+        function finishOne() {
+          if (inspectorViewportXhrRunning > 0) inspectorViewportXhrRunning--;
+          inspectorRemoteNoteComplete(gen);
+          pumpInspectorViewportXhrQueue();
+        }
+        try {
+          GM_xmlhttpRequest({
+            method: opts.method || 'GET',
+            url: opts.url,
+            timeout: timeoutMs,
+            headers: opts.headers,
+            onload: function(res) {
+              try { if (oload) oload(res); } catch (e1) {}
+              finishOne();
+            },
+            onerror: function() {
+              try { if (oerr) oerr(); } catch (e2) {}
+              finishOne();
+            },
+            ontimeout: function() {
+              try { if (oto) oto(); } catch (e3) {}
+              finishOne();
+            }
+          });
+        } catch (e4) {
+          if (inspectorViewportXhrRunning > 0) inspectorViewportXhrRunning--;
+          inspectorRemoteNoteComplete(gen);
+          pumpInspectorViewportXhrQueue();
+        }
+      }
+    }
+
+    function enqueueInspectorViewportXhr(gen, makeOpts) {
+      inspectorRemoteScheduled[gen] = (inspectorRemoteScheduled[gen] || 0) + 1;
+      inspectorViewportXhrQueue.push({ gen: gen, makeOpts: makeOpts });
+      pumpInspectorViewportXhrQueue();
+    }
+
+    /**
+     * Drop stale OpenLayers feature pointers for sidebar “vector” rows and rebuild from current layer contents.
+     * ESRI_FEATURE (and other vectors) replace features on pan; same viewport bucket skipped a full run but refs must refresh.
+     */
+    function refreshInspectorInMemoryVectorRefs() {
+      if (!isInspectorWinOpen()) return;
+      var extent = typeof getMapExtent === 'function' ? getMapExtent() : null;
+      var kmlExtentR = openMapsKmlInspectorIntersectExtent(extent);
+      if (!extent && !kmlExtentR) return;
+      var toRemove = [];
+      viewportItemsById.forEach(function(it, id) {
+        if (String(id).indexOf('om-inspector-v-') === 0) toRemove.push(id);
+      });
+      for (var rmi = 0; rmi < toRemove.length; rmi++) {
+        var rid = toRemove[rmi];
+        viewportItemsById.delete(rid);
+        featureRefById.delete(rid);
+        geometryById.delete(rid);
+      }
+      viewportListIds = viewportListIds.filter(function(lid) {
+        return toRemove.indexOf(lid) < 0;
+      });
+      var total = viewportItemsById.size;
+      for (var hi = 0; hi < handles.length && total < MAX_ITEMS; hi++) {
+        var handle = handles[hi];
+        var mapId = handle.mapId;
+        var meta = maps.get(mapId);
+        var mapTitle = meta ? meta.title : String(mapId);
+
+        function consumeLayerRefresh(olLayer, layerKey, labelSuffix) {
+          if (!olLayer || !isVectorLayer(olLayer)) return;
+          if (!olLayer.getVisibility()) return;
+          var insKeyR = layerKey === 'bbox' ? '__bbox__' : layerKey;
+          if (!isInspectorSourceIncluded(mapId, insKeyR)) return;
+          var feats = olLayer.features || [];
+          var added = 0;
+          for (var fi = 0; fi < feats.length && total < MAX_ITEMS && added < MAX_PER_LAYER; fi++) {
+            var feat = feats[fi];
+            if (!feat || !feat.geometry) continue;
+            if (!geomIntersectsExtent(feat.geometry, extent)) continue;
+            var id = stableFeatureId(mapId, layerKey, feat, fi);
+            if (viewportItemsById.has(id)) continue;
+            var props = {};
+            try {
+              var a = feat.attributes || {};
+              Object.keys(a).forEach(function(k) {
+                props[k] = a[k];
+              });
+            } catch (e1) {}
+            var item = {
+              id: id,
+              label: labelFromFeature(feat),
+              source: mapTitle + ' · ' + labelSuffix,
+              kind: 'vector',
+              mapId: mapId,
+              props: props,
+              bbox: null,
+              inspectorLayerKey: insKeyR,
+              inspectorLayerLabel: labelSuffix
+            };
+            try {
+              var gb = feat.geometry.getBounds();
+              if (gb) item.bbox = { left: gb.left, bottom: gb.bottom, right: gb.right, top: gb.top };
+            } catch (e2) {}
+            viewportItemsById.set(id, item);
+            featureRefById.set(id, { feature: feat, layer: olLayer });
+            viewportListIds.push(id);
+            total++;
+            added++;
+          }
+        }
+
+        consumeLayerRefresh(handle.bboxLayer, 'bbox', I18n.t('openmaps.inspector_bbox_layer'));
+        var olVecR = handle.layer && isVectorLayer(handle.layer) ? handle.layer : null;
+        if (olVecR && meta && openMapsMapTypeIsKmlVectorOverlay(meta.type)) {
+          var featsKr = olVecR.features || [];
+          var addedKr = 0;
+          for (var fkr = 0; fkr < featsKr.length && total < MAX_ITEMS && addedKr < MAX_PER_LAYER; fkr++) {
+            var featK = featsKr[fkr];
+            if (!featK || !featK.geometry) continue;
+            if (!geomIntersectsExtent(featK.geometry, kmlExtentR)) continue;
+            var folderIdK = (featK.attributes && featK.attributes.openMapsKmlFolderId != null) ? featK.attributes.openMapsKmlFolderId : '__root__';
+            if (!openMapsKmlSidebarLayerVisible(handle, folderIdK)) continue;
+            if (!isInspectorSourceIncluded(mapId, folderIdK)) continue;
+            var layerKeyK = 'kml_' + String(folderIdK).replace(/\W/g, '_');
+            var idK = stableFeatureId(mapId, layerKeyK, featK, fkr);
+            if (viewportItemsById.has(idK)) continue;
+            var propsK = {};
+            try {
+              var aK = featK.attributes || {};
+              Object.keys(aK).forEach(function(k) {
+                propsK[k] = aK[k];
+              });
+            } catch (eK1) {}
+            var folderLabelK = (meta.layers && meta.layers[folderIdK] && meta.layers[folderIdK].title) ? meta.layers[folderIdK].title : folderIdK;
+            var itemK = {
+              id: idK,
+              label: labelFromFeature(featK),
+              source: mapTitle + ' · ' + folderLabelK,
+              kind: 'vector',
+              mapId: mapId,
+              props: propsK,
+              bbox: null,
+              inspectorLayerKey: String(folderIdK),
+              inspectorLayerLabel: folderLabelK
+            };
+            try {
+              var gbK = featK.geometry.getBounds();
+              if (gbK) itemK.bbox = { left: gbK.left, bottom: gbK.bottom, right: gbK.right, top: gbK.top };
+            } catch (eK2) {}
+            viewportItemsById.set(idK, itemK);
+            featureRefById.set(idK, { feature: featK, layer: olVecR });
+            viewportListIds.push(idK);
+            total++;
+            addedKr++;
+          }
+          if (featsKr.length === 0 && openMapsKmlVectorRowShouldDraw(handle)) {
+            var mstR = handle.__openmapsKmlMasterFeatures;
+            if (mstR && mstR.length) {
+              for (var mkr = 0; mkr < mstR.length && total < MAX_ITEMS && addedKr < MAX_PER_LAYER; mkr++) {
+                var mfR = mstR[mkr];
+                if (!mfR || !mfR.geometry) continue;
+                if (!geomIntersectsExtent(mfR.geometry, kmlExtentR)) continue;
+                var folderIdR = (mfR.attributes && mfR.attributes.openMapsKmlFolderId != null) ? mfR.attributes.openMapsKmlFolderId : '__root__';
+                if (!openMapsKmlSidebarLayerVisible(handle, folderIdR)) continue;
+                if (!isInspectorSourceIncluded(mapId, folderIdR)) continue;
+                var layerKeyR = 'kml_' + String(folderIdR).replace(/\W/g, '_');
+                var idR = stableFeatureId(mapId, layerKeyR, mfR, mkr);
+                if (viewportItemsById.has(idR)) continue;
+                var propsR = {};
+                try {
+                  var aR = mfR.attributes || {};
+                  Object.keys(aR).forEach(function(k) {
+                    propsR[k] = aR[k];
+                  });
+                } catch (eR1) {}
+                var folderLabelR = (meta.layers && meta.layers[folderIdR] && meta.layers[folderIdR].title) ? meta.layers[folderIdR].title : folderIdR;
+                var itemR = {
+                  id: idR,
+                  label: labelFromFeature(mfR),
+                  source: mapTitle + ' · ' + folderLabelR,
+                  kind: 'vector',
+                  mapId: mapId,
+                  props: propsR,
+                  bbox: null,
+                  inspectorLayerKey: String(folderIdR),
+                  inspectorLayerLabel: folderLabelR
+                };
+                try {
+                  var gbR = mfR.geometry.getBounds();
+                  if (gbR) itemR.bbox = { left: gbR.left, bottom: gbR.bottom, right: gbR.right, top: gbR.top };
+                } catch (eR2) {}
+                viewportItemsById.set(idR, itemR);
+                featureRefById.set(idR, { feature: mfR, layer: olVecR });
+                viewportListIds.push(idR);
+                total++;
+                addedKr++;
+              }
+            }
+          }
+        } else if (olVecR) {
+          var includeVecR = false;
+          var srcNameR = 'main';
+          var srcLabelR = I18n.t('openmaps.map_layers_title');
+          (handle.mapLayers || []).forEach(function(ml) {
+            if (ml && ml.visible && isInspectorSourceIncluded(mapId, ml.name)) {
+              includeVecR = true;
+              srcNameR = ml.name;
+              srcLabelR = (meta.layers && meta.layers[ml.name] && meta.layers[ml.name].title) ? meta.layers[ml.name].title : ml.name;
+            }
+          });
+          if (includeVecR) consumeLayerRefresh(olVecR, srcNameR, srcLabelR);
+        }
+      }
+      if (total >= MAX_ITEMS) truncated = true;
+    }
+
+    function runViewportIndex(forceFull) {
+      if (!isInspectorWinOpen()) return;
+      var extentEarly = typeof getMapExtent === 'function' ? getMapExtent() : null;
+      if (extentEarly) {
+        var bucketEarly = inspectorViewportExtentBucket(extentEarly);
+        if (!forceFull && bucketEarly === lastInspectorViewportBucket) {
+          refreshInspectorInMemoryVectorRefs();
+          renderFullList();
+          paintInspectorStatusLine();
+          return;
+        }
+        lastInspectorViewportBucket = bucketEarly;
+      } else {
+        lastInspectorViewportBucket = null;
+      }
+
+      var myGen = ++viewportGen;
+      var qdj;
+      for (qdj = 0; qdj < inspectorViewportXhrQueue.length; qdj++) {
+        inspectorRemoteNoteComplete(inspectorViewportXhrQueue[qdj].gen);
+      }
+      inspectorViewportXhrQueue.length = 0;
+      inspectorRemoteScheduled[myGen] = 0;
+      inspectorRemoteCompleted[myGen] = 0;
+      viewportItemsById.clear();
+      featureRefById.clear();
+      geometryById.clear();
+      viewportListIds = [];
+      truncated = false;
+      var extent = extentEarly;
+      var kmlExtent = openMapsKmlInspectorIntersectExtent(extentEarly);
+      if (!extent && !kmlExtent) {
+        renderFullList();
+        return;
+      }
+      var total = 0;
+      for (var hi = 0; hi < handles.length && total < MAX_ITEMS; hi++) {
+        var handle = handles[hi];
+        var mapId = handle.mapId;
+        var meta = maps.get(mapId);
+        var mapTitle = meta ? meta.title : String(mapId);
+
+        function consumeLayer(olLayer, layerKey, labelSuffix) {
+          if (!olLayer || !isVectorLayer(olLayer)) return;
+          if (!olLayer.getVisibility()) return;
+          var insKey = layerKey === 'bbox' ? '__bbox__' : layerKey;
+          if (!isInspectorSourceIncluded(mapId, insKey)) return;
+          var feats = olLayer.features || [];
+          var added = 0;
+          for (var fi = 0; fi < feats.length && total < MAX_ITEMS && added < MAX_PER_LAYER; fi++) {
+            var feat = feats[fi];
+            if (!feat || !feat.geometry) continue;
+            if (!geomIntersectsExtent(feat.geometry, extent)) continue;
+            var id = stableFeatureId(mapId, layerKey, feat, fi);
+            if (viewportItemsById.has(id)) continue;
+            var props = {};
+            try {
+              var a = feat.attributes || {};
+              Object.keys(a).forEach(function(k) {
+                props[k] = a[k];
+              });
+            } catch (e1) {}
+            var item = {
+              id: id,
+              label: labelFromFeature(feat),
+              source: mapTitle + ' · ' + labelSuffix,
+              kind: 'vector',
+              mapId: mapId,
+              props: props,
+              bbox: null,
+              inspectorLayerKey: insKey,
+              inspectorLayerLabel: labelSuffix
+            };
+            try {
+              var gb = feat.geometry.getBounds();
+              if (gb) item.bbox = { left: gb.left, bottom: gb.bottom, right: gb.right, top: gb.top };
+            } catch (e2) {}
+            viewportItemsById.set(id, item);
+            featureRefById.set(id, { feature: feat, layer: olLayer });
+            viewportListIds.push(id);
+            total++;
+            added++;
+          }
+        }
+
+        consumeLayer(handle.bboxLayer, 'bbox', I18n.t('openmaps.inspector_bbox_layer'));
+        var olVec = handle.layer && isVectorLayer(handle.layer) ? handle.layer : null;
+        if (olVec && meta && openMapsMapTypeIsKmlVectorOverlay(meta.type)) {
+          var featsK = olVec.features || [];
+          var addedK = 0;
+          for (var fk = 0; fk < featsK.length && total < MAX_ITEMS && addedK < MAX_PER_LAYER; fk++) {
+            var featK = featsK[fk];
+            if (!featK || !featK.geometry) continue;
+            if (!geomIntersectsExtent(featK.geometry, kmlExtent)) continue;
+            var folderIdK = (featK.attributes && featK.attributes.openMapsKmlFolderId != null) ? featK.attributes.openMapsKmlFolderId : '__root__';
+            if (!openMapsKmlSidebarLayerVisible(handle, folderIdK)) continue;
+            if (!isInspectorSourceIncluded(mapId, folderIdK)) continue;
+            var layerKeyK = 'kml_' + String(folderIdK).replace(/\W/g, '_');
+            var idK = stableFeatureId(mapId, layerKeyK, featK, fk);
+            if (viewportItemsById.has(idK)) continue;
+            var propsK = {};
+            try {
+              var aK = featK.attributes || {};
+              Object.keys(aK).forEach(function(k) {
+                propsK[k] = aK[k];
+              });
+            } catch (eK1) {}
+            var folderLabelK = (meta.layers && meta.layers[folderIdK] && meta.layers[folderIdK].title) ? meta.layers[folderIdK].title : folderIdK;
+            var itemK = {
+              id: idK,
+              label: labelFromFeature(featK),
+              source: mapTitle + ' · ' + folderLabelK,
+              kind: 'vector',
+              mapId: mapId,
+              props: propsK,
+              bbox: null,
+              inspectorLayerKey: String(folderIdK),
+              inspectorLayerLabel: folderLabelK
+            };
+            try {
+              var gbK = featK.geometry.getBounds();
+              if (gbK) itemK.bbox = { left: gbK.left, bottom: gbK.bottom, right: gbK.right, top: gbK.top };
+            } catch (eK2) {}
+            viewportItemsById.set(idK, itemK);
+            featureRefById.set(idK, { feature: featK, layer: olVec });
+            viewportListIds.push(idK);
+            total++;
+            addedK++;
+          }
+          if (featsK.length === 0 && openMapsKmlVectorRowShouldDraw(handle)) {
+            var mstV = handle.__openmapsKmlMasterFeatures;
+            if (mstV && mstV.length) {
+              for (var mkv = 0; mkv < mstV.length && total < MAX_ITEMS && addedK < MAX_PER_LAYER; mkv++) {
+                var mfV = mstV[mkv];
+                if (!mfV || !mfV.geometry) continue;
+                if (!geomIntersectsExtent(mfV.geometry, kmlExtent)) continue;
+                var folderIdV = (mfV.attributes && mfV.attributes.openMapsKmlFolderId != null) ? mfV.attributes.openMapsKmlFolderId : '__root__';
+                if (!openMapsKmlSidebarLayerVisible(handle, folderIdV)) continue;
+                if (!isInspectorSourceIncluded(mapId, folderIdV)) continue;
+                var layerKeyV = 'kml_' + String(folderIdV).replace(/\W/g, '_');
+                var idV = stableFeatureId(mapId, layerKeyV, mfV, mkv);
+                if (viewportItemsById.has(idV)) continue;
+                var propsV = {};
+                try {
+                  var aV = mfV.attributes || {};
+                  Object.keys(aV).forEach(function(k) {
+                    propsV[k] = aV[k];
+                  });
+                } catch (eV1) {}
+                var folderLabelV = (meta.layers && meta.layers[folderIdV] && meta.layers[folderIdV].title) ? meta.layers[folderIdV].title : folderIdV;
+                var itemV = {
+                  id: idV,
+                  label: labelFromFeature(mfV),
+                  source: mapTitle + ' · ' + folderLabelV,
+                  kind: 'vector',
+                  mapId: mapId,
+                  props: propsV,
+                  bbox: null,
+                  inspectorLayerKey: String(folderIdV),
+                  inspectorLayerLabel: folderLabelV
+                };
+                try {
+                  var gbV = mfV.geometry.getBounds();
+                  if (gbV) itemV.bbox = { left: gbV.left, bottom: gbV.bottom, right: gbV.right, top: gbV.top };
+                } catch (eV2) {}
+                viewportItemsById.set(idV, itemV);
+                featureRefById.set(idV, { feature: mfV, layer: olVec });
+                viewportListIds.push(idV);
+                total++;
+                addedK++;
+              }
+            }
+          }
+        } else if (olVec) {
+          var includeVec = false;
+          var srcName = 'main';
+          var srcLabel = I18n.t('openmaps.map_layers_title');
+          (handle.mapLayers || []).forEach(function(ml) {
+            if (ml && ml.visible && isInspectorSourceIncluded(mapId, ml.name)) {
+              includeVec = true;
+              srcName = ml.name;
+              srcLabel = (meta.layers && meta.layers[ml.name] && meta.layers[ml.name].title) ? meta.layers[ml.name].title : ml.name;
+            }
+          });
+          if (includeVec) consumeLayer(olVec, srcName, srcLabel);
+        }
+      }
+      if (total >= MAX_ITEMS) truncated = true;
+
+      if (extent && openMapsKmlDiagEnabled()) {
+        for (var hd = 0; hd < handles.length; hd++) {
+          var hD = handles[hd];
+          var mD = maps.get(hD.mapId);
+          if (!mD || !openMapsMapTypeIsKmlVectorOverlay(mD.type)) continue;
+          var olVD = hD.layer && isVectorLayer(hD.layer) ? hD.layer : null;
+          var featsDiag = olVD && olVD.features ? olVD.features : [];
+          if (!featsDiag.length) continue;
+          var anyHitD = false;
+          for (var zi = 0; zi < featsDiag.length; zi++) {
+            var fzi = featsDiag[zi];
+            if (!fzi || !fzi.geometry) continue;
+            if (!geomIntersectsExtent(fzi.geometry, extent)) continue;
+            var fd = (fzi.attributes && fzi.attributes.openMapsKmlFolderId != null) ? fzi.attributes.openMapsKmlFolderId : '__root__';
+            if (!openMapsKmlSidebarLayerVisible(hD, fd)) continue;
+            if (!isInspectorSourceIncluded(hD.mapId, fd)) continue;
+            anyHitD = true;
+            break;
+          }
+          if (!anyHitD) {
+            var fb0 = null;
+            try {
+              if (featsDiag[0] && featsDiag[0].geometry && featsDiag[0].geometry.getBounds) fb0 = featsDiag[0].geometry.getBounds();
+            } catch (eZ) { /* ignore */ }
+            openMapsKmlDiagLog('viewportIndex: KML on layer but none intersect viewport (check CRS/bounds vs map extent)', {
+              mapId: hD.mapId,
+              onLayerCount: featsDiag.length,
+              viewportExtent: { left: extent.left, bottom: extent.bottom, right: extent.right, top: extent.top },
+              firstFeatureBounds: fb0 ? { left: fb0.left, bottom: fb0.bottom, right: fb0.right, top: fb0.top } : null
+            });
+          }
+        }
+      }
+
+      function mergeArcgisRestLayerFeatures(json, mapId, layerId, layerTitle, mapTitle, itemKind, idPrefix) {
+        if (myGen !== viewportGen) return;
+        if (!json || json.error) return;
+        var feats = json.features;
+        if (!Array.isArray(feats)) return;
+        feats.forEach(function(f, idx) {
+          if (viewportListIds.length >= MAX_ITEMS) {
+            truncated = true;
+            return;
+          }
+          var attrs = f.attributes || {};
+          var oid = attrs.OBJECTID != null ? attrs.OBJECTID : (attrs.FID != null ? attrs.FID : (attrs.objectid != null ? attrs.objectid : idx));
+          var id = idPrefix + mapId + '-' + layerId + '-' + String(oid).replace(/\W/g, '_');
+          if (viewportItemsById.has(id)) return;
+          var props = {};
+          Object.keys(attrs).forEach(function(k) { props[k] = attrs[k]; });
+          var label = labelFromAttrs(props);
+          var geom = openMapsEsriGeometryToOpenLayers(f.geometry);
+          var item = {
+            id: id,
+            label: label,
+            source: mapTitle + ' · ' + layerTitle,
+            kind: itemKind,
+            mapId: mapId,
+            props: props,
+            bbox: null,
+            inspectorLayerKey: String(layerId),
+            inspectorLayerLabel: layerTitle
+          };
+          if (geom) {
+            try {
+              var gb = geom.getBounds();
+              if (gb) item.bbox = { left: gb.left, bottom: gb.bottom, right: gb.right, top: gb.top };
+            } catch (e0) {}
+          }
+          viewportItemsById.set(id, item);
+          if (geom) geometryById.set(id, geom);
+          viewportListIds.push(id);
+        });
+        renderFullList();
+      }
+
+      function mergeGeoJsonWfsFeatures(geojson, mapId, layerName, layerTitle, mapTitle) {
+        if (myGen !== viewportGen) return;
+        if (!geojson || geojson.type !== 'FeatureCollection' || !Array.isArray(geojson.features)) return;
+        var fmt = new OpenLayers.Format.GeoJSON({
+          externalProjection: olMap.getProjectionObject(),
+          internalProjection: olMap.getProjectionObject()
+        });
+        var parsed;
+        try {
+          parsed = fmt.read(JSON.stringify(geojson));
+        } catch (e1) {
+          return;
+        }
+        if (!parsed) return;
+        var arr = Array.isArray(parsed) ? parsed : [parsed];
+        arr.forEach(function(olf, idx) {
+          if (viewportListIds.length >= MAX_ITEMS) {
+            truncated = true;
+            return;
+          }
+          if (!olf || !olf.geometry) return;
+          var attrs = olf.attributes || olf.data || {};
+          var fid = attrs.id != null ? attrs.id : (attrs.gml_id != null ? attrs.gml_id : idx);
+          var id = 'om-inspector-wfs-' + mapId + '-' + String(layerName).replace(/\W/g, '_').slice(0, 48) + '-' + String(fid).replace(/\W/g, '_').slice(0, 48) + '-' + idx;
+          if (viewportItemsById.has(id)) return;
+          var props = {};
+          Object.keys(attrs).forEach(function(k) { props[k] = attrs[k]; });
+          var label = labelFromAttrs(props);
+          var geom = olf.geometry;
+          var item = {
+            id: id,
+            label: label,
+            source: mapTitle + ' · ' + layerTitle,
+            kind: 'wfs',
+            mapId: mapId,
+            props: props,
+            bbox: null,
+            inspectorLayerKey: String(layerName),
+            inspectorLayerLabel: layerTitle
+          };
+          if (geom) {
+            try {
+              var gb = geom.getBounds();
+              if (gb) item.bbox = { left: gb.left, bottom: gb.bottom, right: gb.right, top: gb.top };
+            } catch (e2) {}
+          }
+          viewportItemsById.set(id, item);
+          if (geom) geometryById.set(id, geom.clone ? geom.clone() : geom);
+          viewportListIds.push(id);
+        });
+        renderFullList();
+      }
+
+      if (!extent) {
+        renderFullList();
+        paintInspectorStatusLine();
+        return;
+      }
+      var bboxStr = extent.left + ',' + extent.bottom + ',' + extent.right + ',' + extent.top;
+      var maxPer = Math.min(MAX_PER_LAYER, 200);
+      for (var hi2 = 0; hi2 < handles.length; hi2++) {
+        var h = handles[hi2];
+        var m = maps.get(h.mapId);
+        if (!m || m.type !== 'ESRI') continue;
+        if (!h.layer || !h.layer.getVisibility()) continue;
+        if (!h.mapLayers || !h.mapLayers.length) continue;
+        var baseUrl = (m.url || '').replace(/\/+$/, '');
+        if (!baseUrl) continue;
+        var mapTitle2 = m.title || String(h.mapId);
+        for (var mi = 0; mi < h.mapLayers.length; mi++) {
+          var ml = h.mapLayers[mi];
+          var lid = parseInt(ml.name, 10);
+          if (isNaN(lid)) continue;
+          if (!ml.visible) continue;
+          if (!isInspectorSourceIncluded(h.mapId, ml.name)) continue;
+          var layerTitle = (m.layers && m.layers[ml.name] && m.layers[ml.name].title) ? m.layers[ml.name].title : ('#' + ml.name);
+          var qUrl = baseUrl + '/' + lid + '/query?f=json&where=' + encodeURIComponent('1=1') +
+            '&returnGeometry=true&outFields=*&geometry=' + encodeURIComponent(bboxStr) +
+            '&geometryType=esriGeometryEnvelope&inSR=3857&outSR=3857&spatialRel=esriSpatialRelIntersects' +
+            '&resultRecordCount=' + maxPer;
+          (function(mid, lid2, lt, mt, qUrl_) {
+            enqueueInspectorViewportXhr(myGen, function() {
+              return {
+                method: 'GET',
+                url: qUrl_,
+                timeout: INSPECTOR_VIEWPORT_XHR_TIMEOUT_MS,
+                onload: function(res) {
+                  try {
+                    if (myGen !== viewportGen) return;
+                    if (res.status !== 200) return;
+                    try {
+                      var json = JSON.parse(res.responseText || '{}');
+                      mergeArcgisRestLayerFeatures(json, mid, lid2, lt, mt, 'esri', 'om-inspector-esri-');
+                    } catch (e) {}
+                  } catch (e) {}
+                },
+                onerror: function() {},
+                ontimeout: function() {}
+              };
+            });
+          })(h.mapId, lid, layerTitle, mapTitle2, qUrl);
+        }
+      }
+
+      for (var hiW = 0; hiW < handles.length; hiW++) {
+        var hw = handles[hiW];
+        var mw = maps.get(hw.mapId);
+        if (!mw || mw.type !== 'WMS') continue;
+        var restBase = openMapsArcgisRestBaseFromWmsUrl(mw.url || '');
+        if (!restBase) continue;
+        if (hw.wmsArcgisRestViewportProbe === false) continue;
+        if (hw.hidden || hw.outOfArea || !isTouAccepted(mw.touId)) continue;
+        if (!hw.mapLayers || !hw.mapLayers.length) continue;
+        var mapTitleW = mw.title || String(hw.mapId);
+        for (var miw = 0; miw < hw.mapLayers.length; miw++) {
+          var mlw = hw.mapLayers[miw];
+          var lidw = parseInt(mlw.name, 10);
+          if (isNaN(lidw)) continue;
+          if (!mlw.visible) continue;
+          if (!isInspectorSourceIncluded(hw.mapId, mlw.name)) continue;
+          var layerTitleW = (mw.layers && mw.layers[mlw.name] && mw.layers[mlw.name].title) ? mw.layers[mlw.name].title : ('#' + mlw.name);
+          var qUrlW = restBase + '/' + lidw + '/query?f=json&where=' + encodeURIComponent('1=1') +
+            '&returnGeometry=true&outFields=*&geometry=' + encodeURIComponent(bboxStr) +
+            '&geometryType=esriGeometryEnvelope&inSR=3857&outSR=3857&spatialRel=esriSpatialRelIntersects' +
+            '&resultRecordCount=' + maxPer;
+          (function(mid, lid2, lt, mt, qUrlW_) {
+            enqueueInspectorViewportXhr(myGen, function() {
+              return {
+                method: 'GET',
+                url: qUrlW_,
+                timeout: INSPECTOR_VIEWPORT_XHR_TIMEOUT_MS,
+                onload: function(res) {
+                  try {
+                    if (myGen !== viewportGen) return;
+                    if (res.status !== 200) return;
+                    try {
+                      var json = JSON.parse(res.responseText || '{}');
+                      mergeArcgisRestLayerFeatures(json, mid, lid2, lt, mt, 'wms', 'om-inspector-wmsa-');
+                    } catch (e) {}
+                  } catch (e) {}
+                },
+                onerror: function() {},
+                ontimeout: function() {}
+              };
+            });
+          })(hw.mapId, lidw, layerTitleW, mapTitleW, qUrlW);
+        }
+      }
+
+      for (var hiF = 0; hiF < handles.length; hiF++) {
+        var hf = handles[hiF];
+        var mf = maps.get(hf.mapId);
+        if (!mf || mf.type !== 'WMS') continue;
+        var owsBase = geoserverOwsBaseFromWmsUrl(mf.url || '');
+        if (!owsBase) continue;
+        if (!hf.layer || !hf.layer.getVisibility()) continue;
+        if (!hf.mapLayers || !hf.mapLayers.length) continue;
+        var mapTitleF = mf.title || String(hf.mapId);
+        for (var mif = 0; mif < hf.mapLayers.length; mif++) {
+          var mlf = hf.mapLayers[mif];
+          if (!mlf.visible) continue;
+          if (!isInspectorSourceIncluded(hf.mapId, mlf.name)) continue;
+          var layerTitleF = (mf.layers && mf.layers[mlf.name] && mf.layers[mlf.name].title) ? mf.layers[mlf.name].title : mlf.name;
+          var bboxWfs = bboxStr + ',urn:ogc:def:crs:EPSG::3857';
+          var wfsUrl = owsBase + '?service=WFS&version=2.0.0&request=GetFeature&typeNames=' + encodeURIComponent(mlf.name) +
+            '&count=' + maxPer + '&outputFormat=application/json&srsName=EPSG:3857&bbox=' + encodeURIComponent(bboxWfs);
+          (function(mid, lname, lt, mt, wfsUrl_) {
+            enqueueInspectorViewportXhr(myGen, function() {
+              return {
+                method: 'GET',
+                url: wfsUrl_,
+                timeout: INSPECTOR_VIEWPORT_XHR_TIMEOUT_MS,
+                onload: function(res) {
+                  try {
+                    if (myGen !== viewportGen) return;
+                    if (res.status !== 200) return;
+                    try {
+                      var gj = JSON.parse(res.responseText || '{}');
+                      mergeGeoJsonWfsFeatures(gj, mid, lname, lt, mt);
+                    } catch (e) {}
+                  } catch (e) {}
+                },
+                onerror: function() {},
+                ontimeout: function() {}
+              };
+            });
+          })(hf.mapId, mlf.name, layerTitleF, mapTitleF, wfsUrl);
+        }
+      }
+
+      renderFullList();
+    }
+
+    function getCombinedOrderedIds() {
+      var seen = Object.create(null);
+      var out = [];
+      viewportListIds.forEach(function(id) {
+        if (!seen[id]) { seen[id] = true; out.push(id); }
+      });
+      queryListIds.forEach(function(id) {
+        if (!seen[id] && queryItemsById.has(id)) { seen[id] = true; out.push(id); }
+      });
+      if (out.length > MAX_ITEMS) truncated = true;
+      return out.slice(0, MAX_ITEMS);
+    }
+
+    function getDisplayItems(ids) {
+      var q = (searchInput.value || '').trim().toLowerCase();
+      if (!q) return ids;
+      return ids.filter(function(id) {
+        var it = viewportItemsById.get(id) || queryItemsById.get(id);
+        if (!it) return false;
+        var blob = (it.label + ' ' + it.source + ' ' + JSON.stringify(it.props || {})).toLowerCase();
+        return blob.indexOf(q) !== -1;
+      });
+    }
+
+    function paintInspectorStatusLine() {
+      var ids = getCombinedOrderedIds();
+      var display = getDisplayItems(ids);
+      var countText = (truncated ? I18n.t('openmaps.inspector_list_truncated') + ' ' : '') +
+        '(' + display.length + '/' + Math.min(ids.length, MAX_ITEMS) + ')';
+      var g = viewportGen;
+      var sched = inspectorRemoteScheduled[g] || 0;
+      var done = inspectorRemoteCompleted[g] || 0;
+      var showScan = sched > 0 && done < sched;
+      statusLine.innerHTML = '';
+      statusLine.className = 'openmaps-inspector-status' + (display.length ? ' openmaps-inspector-status--has' : '');
+      if (showScan) statusLine.classList.add('openmaps-inspector-status--busy');
+      var countSpan = document.createElement('span');
+      countSpan.className = 'openmaps-inspector-status-count';
+      countSpan.textContent = countText;
+      statusLine.appendChild(countSpan);
+      if (showScan) {
+        statusLine.appendChild(document.createTextNode(' '));
+        var scan = document.createElement('span');
+        scan.className = 'openmaps-inspector-status-scan';
+        scan.setAttribute('role', 'status');
+        var prog = I18n.t('openmaps.inspector_scan_progress')
+          .replace(/\{done\}/g, String(done))
+          .replace(/\{total\}/g, String(sched));
+        scan.setAttribute('aria-label', prog);
+        var ic = document.createElement('i');
+        ic.className = 'fa fa-spinner fa-spin';
+        ic.setAttribute('aria-hidden', 'true');
+        scan.appendChild(ic);
+        scan.appendChild(document.createTextNode(' ' + prog));
+        statusLine.appendChild(scan);
+      }
+      statusLine.setAttribute('aria-busy', showScan ? 'true' : 'false');
+      listHost.setAttribute('aria-busy', showScan ? 'true' : 'false');
+      var rico = refreshBtn.querySelector('i');
+      if (rico) {
+        if (showScan) rico.classList.add('fa-spin');
+        else rico.classList.remove('fa-spin');
+      }
+      refreshBtn.setAttribute('aria-busy', showScan ? 'true' : 'false');
+    }
+
+    function renderFullList() {
+      listHost.innerHTML = '';
+      syncMapGroupDefaults();
+      paintInspectorStatusLine();
+      var ids = getCombinedOrderedIds();
+      var display = getDisplayItems(ids);
+      var mapOrder = [];
+      var byMap = Object.create(null);
+      var seenMaps = Object.create(null);
+      display.forEach(function(id) {
+        var it = viewportItemsById.get(id) || queryItemsById.get(id);
+        if (!it) return;
+        var mid = String(it.mapId);
+        var mt0 = mapTitleForInspector(mid);
+        if (!isInspectorSourceIncluded(mid, inspectorResolveItemLayerKey(it, mt0))) return;
+        if (!byMap[mid]) {
+          byMap[mid] = [];
+          mapOrder.push(mid);
+          seenMaps[mid] = true;
+        }
+        byMap[mid].push(id);
+      });
+      for (var hixApp = 0; hixApp < handles.length; hixApp++) {
+        var hApp = handles[hixApp];
+        var midApp = String(hApp.mapId);
+        if (seenMaps[midApp]) continue;
+        if (hApp.hidden || hApp.outOfArea) continue;
+        if (!inspectorMapHasConfigurableLayerScan(midApp)) continue;
+        if (!inspectorListableLayerKeys(midApp).length) continue;
+        mapOrder.push(midApp);
+        byMap[midApp] = [];
+        seenMaps[midApp] = true;
+      }
+      if (!mapOrder.length) {
+        var empty = document.createElement('div');
+        empty.className = 'openmaps-inspector-empty';
+        empty.textContent = I18n.t('openmaps.inspector_list_empty') + ' ' +
+          (Settings.get().inspectorAutoWmsGetFeatureInfo !== false
+            ? I18n.t('openmaps.inspector_list_empty_hint_auto')
+            : I18n.t('openmaps.inspector_list_empty_hint_manual'));
+        listHost.appendChild(empty);
+        applyInspectorDualHighlights();
+        return;
+      }
+      mapOrder.forEach(function(mid) {
+        var groupIds = byMap[mid] || [];
+        var mapTitle = mapTitleForInspector(mid);
+        var groupWrap = document.createElement('div');
+        groupWrap.className = 'openmaps-inspector-map-group';
+
+        var headRow = document.createElement('div');
+        headRow.className = 'openmaps-inspector-map-head';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = inspectorMapGroupExpanded(mid);
+        cb.setAttribute('aria-label', I18n.t('openmaps.inspector_map_group_toggle'));
+        cb.title = I18n.t('openmaps.inspector_map_group_toggle');
+        cb.addEventListener('change', function() {
+          mapGroupShown[mid] = !!cb.checked;
+          renderFullList();
+        });
+        cb.addEventListener('click', function(ev) { ev.stopPropagation(); });
+        var titleSpan = document.createElement('span');
+        titleSpan.className = 'openmaps-inspector-map-head-title';
+        titleSpan.textContent = mapTitle;
+        var countSpan = document.createElement('span');
+        countSpan.className = 'openmaps-inspector-map-head-count';
+        countSpan.textContent = '(' + groupIds.length + ')';
+        var menuDetails = document.createElement('details');
+        menuDetails.className = 'openmaps-inspector-map-menu-details';
+        var menuSum = document.createElement('summary');
+        menuSum.className = 'openmaps-inspector-ibtn openmaps-inspector-map-menu-summary';
+        menuSum.innerHTML = '<i class="fa fa-ellipsis-v" aria-hidden="true"></i>';
+        menuSum.setAttribute('aria-label', I18n.t('openmaps.inspector_map_row_menu'));
+        menuSum.title = I18n.t('openmaps.inspector_map_row_menu');
+        menuSum.addEventListener('click', function(ev) { ev.stopPropagation(); });
+        var menuPanel = document.createElement('div');
+        menuPanel.className = 'openmaps-inspector-map-menu-panel';
+        var openTableBtn = document.createElement('button');
+        openTableBtn.type = 'button';
+        openTableBtn.className = 'openmaps-inspector-map-menu-item';
+        openTableBtn.textContent = I18n.t('openmaps.inspector_open_data_table');
+        openTableBtn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          menuDetails.open = false;
+          openDataTableForMap(mid);
+        });
+        menuPanel.appendChild(openTableBtn);
+        if (inspectorMapHasConfigurableLayerScan(mid)) {
+          var menuSep = document.createElement('div');
+          menuSep.className = 'openmaps-inspector-map-menu-sep';
+          menuSep.style.cssText = 'height:1px;margin:6px 0;background:#e8eaed;';
+          menuPanel.appendChild(menuSep);
+          function appendInspectorScanBulkItem(txt, tip, mode) {
+            var bulkBtn = document.createElement('button');
+            bulkBtn.type = 'button';
+            bulkBtn.className = 'openmaps-inspector-map-menu-item';
+            bulkBtn.textContent = txt;
+            if (tip) bulkBtn.title = tip;
+            bulkBtn.addEventListener('click', function(ev) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              menuDetails.open = false;
+              inspectorBulkSourcesForMap(mid, mode);
+              renderFullList();
+            });
+            menuPanel.appendChild(bulkBtn);
+          }
+          appendInspectorScanBulkItem(I18n.t('openmaps.inspector_sources_all'), '', 'all');
+          appendInspectorScanBulkItem(I18n.t('openmaps.inspector_sources_none'), '', 'none');
+          appendInspectorScanBulkItem(I18n.t('openmaps.inspector_sources_visible'), I18n.t('openmaps.inspector_sources_visible_tooltip'), 'match');
+        }
+        menuDetails.appendChild(menuSum);
+        menuDetails.appendChild(menuPanel);
+        menuDetails.addEventListener('toggle', function() {
+          if (menuDetails.open) {
+            var allD = listHost.querySelectorAll('.openmaps-inspector-map-menu-details');
+            for (var di = 0; di < allD.length; di++) {
+              if (allD[di] !== menuDetails) allD[di].open = false;
+            }
+          }
+        });
+        headRow.appendChild(cb);
+        headRow.appendChild(titleSpan);
+        headRow.appendChild(countSpan);
+        headRow.appendChild(menuDetails);
+        groupWrap.appendChild(headRow);
+
+        if (inspectorMapGroupExpanded(mid)) {
+          var byLayer = Object.create(null);
+          var gli;
+          for (gli = 0; gli < groupIds.length; gli++) {
+            var gid = groupIds[gli];
+            var git = viewportItemsById.get(gid) || queryItemsById.get(gid);
+            if (!git) continue;
+            var lkG = inspectorResolveItemLayerKey(git, mapTitle);
+            if (!byLayer[lkG]) byLayer[lkG] = [];
+            byLayer[lkG].push(gid);
+          }
+          var cfgScan = inspectorMapHasConfigurableLayerScan(mid);
+          var layerOrder = cfgScan
+            ? inspectorMergeUnknownLayerKeys(inspectorListableLayerKeys(mid), byLayer)
+            : inspectorMergeUnknownLayerKeys(inspectorLayerKeysInDisplayOrder(mid), byLayer);
+          var metaGrp = maps.get(mid);
+          var kmlFolderTotals = null;
+          if (cfgScan && metaGrp && openMapsMapTypeIsKmlVectorOverlay(metaGrp.type)) {
+            var hKtot = inspectorHandleForMapId(mid);
+            if (hKtot) kmlFolderTotals = openMapsKmlMasterVisibleCountsByFolder(hKtot);
+          }
+          var effListHoverId = getEffectiveHoverHighlightId();
+          var lix;
+          for (lix = 0; lix < layerOrder.length; lix++) {
+            var layerKey = layerOrder[lix];
+            var folderIds = byLayer[layerKey] || [];
+            if (!cfgScan && !folderIds.length) continue;
+            var sampleIt0 = folderIds.length ? (viewportItemsById.get(folderIds[0]) || queryItemsById.get(folderIds[0])) : null;
+            var layerLabel0 = inspectorResolveItemLayerLabel(sampleIt0, mid, layerKey);
+            var folderDetails = document.createElement('div');
+            folderDetails.className = 'openmaps-inspector-folder';
+            var folderSum = document.createElement('div');
+            folderSum.className = 'openmaps-inspector-folder-sum';
+            folderSum.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:default;list-style:none;font-size:11px;font-weight:600;color:#3c4043;padding:6px 8px 4px 22px;background:#fafafa;border-bottom:1px solid #eef0f3;';
+            var layerCb = document.createElement('input');
+            layerCb.type = 'checkbox';
+            layerCb.checked = isInspectorFolderChildrenVisible(mid, layerKey);
+            layerCb.title = I18n.t('openmaps.inspector_folder_toggle_rows');
+            layerCb.addEventListener('click', function(ev) { ev.stopPropagation(); });
+            (function(midF, layerKeyF, layerCbF) {
+              layerCbF.addEventListener('change', function() {
+                inspectorFolderChildrenVisible[inspectorSourceStorageKey(midF, layerKeyF)] = !!layerCbF.checked;
+                renderFullList();
+              });
+            })(mid, layerKey, layerCb);
+            var folderTitleSp = document.createElement('span');
+            folderTitleSp.style.cssText = 'flex:1;min-width:0;word-break:break-word;';
+            var loadedKmlFolder = (kmlFolderTotals && Object.prototype.hasOwnProperty.call(kmlFolderTotals, String(layerKey))) ? kmlFolderTotals[String(layerKey)] : null;
+            if (loadedKmlFolder != null) {
+              folderTitleSp.textContent = layerLabel0 + ' (' +
+                I18n.t('openmaps.inspector_kml_folder_feature_counts')
+                  .replace(/\{inView\}/g, String(folderIds.length))
+                  .replace(/\{total\}/g, String(loadedKmlFolder)) + ')';
+            } else {
+              folderTitleSp.textContent = layerLabel0 + ' (' + folderIds.length + ')';
+            }
+            folderSum.appendChild(layerCb);
+            folderSum.appendChild(folderTitleSp);
+            folderDetails.appendChild(folderSum);
+            if (isInspectorFolderChildrenVisible(mid, layerKey) && folderIds.length) {
+              var folderBody = document.createElement('div');
+              folderBody.className = 'openmaps-inspector-folder-body';
+              folderBody.style.cssText = 'padding:0 4px 4px 12px;border-bottom:1px solid #f0f0f0;';
+              var fii;
+              for (fii = 0; fii < folderIds.length; fii++) {
+                (function(id) {
+                  var it = viewportItemsById.get(id) || queryItemsById.get(id);
+                  if (!it) return;
+                  var row = document.createElement('div');
+                  var rowCls = 'openmaps-inspector-list-row openmaps-inspector-list-row--nested';
+                  if (id === selectedId) rowCls += ' openmaps-inspector-list-row--sel';
+                  if (effListHoverId && id === effListHoverId) rowCls += ' openmaps-inspector-list-row--hov';
+                  row.className = rowCls;
+                  row.dataset.itemId = id;
+                  var outerHex = openMapsInspectorOuterHexForItem(it);
+                  var innerSpec = openMapsInspectorInnerSpecForItem(it);
+                  var av = document.createElement('div');
+                  av.className = 'openmaps-inspector-avatar';
+                  av.style.backgroundColor = outerHex;
+                  av.style.position = 'relative';
+                  av.style.overflow = 'visible';
+                  av.setAttribute('aria-hidden', 'true');
+                  var inner = document.createElement('div');
+                  inner.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;box-shadow:0 1px 1px rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center;overflow:hidden;';
+                  inner.style.backgroundColor = innerSpec && innerSpec.colorHex ? innerSpec.colorHex : outerHex;
+                  if (innerSpec && innerSpec.iconHref) {
+                    var im = document.createElement('img');
+                    im.src = innerSpec.iconHref;
+                    im.alt = '';
+                    im.style.cssText = 'width:9px;height:9px;object-fit:contain;display:block;';
+                    im.onerror = function() {
+                      try { if (im.parentNode) im.parentNode.removeChild(im); } catch (eI0) {}
+                    };
+                    inner.appendChild(im);
+                  }
+                  av.appendChild(inner);
+                  var left = document.createElement('div');
+                  left.className = 'openmaps-inspector-row-main';
+                  var titleEl = document.createElement('div');
+                  titleEl.className = 'openmaps-inspector-row-title';
+                  titleEl.textContent = it.label || id;
+                  var srcEl = document.createElement('div');
+                  srcEl.className = 'openmaps-inspector-row-sub';
+                  srcEl.textContent = kindLabelForItem(it);
+                  left.appendChild(titleEl);
+                  left.appendChild(srcEl);
+                  row.appendChild(av);
+                  row.appendChild(left);
+                  row.addEventListener('click', function() {
+                    selectItem(id);
+                  });
+                  row.addEventListener('mouseenter', function() {
+                    scheduleInspectorListHoverHighlight(id);
+                  });
+                  row.addEventListener('mouseleave', function(ev) {
+                    var rel = ev.relatedTarget;
+                    if (rel && rel.nodeType === 1 && listHost.contains(rel)) {
+                      try {
+                        if (typeof rel.closest === 'function' && rel.closest('.openmaps-inspector-list-row')) return;
+                      } catch (e) {}
+                    }
+                    scheduleInspectorListHoverHighlight(selectedId);
+                  });
+                  folderBody.appendChild(row);
+                })(folderIds[fii]);
+              }
+              folderDetails.appendChild(folderBody);
+            }
+            groupWrap.appendChild(folderDetails);
+          }
+        }
+        listHost.appendChild(groupWrap);
+      });
+      applyInspectorDualHighlights();
+    }
+
+    function formatInspectorItemDetails(it) {
+      var lines = [];
+      lines.push(it.label);
+      lines.push('');
+      try {
+        var keys = Object.keys(it.props || {}).sort();
+        keys.forEach(function(k) {
+          lines.push(k + ': ' + JSON.stringify(it.props[k]));
+        });
+      } catch (e) {
+        lines.push(String(it.props));
+      }
+      return lines.join('\n');
+    }
+
+    function getInspectorItemAnchorLonLat(id, it) {
+      try {
+        var ref = featureRefById.get(id);
+        if (ref && ref.feature && ref.feature.geometry) {
+          var gb = ref.feature.geometry.getBounds();
+          if (gb && gb.getCenterLonLat) return gb.getCenterLonLat();
+        }
+        var geom = geometryById.get(id);
+        if (geom && geom.getBounds) {
+          var b = geom.getBounds();
+          if (b && b.getCenterLonLat) return b.getCenterLonLat();
+        }
+        if (it && it.bbox) {
+          var bb = it.bbox;
+          return new OpenLayers.Bounds(bb.left, bb.bottom, bb.right, bb.top).getCenterLonLat();
+        }
+      } catch (e) {}
+      return null;
+    }
+
+    function positionInspectorCallout() {
+      if (!inspectorCalloutEl || inspectorCalloutEl.style.display === 'none' || !inspectorCalloutLonLat) return;
+      syncInspectorCalloutPanelWidth();
+      try {
+        var px = olMap.getPixelFromLonLat(inspectorCalloutLonLat);
+        if (!px) return;
+        inspectorCalloutEl.style.left = Math.round(px.x) + 'px';
+        inspectorCalloutEl.style.top = Math.round(px.y) + 'px';
+      } catch (e) {}
+    }
+
+    function detachInspectorCalloutMapPanGuard() {
+      if (!inspectorCalloutEl || !inspectorCalloutEl._onMapMoveArm || !olMap || !olMap.events) return;
+      try {
+        olMap.events.unregister('move', null, inspectorCalloutEl._onMapMoveArm);
+      } catch (eM) { /* ignore */ }
+      inspectorCalloutEl._onMapMoveArm = null;
+    }
+
+    function hideInspectorCallout(opt) {
+      if (!inspectorCalloutEl) return;
+      var wasVisible = inspectorCalloutEl.style.display !== 'none';
+      inspectorCalloutEl.style.display = 'none';
+      inspectorCalloutLonLat = null;
+      if (inspectorCalloutEl._onMove) {
+        try {
+          olMap.events.unregister('move', null, inspectorCalloutEl._onMove);
+          olMap.events.unregister('moveend', null, inspectorCalloutEl._onMove);
+        } catch (e) {}
+        inspectorCalloutEl._onMove = null;
+      }
+      if (inspectorCalloutEl._onDocMove) {
+        document.removeEventListener('pointermove', inspectorCalloutEl._onDocMove, true);
+        inspectorCalloutEl._onDocMove = null;
+      }
+      if (inspectorCalloutEl._onDocUp) {
+        document.removeEventListener('pointerup', inspectorCalloutEl._onDocUp, true);
+        document.removeEventListener('pointercancel', inspectorCalloutEl._onDocUp, true);
+        inspectorCalloutEl._onDocUp = null;
+      }
+      if (inspectorCalloutEl._onDoc) {
+        document.removeEventListener('pointerdown', inspectorCalloutEl._onDoc, true);
+        inspectorCalloutEl._onDoc = null;
+      }
+      detachInspectorCalloutMapPanGuard();
+      inspectorCalloutEl._calloutDismissArm = null;
+      if (wasVisible && opt && opt.clearSelection === true) {
+        selectedId = null;
+        try {
+          renderFullList();
+        } catch (eRF) {
+          applyInspectorDualHighlights();
+        }
+      }
+    }
+
+    function ensureInspectorCallout() {
+      if (inspectorCalloutEl) return inspectorCalloutEl;
+      try {
+        olMap.div.style.position = olMap.div.style.position || 'relative';
+      } catch (e) {}
+      var outer = document.createElement('div');
+      outer.className = 'openmaps-inspector-callout';
+      outer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:100500;display:none;pointer-events:none;';
+      var panel = document.createElement('div');
+      panel.className = 'openmaps-inspector-callout-panel';
+      var head = document.createElement('div');
+      head.className = 'openmaps-inspector-callout-head';
+      var titleEl = document.createElement('div');
+      titleEl.className = 'openmaps-inspector-callout-title';
+      var closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'openmaps-inspector-callout-close';
+      closeBtn.innerHTML = '&times;';
+      closeBtn.setAttribute('aria-label', I18n.t('openmaps.inspector_table_close'));
+      head.appendChild(titleEl);
+      head.appendChild(closeBtn);
+      var bodyPre = document.createElement('pre');
+      bodyPre.className = 'openmaps-inspector-callout-body';
+      panel.appendChild(head);
+      panel.appendChild(bodyPre);
+      outer.appendChild(panel);
+      olMap.div.appendChild(outer);
+      inspectorCalloutEl = outer;
+      inspectorCalloutEl._panel = panel;
+      inspectorCalloutEl._title = titleEl;
+      inspectorCalloutEl._body = bodyPre;
+      closeBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        hideInspectorCallout({ clearSelection: true });
+      });
+      panel.addEventListener('pointerdown', function(e) { e.stopPropagation(); });
+      return inspectorCalloutEl;
+    }
+
+    function showInspectorCalloutForItem(id, it) {
+      var ll = getInspectorItemAnchorLonLat(id, it);
+      if (!ll) {
+        hideInspectorCallout();
+        return;
+      }
+      var el = ensureInspectorCallout();
+      inspectorCalloutLonLat = ll;
+      el._title.textContent = it.label || id;
+      el._body.textContent = formatInspectorItemDetails(it);
+      el.style.display = 'block';
+      positionInspectorCallout();
+      function onMove() {
+        positionInspectorCallout();
+      }
+      if (el._onMove) {
+        try {
+          olMap.events.unregister('move', null, el._onMove);
+          olMap.events.unregister('moveend', null, el._onMove);
+        } catch (e) {}
+      }
+      el._onMove = onMove;
+      try {
+        olMap.events.register('move', null, onMove);
+        olMap.events.register('moveend', null, onMove);
+      } catch (e) {}
+      if (el._onDocMove) {
+        document.removeEventListener('pointermove', el._onDocMove, true);
+        el._onDocMove = null;
+      }
+      if (el._onDocUp) {
+        document.removeEventListener('pointerup', el._onDocUp, true);
+        document.removeEventListener('pointercancel', el._onDocUp, true);
+        el._onDocUp = null;
+      }
+      if (el._onDoc) {
+        document.removeEventListener('pointerdown', el._onDoc, true);
+        el._onDoc = null;
+      }
+      detachInspectorCalloutMapPanGuard();
+      el._calloutDismissArm = null;
+      setTimeout(function() {
+        var dragTolPx = 8;
+        var dragTol2 = dragTolPx * dragTolPx;
+        function removeGestureListeners() {
+          if (!inspectorCalloutEl) return;
+          if (inspectorCalloutEl._onDocMove) {
+            document.removeEventListener('pointermove', inspectorCalloutEl._onDocMove, true);
+            inspectorCalloutEl._onDocMove = null;
+          }
+          if (inspectorCalloutEl._onDocUp) {
+            document.removeEventListener('pointerup', inspectorCalloutEl._onDocUp, true);
+            document.removeEventListener('pointercancel', inspectorCalloutEl._onDocUp, true);
+            inspectorCalloutEl._onDocUp = null;
+          }
+          detachInspectorCalloutMapPanGuard();
+          inspectorCalloutEl._calloutDismissArm = null;
+        }
+        function onDocPointerMove(ev) {
+          var arm = inspectorCalloutEl && inspectorCalloutEl._calloutDismissArm;
+          if (!arm || ev.pointerId !== arm.pid) return;
+          var dx = ev.clientX - arm.x0;
+          var dy = ev.clientY - arm.y0;
+          if (dx * dx + dy * dy > dragTol2) arm.dragged = true;
+        }
+        function onDocPointerUp(ev) {
+          if (!inspectorCalloutEl || inspectorCalloutEl.style.display === 'none') {
+            removeGestureListeners();
+            return;
+          }
+          var arm = inspectorCalloutEl._calloutDismissArm;
+          if (!arm || ev.pointerId !== arm.pid) return;
+          var cancelled = ev.type === 'pointercancel';
+          var dx = ev.clientX - arm.x0;
+          var dy = ev.clientY - arm.y0;
+          var dragged = cancelled || arm.dragged || (dx * dx + dy * dy > dragTol2);
+          removeGestureListeners();
+          if (dragged) return;
+          if (inspectorCalloutEl.contains(ev.target)) return;
+          if (ev.target.closest && (ev.target.closest('#sidepanel-openMaps') || ev.target.closest('.openmaps-inspector-window'))) return;
+          hideInspectorCallout({ clearSelection: true });
+        }
+        function onDocPointerDown(ev) {
+          if (!inspectorCalloutEl || inspectorCalloutEl.style.display === 'none') return;
+          if (inspectorCalloutEl.contains(ev.target)) return;
+          if (ev.target.closest && (ev.target.closest('#sidepanel-openMaps') || ev.target.closest('.openmaps-inspector-window'))) return;
+          removeGestureListeners();
+          inspectorCalloutEl._calloutDismissArm = { x0: ev.clientX, y0: ev.clientY, pid: ev.pointerId, dragged: false };
+          inspectorCalloutEl._onDocMove = onDocPointerMove;
+          inspectorCalloutEl._onDocUp = onDocPointerUp;
+          document.addEventListener('pointermove', onDocPointerMove, true);
+          document.addEventListener('pointerup', onDocPointerUp, true);
+          document.addEventListener('pointercancel', onDocPointerUp, true);
+          try {
+            if (olMap && olMap.div && ev.target && typeof olMap.div.contains === 'function' && olMap.div.contains(ev.target)) {
+              var onMapMove = function() {
+                var arm2 = inspectorCalloutEl && inspectorCalloutEl._calloutDismissArm;
+                if (arm2) arm2.dragged = true;
+                detachInspectorCalloutMapPanGuard();
+              };
+              inspectorCalloutEl._onMapMoveArm = onMapMove;
+              olMap.events.register('move', null, onMapMove);
+            }
+          } catch (eArm) { /* ignore */ }
+        }
+        el._onDoc = onDocPointerDown;
+        document.addEventListener('pointerdown', onDocPointerDown, true);
+      }, 0);
+    }
+
+    function cancelMapEsriHoverMotion() {
+      if (mapEsriHoverRaf != null) {
+        cancelAnimationFrame(mapEsriHoverRaf);
+        mapEsriHoverRaf = null;
+      }
+      mapEsriHoverPendingEvt = null;
+    }
+
+    function selectItem(id) {
+      cancelScheduledInspectorHoverHL();
+      cancelMapEsriHoverMotion();
+      mapEsriHoverLastKey = '';
+      selectedId = id;
+      var it = viewportItemsById.get(id) || queryItemsById.get(id);
+      listHoverHighlightId = it ? id : null;
+      renderFullList();
+      if (!it) {
+        hideInspectorCallout();
+        return;
+      }
+      showInspectorCalloutForItem(id, it);
+    }
+
+    function cancelScheduledInspectorHoverHL() {
+      if (inspectorHoverHLRaf != null) {
+        cancelAnimationFrame(inspectorHoverHLRaf);
+        inspectorHoverHLRaf = null;
+      }
+      inspectorHoverHLPending = null;
+    }
+
+    function flushInspectorHoverHL() {
+      inspectorHoverHLRaf = null;
+      var id = inspectorHoverHLPending;
+      inspectorHoverHLPending = null;
+      listHoverHighlightId = id;
+      applyInspectorDualHighlights();
+    }
+
+    /** Batches hover-driven highlight changes so moving across rows does not sync-hit OpenLayers twice per step. */
+    function scheduleInspectorListHoverHighlight(id) {
+      inspectorHoverHLPending = id;
+      if (inspectorHoverHLRaf == null) {
+        inspectorHoverHLRaf = requestAnimationFrame(flushInspectorHoverHL);
+      }
+    }
+
+    function getEffectiveHoverHighlightId() {
+      if (inspectorPointerOverList) return listHoverHighlightId;
+      return mapHoverHighlightId;
+    }
+
+    /** Keep list row `--hov` in sync when map pointer drives hover (no full list rebuild). */
+    function syncInspectorListRowHoverClasses() {
+      var eff = getEffectiveHoverHighlightId();
+      try {
+        var rows = listHost.querySelectorAll('.openmaps-inspector-list-row');
+        for (var ri = 0; ri < rows.length; ri++) {
+          var row = rows[ri];
+          var rid = row.dataset.itemId;
+          var on = !!(eff && rid === eff);
+          if (on) row.classList.add('openmaps-inspector-list-row--hov');
+          else row.classList.remove('openmaps-inspector-list-row--hov');
+        }
+      } catch (eSyncH) { /* ignore */ }
+    }
+
+    function clearHighlight() {
+      if (highlightSelectLayer && highlightSelectLayer.removeAllFeatures) highlightSelectLayer.removeAllFeatures();
+      if (highlightSelectHaloLayer && highlightSelectHaloLayer.removeAllFeatures) highlightSelectHaloLayer.removeAllFeatures();
+      if (highlightSelectLiftLayer && highlightSelectLiftLayer.removeAllFeatures) highlightSelectLiftLayer.removeAllFeatures();
+      if (highlightHoverLayer && highlightHoverLayer.removeAllFeatures) highlightHoverLayer.removeAllFeatures();
+      if (highlightHoverHaloLayer && highlightHoverHaloLayer.removeAllFeatures) highlightHoverHaloLayer.removeAllFeatures();
+      if (highlightHoverLiftLayer && highlightHoverLiftLayer.removeAllFeatures) highlightHoverLiftLayer.removeAllFeatures();
+      mapHoverHighlightId = null;
+      listHoverHighlightId = null;
+      try {
+        syncOpenMapsLayerIndices();
+      } catch (eSync) { /* ignore */ }
+      syncInspectorListRowHoverClasses();
+    }
+
+    /**
+     * Layers to pin top → bottom (first = frontmost). Consumed by pinOpenMapsOverlayStackTop.
+     */
+    function getInspectorOverlayLayersTopToBottom() {
+      var out = [];
+      try {
+        var om = W.map.getOLMap();
+        if (!om || !om.layers) return out;
+        function hasFeats(lyr) {
+          return lyr && lyr.features && lyr.features.length > 0 && om.layers.indexOf(lyr) >= 0;
+        }
+        var stack = [
+          hasFeats(highlightSelectLayer) ? highlightSelectLayer : null,
+          hasFeats(highlightHoverLayer) ? highlightHoverLayer : null,
+          hasFeats(highlightSelectLiftLayer) ? highlightSelectLiftLayer : null,
+          hasFeats(highlightHoverLiftLayer) ? highlightHoverLiftLayer : null,
+          hasFeats(highlightSelectHaloLayer) ? highlightSelectHaloLayer : null,
+          hasFeats(highlightHoverHaloLayer) ? highlightHoverHaloLayer : null
+        ];
+        for (var si = 0; si < stack.length; si++) {
+          if (stack[si]) out.push(stack[si]);
+        }
+        if (inspectorViewportGeomLayer && hasFeats(inspectorViewportGeomLayer)) {
+          out.push(inspectorViewportGeomLayer);
+        }
+      } catch (eG) { /* ignore */ }
+      return out;
+    }
+
+    /**
+     * Delegates to unified stack pin (inspector + ESRI_FEATURE) so highlights stay above viewport geom above ESRI above WME Places.
+     */
+    function pinInspectorHighlightStack() {
+      try {
+        pinOpenMapsOverlayStackTop(W.map.getOLMap());
+      } catch (ePin) { /* ignore */ }
+    }
+
+    function ensureInspectorViewportGeomLayer() {
+      if (inspectorViewportGeomLayer) return;
+      inspectorViewportGeomLayer = new OpenLayers.Layer.Vector('OpenMapsInspectorViewportGeom', {
+        styleMap: new OpenLayers.StyleMap({ 'default': new OpenLayers.Style({}) }),
+        displayInLayerSwitcher: false
+      });
+      W.map.addLayer(inspectorViewportGeomLayer);
+    }
+
+    function syncInspectorViewportGeometrySymbols() {
+      try {
+        if (!isInspectorWinOpen()) {
+          if (inspectorViewportGeomLayer && inspectorViewportGeomLayer.removeAllFeatures) inspectorViewportGeomLayer.removeAllFeatures();
+          return;
+        }
+        ensureInspectorViewportGeomLayer();
+        inspectorViewportGeomLayer.removeAllFeatures();
+        var selId2 = selectedId;
+        var effHovId2 = getEffectiveHoverHighlightId();
+        var drawHover2 = !!(effHovId2 && effHovId2 !== selId2);
+        var skipVg = Object.create(null);
+        if (selId2) skipVg[selId2] = true;
+        if (drawHover2 && effHovId2) skipVg[effHovId2] = true;
+        for (var vgi = 0; vgi < viewportListIds.length; vgi++) {
+          var vid = viewportListIds[vgi];
+          if (skipVg[vid]) continue;
+          var gV = geometryById.get(vid);
+          if (!gV) continue;
+          var refV = featureRefById.get(vid);
+          if (refV && refV.feature) continue;
+          var itV = viewportItemsById.get(vid);
+          if (!itV) continue;
+          var fillHexV = openMapsInspectorFillHexForItem(itV);
+          var gClone = typeof gV.clone === 'function' ? gV.clone() : gV;
+          var cnV = gClone && gClone.CLASS_NAME;
+          if (cnV === 'OpenLayers.Geometry.Point' || cnV === 'OpenLayers.Geometry.MultiPoint') {
+            var packV = openMapsEsriFeatureAvatarMarkerPack(openMapsInspectorOuterHexForItem(itV));
+            var innerSpecV = openMapsInspectorInnerSpecForItem(itV);
+            if (innerSpecV && innerSpecV.colorHex) packV.innerHex = innerSpecV.colorHex;
+            var vf = new OpenLayers.Feature.Vector(gClone);
+            vf.openMapsInspectorItemId = vid;
+            vf.style = openMapsEsriPointVectorStyle(packV);
+            inspectorViewportGeomLayer.addFeatures([vf]);
+          } else {
+            var stV = openMapsInspectorViewportGeomBaseStyle(gClone, fillHexV);
+            var vf2 = new OpenLayers.Feature.Vector(gClone);
+            vf2.openMapsInspectorItemId = vid;
+            vf2.style = stV || null;
+            inspectorViewportGeomLayer.addFeatures([vf2]);
+          }
+        }
+      } catch (eVg) { /* ignore */ }
+    }
+
+    function ensureInspectorHighlightSelectLayer() {
+      if (highlightSelectLayer) return;
+      highlightSelectLayer = new OpenLayers.Layer.Vector('OpenMapsInspectorHLsel', {
+        styleMap: new OpenLayers.StyleMap({
+          'default': new OpenLayers.Style({
+            strokeColor: '#1a73e8',
+            strokeWidth: 3,
+            fillOpacity: 0.15,
+            fillColor: '#1a73e8',
+            pointRadius: 6
+          })
+        }),
+        displayInLayerSwitcher: false
+      });
+      W.map.addLayer(highlightSelectLayer);
+    }
+
+    function ensureInspectorHighlightHoverLayer() {
+      if (highlightHoverLayer) return;
+      highlightHoverLayer = new OpenLayers.Layer.Vector('OpenMapsInspectorHLhov', {
+        styleMap: new OpenLayers.StyleMap({
+          'default': new OpenLayers.Style({
+            strokeColor: '#5a9fd4',
+            strokeWidth: 2.5,
+            fillOpacity: 0.12,
+            fillColor: '#5a9fd4',
+            pointRadius: 5
+          })
+        }),
+        displayInLayerSwitcher: false
+      });
+      W.map.addLayer(highlightHoverLayer);
+    }
+
+    /** Draw highlighted point above siblings in the same vector layer (OpenLayers paints in feature array order). */
+    function bumpEsriPointFeatureToDrawLast(feat, lyr) {
+      if (!feat || !lyr || !lyr.features) return;
+      try {
+        var arr = lyr.features;
+        if (arr.length < 2) return;
+        if (arr.indexOf(feat) < 0) return;
+        lyr.removeFeatures([feat]);
+        lyr.addFeatures([feat]);
+      } catch (eBump) { /* ignore */ }
+    }
+
+    function applyInspectorDualHighlights() {
+      try {
+        ensureInspectorHighlightSelectLayer();
+        ensureInspectorHighlightHoverLayer();
+        if (highlightSelectLayer) highlightSelectLayer.removeAllFeatures();
+        if (highlightSelectHaloLayer) highlightSelectHaloLayer.removeAllFeatures();
+        if (highlightSelectLiftLayer) highlightSelectLiftLayer.removeAllFeatures();
+        if (highlightHoverLayer) highlightHoverLayer.removeAllFeatures();
+        if (highlightHoverHaloLayer) highlightHoverHaloLayer.removeAllFeatures();
+        if (highlightHoverLiftLayer) highlightHoverLiftLayer.removeAllFeatures();
+
+        var selId = selectedId;
+        var effHovId = getEffectiveHoverHighlightId();
+        var drawHover = !!(effHovId && effHovId !== selId);
+
+        var selBump = { feat: null, lyr: null };
+        var hovBump = { feat: null, lyr: null };
+
+        function paintInspectorAvatarPointHighlight(mode, g0, outerHex, innerSpec) {
+          if (!g0 || typeof g0.clone !== 'function') return;
+          var innerColor = innerSpec && innerSpec.colorHex ? String(innerSpec.colorHex) : String(outerHex || '#0099ff');
+          var innerIcon = innerSpec && innerSpec.iconHref ? String(innerSpec.iconHref) : null;
+          var pack = openMapsEsriFeatureAvatarMarkerPack(outerHex);
+          var ringL = mode === 'select' ? highlightSelectLayer : highlightHoverLayer;
+          var liftL = mode === 'select' ? highlightSelectLiftLayer : highlightHoverLiftLayer;
+          if (!liftL) {
+            liftL = new OpenLayers.Layer.Vector(mode === 'select' ? 'OpenMapsInspectorHLselLift' : 'OpenMapsInspectorHLhovLift', {
+              styleMap: new OpenLayers.StyleMap({ 'default': new OpenLayers.Style({}) }),
+              displayInLayerSwitcher: false
+            });
+            W.map.addLayer(liftL);
+            if (mode === 'select') highlightSelectLiftLayer = liftL;
+            else highlightHoverLiftLayer = liftL;
+          }
+          var liftFeat = new OpenLayers.Feature.Vector(g0.clone());
+          liftFeat.style = openMapsEsriPointVectorStyle(pack);
+          liftL.addFeatures([liftFeat]);
+          // Embedded layer circle inside the map-colored circle.
+          var innerR = Math.max(2, Math.round(pack.symbolR * 0.62));
+          var innerFeat = new OpenLayers.Feature.Vector(g0.clone());
+          innerFeat.style = {
+            graphicName: 'circle',
+            pointRadius: innerR,
+            fillColor: innerColor,
+            fillOpacity: 0.98,
+            strokeColor: '#ffffff',
+            strokeWidth: Math.max(1, Math.round(pack.whiteW * 0.7)),
+            strokeOpacity: 1
+          };
+          liftL.addFeatures([innerFeat]);
+          // Optional icon inside the embedded circle (best-effort; Canvas may skip externalGraphic).
+          if (innerIcon) {
+            var icoFeat = new OpenLayers.Feature.Vector(g0.clone());
+            var wh = Math.max(6, Math.round(innerR * 2 * 0.86));
+            icoFeat.style = {
+              externalGraphic: innerIcon,
+              graphicWidth: wh,
+              graphicHeight: wh,
+              graphicOpacity: 1,
+              fillOpacity: 0,
+              strokeWidth: 0
+            };
+            liftL.addFeatures([icoFeat]);
+          }
+          var haloL = mode === 'select' ? highlightSelectHaloLayer : highlightHoverHaloLayer;
+          if (!haloL) {
+            haloL = new OpenLayers.Layer.Vector(mode === 'select' ? 'OpenMapsInspectorHLselHalo' : 'OpenMapsInspectorHLhovHalo', {
+              styleMap: new OpenLayers.StyleMap({ 'default': new OpenLayers.Style({}) }),
+              displayInLayerSwitcher: false
+            });
+            W.map.addLayer(haloL);
+            if (mode === 'select') highlightSelectHaloLayer = haloL;
+            else highlightHoverHaloLayer = haloL;
+          }
+          var haloR = Math.max(pack.symbolR + pack.whiteW * 0.35, pack.highlightR - pack.hlStroke * 0.45);
+          var ringPathR = Math.max(pack.symbolR + pack.whiteW * 0.5, pack.highlightR - pack.hlStroke * 0.5);
+          var isHover = mode === 'hover';
+          var haloFeat = new OpenLayers.Feature.Vector(g0.clone());
+          haloFeat.style = {
+            graphicName: 'circle',
+            pointRadius: haloR,
+            fillColor: isHover ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.95)',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWidth: 0,
+            strokeOpacity: 0
+          };
+          var ringFeat = new OpenLayers.Feature.Vector(g0.clone());
+          ringFeat.style = {
+            graphicName: 'circle',
+            pointRadius: ringPathR,
+            fillOpacity: 0,
+            strokeColor: '#ffffff',
+            strokeWidth: isHover ? Math.max(1, pack.hlStroke - 0.5) : pack.hlStroke,
+            strokeOpacity: 1
+          };
+          haloL.addFeatures([haloFeat]);
+          ringL.addFeatures([ringFeat]);
+        }
+
+        function paintInspectFeature(mode, feature, sourceLayer) {
+          var ringL = mode === 'select' ? highlightSelectLayer : highlightHoverLayer;
+          var g0 = feature.geometry;
+          var cn0 = g0 && g0.CLASS_NAME;
+          var isEsriPoint = sourceLayer && sourceLayer.openMapsEsriAvatarFill &&
+            (cn0 === 'OpenLayers.Geometry.Point' || cn0 === 'OpenLayers.Geometry.MultiPoint');
+          if (isEsriPoint) {
+            var midE = sourceLayer.openMapsMapId;
+            var mE = maps.get(midE);
+            var outerE = openMapsMapAvatarColorFromTitle(mE && mE.title ? String(mE.title) : '');
+            paintInspectorAvatarPointHighlight(mode, g0, outerE, { colorHex: sourceLayer.openMapsEsriAvatarFill, iconHref: null });
+            return { feat: feature, lyr: sourceLayer };
+          }
+          var kmlFill = null;
+          if (sourceLayer && openMapsLayerNameIsKmlVectorOverlay(sourceLayer.name)) {
+            var midK = sourceLayer.openMapsMapId;
+            var mK = maps.get(midK);
+            var titleK = mK && mK.title ? mK.title : '';
+            var fidK = feature.attributes && feature.attributes.openMapsKmlFolderId != null ? String(feature.attributes.openMapsKmlFolderId) : '__root__';
+            kmlFill = openMapsKmlFolderFillHex(titleK, fidK);
+          }
+          if (kmlFill && (cn0 === 'OpenLayers.Geometry.Point' || cn0 === 'OpenLayers.Geometry.MultiPoint')) {
+            var outerK = openMapsMapAvatarColorFromTitle((maps.get(sourceLayer.openMapsMapId) || {}).title || '');
+            var mKm = maps.get(sourceLayer.openMapsMapId);
+            var iconK = null;
+            try {
+              var lmK = mKm && mKm.layers && mKm.layers[fidK] ? mKm.layers[fidK] : null;
+              if (lmK && lmK.openMapsKmlIconHref && openMapsKmlTextIsUsableIconHref(lmK.openMapsKmlIconHref)) iconK = String(lmK.openMapsKmlIconHref).trim();
+            } catch (eKi) { /* ignore */ }
+            paintInspectorAvatarPointHighlight(mode, g0, outerK, { colorHex: kmlFill, iconHref: iconK });
+            return { feat: feature, lyr: sourceLayer };
+          }
+          var clone = feature.clone();
+          if (kmlFill) {
+            var stKm = openMapsEsriInspectorHighlightStyle(clone.geometry, kmlFill);
+            if (mode === 'hover' && stKm) {
+              if (typeof stKm.strokeWidth === 'number') stKm.strokeWidth = Math.max(1, stKm.strokeWidth - 0.5);
+              if (typeof stKm.strokeOpacity === 'number') stKm.strokeOpacity = Math.min(1, stKm.strokeOpacity * 0.88);
+            }
+            clone.style = stKm || null;
+          } else if (sourceLayer && sourceLayer.openMapsEsriAvatarFill) {
+            var st = openMapsEsriInspectorHighlightStyle(clone.geometry, sourceLayer.openMapsEsriAvatarFill);
+            if (mode === 'hover' && st) {
+              if (typeof st.strokeWidth === 'number') st.strokeWidth = Math.max(1, st.strokeWidth - 0.5);
+              if (typeof st.strokeOpacity === 'number') st.strokeOpacity = Math.min(1, st.strokeOpacity * 0.88);
+            }
+            clone.style = st || null;
+          } else clone.style = null;
+          ringL.addFeatures([clone]);
+          return { feat: null, lyr: null };
+        }
+
+        function paintInspectItemGeometry(mode, geom, itemId) {
+          if (!geom) return;
+          var it = viewportItemsById.get(itemId) || queryItemsById.get(itemId);
+          var outerHex = openMapsInspectorOuterHexForItem(it);
+          var innerSpec = openMapsInspectorInnerSpecForItem(it);
+          var g0 = typeof geom.clone === 'function' ? geom.clone() : geom;
+          var cn = g0 && g0.CLASS_NAME;
+          if (cn === 'OpenLayers.Geometry.Point' || cn === 'OpenLayers.Geometry.MultiPoint') {
+            paintInspectorAvatarPointHighlight(mode, g0, outerHex, innerSpec);
+            return;
+          }
+          var ringL = mode === 'select' ? highlightSelectLayer : highlightHoverLayer;
+          var f = new OpenLayers.Feature.Vector(g0);
+          var st = openMapsEsriInspectorHighlightStyle(g0, innerSpec && innerSpec.colorHex ? innerSpec.colorHex : outerHex);
+          if (mode === 'hover' && st) {
+            if (typeof st.strokeWidth === 'number') st.strokeWidth = Math.max(1, st.strokeWidth - 0.5);
+            if (typeof st.strokeOpacity === 'number') st.strokeOpacity = Math.min(1, st.strokeOpacity * 0.88);
+          }
+          f.style = st || null;
+          ringL.addFeatures([f]);
+        }
+
+        if (selId) {
+          var sref = featureRefById.get(selId);
+          if (sref && sref.feature) {
+            var rb = paintInspectFeature('select', sref.feature, sref.layer);
+            selBump.feat = rb.feat;
+            selBump.lyr = rb.lyr;
+          } else {
+            var sg = geometryById.get(selId);
+            if (sg) paintInspectItemGeometry('select', sg, selId);
+          }
+        }
+
+        if (drawHover) {
+          var href = featureRefById.get(effHovId);
+          if (href && href.feature) {
+            var rh = paintInspectFeature('hover', href.feature, href.layer);
+            hovBump.feat = rh.feat;
+            hovBump.lyr = rh.lyr;
+          } else {
+            var hg = geometryById.get(effHovId);
+            if (hg) paintInspectItemGeometry('hover', hg, effHovId);
+          }
+        }
+
+        if (selBump.feat && hovBump.feat && selBump.lyr === hovBump.lyr) {
+          bumpEsriPointFeatureToDrawLast(hovBump.feat, selBump.lyr);
+          bumpEsriPointFeatureToDrawLast(selBump.feat, selBump.lyr);
+        } else {
+          if (hovBump.feat && hovBump.lyr) bumpEsriPointFeatureToDrawLast(hovBump.feat, hovBump.lyr);
+          if (selBump.feat && selBump.lyr) bumpEsriPointFeatureToDrawLast(selBump.feat, selBump.lyr);
+        }
+
+        syncInspectorViewportGeometrySymbols();
+        pinInspectorHighlightStack();
+        requestAnimationFrame(function() {
+          try {
+            pinInspectorHighlightStack();
+          } catch (ePin2) { /* ignore */ }
+        });
+        syncInspectorListRowHoverClasses();
+      } catch (eDual) {
+        clearHighlight();
+      }
+    }
+
+    function isInspectorHighlightVectorLayer(Lay) {
+      return Lay === highlightSelectLayer || Lay === highlightHoverLayer ||
+        Lay === highlightSelectHaloLayer || Lay === highlightHoverHaloLayer ||
+        Lay === highlightSelectLiftLayer || Lay === highlightHoverLiftLayer;
+    }
+
+    /** ESRI_FEATURE layers and the Map Inspector geometry-only symbol layer (WMS/WFS/query). */
+    function inspectorMapVectorLayerIsHitTarget(Lay) {
+      if (!Lay) return false;
+      if (Lay.openMapsEsriAvatarFill) return true;
+      return inspectorViewportGeomLayer != null && Lay === inspectorViewportGeomLayer;
+    }
+
+    function findTopEsriFeatureFromEvent(evt) {
+      if (!evt || evt.xy == null) return null;
+      var om = W.map.getOLMap();
+      if (!om || !om.layers) return null;
+      var n = om.layers.length;
+      for (var i = n - 1; i >= 0; i--) {
+        var Lay = om.layers[i];
+        if (!Lay || isInspectorHighlightVectorLayer(Lay)) continue;
+        if (!inspectorMapVectorLayerIsHitTarget(Lay)) continue;
+        if (typeof Lay.getVisibility === 'function' && !Lay.getVisibility()) continue;
+        if (typeof Lay.getFeatureFromEvent !== 'function') continue;
+        try {
+          var fe = Lay.getFeatureFromEvent(evt);
+          if (fe) return { feature: fe, layer: Lay };
+        } catch (eG) { /* next layer */ }
+      }
+      var ll = null;
+      try {
+        ll = om.getLonLatFromPixel(evt.xy);
+      } catch (eLL) { ll = null; }
+      if (!ll || typeof ll.lon !== 'number' || typeof ll.lat !== 'number') return null;
+      var px = ll.lon;
+      var py = ll.lat;
+      var res = typeof om.getResolution === 'function' ? om.getResolution() : null;
+      if (res == null || !(res > 0)) return null;
+      var tolMap = res * 14;
+      var tol2 = tolMap * tolMap;
+      for (var j = n - 1; j >= 0; j--) {
+        var L2 = om.layers[j];
+        if (!L2 || isInspectorHighlightVectorLayer(L2)) continue;
+        if (!inspectorMapVectorLayerIsHitTarget(L2)) continue;
+        if (typeof L2.getVisibility === 'function' && !L2.getVisibility()) continue;
+        var fts = L2.features || [];
+        var bestF = null;
+        var bestD = Infinity;
+        for (var fi = 0; fi < fts.length; fi++) {
+          var f = fts[fi];
+          var g = f.geometry;
+          if (!g) continue;
+          var comps = [];
+          if (g.CLASS_NAME === 'OpenLayers.Geometry.Point') {
+            comps.push(g);
+          } else if (g.CLASS_NAME === 'OpenLayers.Geometry.MultiPoint' && g.components) {
+            for (var ci = 0; ci < g.components.length; ci++) comps.push(g.components[ci]);
+          } else continue;
+          for (var pi = 0; pi < comps.length; pi++) {
+            var pg = comps[pi];
+            if (typeof pg.x !== 'number' || typeof pg.y !== 'number') continue;
+            var dx = pg.x - px;
+            var dy = pg.y - py;
+            var d2 = dx * dx + dy * dy;
+            if (d2 < bestD) {
+              bestD = d2;
+              bestF = f;
+            }
+          }
+        }
+        if (bestF != null && bestD <= tol2) return { feature: bestF, layer: L2 };
+      }
+      return null;
+    }
+
+    function esriMapHitCacheKey(hit) {
+      if (!hit || !hit.feature || !hit.layer) return '';
+      try {
+        var vgId = hit.feature.openMapsInspectorItemId;
+        if (vgId != null && vgId !== '') {
+          return 'omVg|' + String(hit.layer.id) + '|' + String(vgId);
+        }
+        var g = hit.feature.geometry;
+        var xy = (g && typeof g.x === 'number' && typeof g.y === 'number') ? (g.x + ',' + g.y) : '';
+        // Do not use feature array index — draw-order bump moves the feature and would change the key every frame.
+        var fid = hit.feature.fid != null ? String(hit.feature.fid) : '';
+        return String(hit.layer.id) + '|' + fid + '|' + xy;
+      } catch (eK) {
+        return '';
+      }
+    }
+
+    function flushMapEsriHover() {
+      mapEsriHoverRaf = null;
+      var evt = mapEsriHoverPendingEvt;
+      mapEsriHoverPendingEvt = null;
+      if (!evt) return;
+      var hit = findTopEsriFeatureFromEvent(evt);
+      var k = esriMapHitCacheKey(hit);
+      if (k === mapEsriHoverLastKey) return;
+      mapEsriHoverLastKey = k;
+      if (hit) {
+        var vgH = hit.feature && hit.feature.openMapsInspectorItemId;
+        if (vgH != null && vgH !== '') {
+          mapHoverHighlightId = vgH;
+        } else {
+          var mapIdH = openMapsMapIdFromEsriFeatureHitLayer(hit.layer);
+          if (mapIdH != null) {
+            var fi = (hit.layer.features || []).indexOf(hit.feature);
+            mapHoverHighlightId = stableFeatureId(mapIdH, 'main', hit.feature, fi >= 0 ? fi : 0);
+          } else {
+            mapHoverHighlightId = null;
+          }
+        }
+      } else {
+        mapEsriHoverLastKey = '';
+        mapHoverHighlightId = null;
+      }
+      applyInspectorDualHighlights();
+    }
+
+    function onOlMapPointerMove(evt) {
+      mapEsriHoverPendingEvt = evt;
+      if (mapEsriHoverRaf != null) return;
+      mapEsriHoverRaf = requestAnimationFrame(flushMapEsriHover);
+    }
+
+    function onOlMapDivPointerLeave() {
+      mapEsriHoverLastKey = '';
+      cancelMapEsriHoverMotion();
+      mapHoverHighlightId = null;
+      applyInspectorDualHighlights();
+    }
+
+    function scheduleViewportRefresh() {
+      if (!isInspectorWinOpen()) return;
+      if (moveTimer) clearTimeout(moveTimer);
+      moveTimer = setTimeout(function() {
+        moveTimer = null;
+        runViewportIndex();
+      }, DEBOUNCE_MS);
+    }
+
+    function trySelectEsriFeatureFromClick(evt) {
+      var hit = findTopEsriFeatureFromEvent(evt);
+      if (!hit) return false;
+      var vgId = hit.feature && hit.feature.openMapsInspectorItemId;
+      if (vgId != null && vgId !== '') {
+        function attemptSelectVg() {
+          if (viewportItemsById.has(vgId) || queryItemsById.has(vgId)) {
+            selectItem(vgId);
+            return true;
+          }
+          return false;
+        }
+        if (attemptSelectVg()) return true;
+        if (!isInspectorWinOpen()) openWin();
+        runViewportIndex(true);
+        setTimeout(function() { attemptSelectVg(); }, 0);
+        return true;
+      }
+      var mapIdC = openMapsMapIdFromEsriFeatureHitLayer(hit.layer);
+      if (mapIdC == null) return false;
+      var fi = (hit.layer.features || []).indexOf(hit.feature);
+      var layerKeyC = 'main';
+      var handleC = inspectorHandleForMapId(mapIdC);
+      if (handleC) {
+        (handleC.mapLayers || []).forEach(function(ml) {
+          if (ml && ml.visible && isInspectorSourceIncluded(mapIdC, ml.name)) {
+            layerKeyC = ml.name;
+          }
+        });
+      }
+      var sid = stableFeatureId(mapIdC, layerKeyC, hit.feature, fi >= 0 ? fi : 0);
+      function attemptSelect() {
+        if (viewportItemsById.has(sid) || queryItemsById.has(sid)) {
+          selectItem(sid);
+          return true;
+        }
+        return false;
+      }
+      if (attemptSelect()) return true;
+      if (!isInspectorWinOpen()) {
+        openWin();
+      }
+      runViewportIndex(true);
+      setTimeout(function() { attemptSelect(); }, 0);
+      return true;
+    }
+
+    function onMapClick(evt) {
+      if (evt && evt._openMapsInspectorClickHandled) return;
+      if (trySelectEsriFeatureFromClick(evt)) return;
+      if (!isInspectorWinOpen()) return;
+      var extent = typeof getMapExtent === 'function' ? getMapExtent() : null;
+      if (!extent) return;
+      for (var hi = 0; hi < handles.length; hi++) {
+        var h = handles[hi];
+        var layers = [];
+        if (h.bboxLayer && isVectorLayer(h.bboxLayer)) layers.push({ layer: h.bboxLayer, key: 'bbox' });
+        if (h.layer && isVectorLayer(h.layer)) layers.push({ layer: h.layer, key: 'main' });
+        for (var li = 0; li < layers.length; li++) {
+          var L = layers[li].layer;
+          if (!L.getVisibility()) continue;
+          var f = null;
+          try {
+            if (typeof L.getFeatureFromEvent === 'function') f = L.getFeatureFromEvent(evt);
+          } catch (e) {}
+          if (f) {
+            var foundId = null;
+            featureRefById.forEach(function(ref, rid) {
+              if (ref.feature === f) foundId = rid;
+            });
+            if (foundId) {
+              selectItem(foundId);
+              return;
+            }
+            var idx = (L.features || []).indexOf(f);
+            var sid = stableFeatureId(h.mapId, layers[li].key, f, idx >= 0 ? idx : 0);
+            if (viewportItemsById.has(sid)) selectItem(sid);
+            return;
+          }
+        }
+      }
+    }
+
+    function registerMapClick() {
+      if (mapClickRegistered) return;
+      try {
+        olMap.events.register('click', null, onMapClick);
+        mapClickRegistered = true;
+      } catch (e) {}
+    }
+
+    /**
+     * WME Places/POI overlays often sit above the map in the DOM and receive the click before OpenLayers’ bubble
+     * handler runs, so `olMap.events` click never fires. Capture on the document (map area only) runs first
+     * and uses the same pixel math + hit-test as ESRI_FEATURE / inspector viewport geometry.
+     * OpenMaps overlay vectors use `pointer-events: none` so native Places layers can be the hit target when
+     * we do not consume the click (see `applyOpenMapsOverlayZToLayerDiv`).
+     */
+    function registerInspectorMapClickCapture() {
+      if (inspectorMapClickCaptureRegistered) return;
+      if (typeof document === 'undefined' || !document.addEventListener) return;
+      document.addEventListener('click', function inspectorMapClickCapture(evt) {
+        if (evt._openMapsInspectorClickHandled) return;
+        try {
+          if (evt.button != null && evt.button !== 0) return;
+          if (win && (win === evt.target || (typeof win.contains === 'function' && win.contains(evt.target)))) return;
+          if (inspectorCalloutEl && inspectorCalloutEl.style.display !== 'none' &&
+            typeof inspectorCalloutEl.contains === 'function' && inspectorCalloutEl.contains(evt.target)) return;
+          if (!olMap || !olMap.div) return;
+          var mapDiv = olMap.div;
+          var r = mapDiv.getBoundingClientRect();
+          if (evt.clientX < r.left || evt.clientX > r.right || evt.clientY < r.top || evt.clientY > r.bottom) return;
+          var pos = OpenLayers.Util.pagePosition(mapDiv);
+          var synthetic = { xy: new OpenLayers.Pixel(evt.clientX - pos[0], evt.clientY - pos[1]) };
+          if (trySelectEsriFeatureFromClick(synthetic)) {
+            evt._openMapsInspectorClickHandled = true;
+            evt.preventDefault();
+            evt.stopPropagation();
+            evt.stopImmediatePropagation();
+          }
+        } catch (eCap) { /* ignore */ }
+      }, true);
+      inspectorMapClickCaptureRegistered = true;
+    }
+
+    function unregisterMapClick() {
+      if (!mapClickRegistered) return;
+      try {
+        olMap.events.unregister('click', null, onMapClick);
+      } catch (e) {}
+      mapClickRegistered = false;
+    }
+
+    // Inspector root stays open in floating window; still keep the hooks for safety.
+    syncMapGroupDefaults();
+    registerMapClick();
+    registerInspectorMapClickCapture();
+    try {
+      olMap.events.register('mousemove', null, onOlMapPointerMove);
+    } catch (eMm) { /* ignore */ }
+    try {
+      if (olMap.div) olMap.div.addEventListener('mouseleave', onOlMapDivPointerLeave);
+    } catch (eMl) { /* ignore */ }
+
+    if (openMapsWmeSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.on === 'function') {
+      try {
+        openMapsWmeSdk.Events.on({ eventName: 'wme-map-move-end', eventHandler: scheduleViewportRefresh });
+        openMapsWmeSdk.Events.on({ eventName: 'wme-map-zoom-changed', eventHandler: scheduleViewportRefresh });
+      } catch (eSdkEv) {
+        W.map.events.register('moveend', null, scheduleViewportRefresh);
+      }
+    } else {
+      W.map.events.register('moveend', null, scheduleViewportRefresh);
+    }
+
+    searchInput.addEventListener('input', function() { renderFullList(); });
+    refreshBtn.addEventListener('click', function() { runViewportIndex(true); });
+
+    clearQueryBtn.addEventListener('click', function() {
+      queryItemsById.clear();
+      queryListIds = [];
+      if (selectedId && String(selectedId).indexOf('om-inspector-q-') === 0) {
+        selectedId = null;
+        hideInspectorCallout();
+      }
+      renderFullList();
+    });
+
+    var tableOverlay = null;
+    function ensureTableOverlay() {
+      if (tableOverlay) return tableOverlay;
+      tableOverlay = document.createElement('div');
+      tableOverlay.className = 'openmaps-inspector-table-overlay';
+      tableOverlay.style.cssText = 'display:none; position:fixed; inset:0; z-index:100600; background:rgba(0,0,0,0.35); align-items:center; justify-content:center; padding:16px; box-sizing:border-box;';
+      var panel = document.createElement('div');
+      panel.className = 'openmaps-inspector-table-panel';
+      panel.style.cssText = 'background:var(--background_default,#fff); border-radius:8px; max-width:min(96vw,900px); width:100%; max-height:86vh; display:flex; flex-direction:column; box-shadow:0 8px 24px rgba(0,0,0,0.2);';
+      var head = document.createElement('div');
+      head.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border-bottom:1px solid #e8eaed;';
+      var hTitle = document.createElement('h3');
+      hTitle.style.cssText = 'margin:0; font-size:16px;';
+      hTitle.textContent = I18n.t('openmaps.inspector_table_title');
+      var closeBtn = document.createElement('wz-button');
+      closeBtn.setAttribute('size', 'sm');
+      closeBtn.setAttribute('color', 'secondary');
+      closeBtn.textContent = I18n.t('openmaps.inspector_table_close');
+      head.appendChild(hTitle);
+      head.appendChild(closeBtn);
+      tableOverlay._hTitle = hTitle;
+      var searchTable = document.createElement('input');
+      searchTable.type = 'search';
+      searchTable.className = 'form-control';
+      searchTable.placeholder = I18n.t('openmaps.inspector_table_search');
+      searchTable.style.cssText = 'margin:8px 12px; width:auto; flex-shrink:0;';
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'overflow:auto; padding:0 12px 12px; flex:1; min-height:0;';
+      var tableEl = document.createElement('table');
+      tableEl.className = 'openmaps-inspector-data-table';
+      tableEl.style.cssText = 'width:100%; border-collapse:collapse; font-size:12px;';
+      wrap.appendChild(tableEl);
+      panel.appendChild(head);
+      panel.appendChild(searchTable);
+      panel.appendChild(wrap);
+      tableOverlay.appendChild(panel);
+      document.body.appendChild(tableOverlay);
+      closeBtn.addEventListener('click', function() { tableOverlay.style.display = 'none'; });
+      tableOverlay.addEventListener('click', function(ev) { if (ev.target === tableOverlay) tableOverlay.style.display = 'none'; });
+      tableOverlay._table = tableEl;
+      tableOverlay._search = searchTable;
+      return tableOverlay;
+    }
+
+    var tableSortState = { colIdx: 0, dir: 1 };
+
+    function openDataTableForMap(mapIdStr) {
+      var TABLE_ROW_CAP = 500;
+      tableSortState.colIdx = 0;
+      tableSortState.dir = 1;
+      var overlay = ensureTableOverlay();
+      var mapTitle = mapTitleForInspector(mapIdStr);
+      if (overlay._hTitle) {
+        overlay._hTitle.textContent = I18n.t('openmaps.inspector_table_title') + ' — ' + mapTitle;
+      }
+      var ids = getCombinedOrderedIds();
+      var rows = ids.map(function(id) {
+        return viewportItemsById.get(id) || queryItemsById.get(id);
+      }).filter(function(r) {
+        return r && String(r.mapId) === String(mapIdStr);
+      });
+      var colSet = [];
+      rows.forEach(function(row) {
+        Object.keys(row.props || {}).forEach(function(k) {
+          if (colSet.indexOf(k) === -1) colSet.push(k);
+        });
+      });
+      colSet.sort();
+      if (colSet.length > MAX_TABLE_COLS) colSet.length = MAX_TABLE_COLS;
+      var baseCols = ['_label', '_source', '_kind'];
+      var allCols = baseCols.concat(colSet);
+
+      function cellVal(r, c) {
+        if (c === '_label') return r.label || '';
+        if (c === '_source') return r.source || '';
+        if (c === '_kind') return r.kind || '';
+        var p = r.props || {};
+        return p[c] != null ? String(p[c]) : '';
+      }
+
+      function buildTable(filterText) {
+        var ft = (filterText || '').trim().toLowerCase();
+        var bodyRows = rows.filter(function(r) {
+          if (!ft) return true;
+          var blob = (r.label + ' ' + r.source + JSON.stringify(r.props || {})).toLowerCase();
+          return blob.indexOf(ft) !== -1;
+        });
+        if (bodyRows.length > TABLE_ROW_CAP) bodyRows = bodyRows.slice(0, TABLE_ROW_CAP);
+
+        var sc = allCols[tableSortState.colIdx];
+        if (sc) {
+          bodyRows = bodyRows.slice().sort(function(a, b) {
+            var va = cellVal(a, sc);
+            var vb = cellVal(b, sc);
+            var cmp = va < vb ? -1 : (va > vb ? 1 : 0);
+            if (cmp === 0) return 0;
+            return cmp * tableSortState.dir;
+          });
+        }
+
+        var thead = document.createElement('thead');
+        var trh = document.createElement('tr');
+        allCols.forEach(function(c, ci) {
+          var th = document.createElement('th');
+          th.style.cssText = 'text-align:left; padding:6px; border-bottom:2px solid #ccc; cursor:pointer; white-space:nowrap;';
+          th.textContent = (c.charAt(0) === '_' ? c.slice(1) : c) + (tableSortState.colIdx === ci ? (tableSortState.dir > 0 ? ' ▲' : ' ▼') : '');
+          th.addEventListener('click', function() {
+            if (tableSortState.colIdx === ci) tableSortState.dir = -tableSortState.dir;
+            else {
+              tableSortState.colIdx = ci;
+              tableSortState.dir = 1;
+            }
+            buildTable(overlay._search.value);
+          });
+          trh.appendChild(th);
+        });
+        thead.appendChild(trh);
+
+        var tbody = document.createElement('tbody');
+        bodyRows.forEach(function(r) {
+          var tr = document.createElement('tr');
+          allCols.forEach(function(c) {
+            var td = document.createElement('td');
+            td.style.cssText = 'padding:4px 6px; border-bottom:1px solid #eee; vertical-align:top;';
+            td.textContent = cellVal(r, c);
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+
+        overlay._table.innerHTML = '';
+        overlay._table.appendChild(thead);
+        overlay._table.appendChild(tbody);
+      }
+
+      overlay._search.oninput = function() { buildTable(overlay._search.value); };
+      overlay.style.display = 'flex';
+      buildTable(overlay._search.value || '');
+    }
+
+    function ingestEsriResults(json, mapId, layersStr) {
+      var results = (json && Array.isArray(json.results)) ? json.results : [];
+      var map = maps.get(mapId);
+      var title = map ? map.title : '';
+      results.forEach(function(r, idx) {
+        var id = 'om-inspector-q-esri-' + mapId + '-' + idx + '-' + Math.random().toString(36).slice(2, 10);
+        var attrs = (r && r.attributes && typeof r.attributes === 'object') ? r.attributes : {};
+        var props = {};
+        Object.keys(attrs).forEach(function(k) { props[k] = attrs[k]; });
+        var label = (r.layerName || 'Layer') + (r.value ? (' — ' + r.value) : '');
+        var qLayerKey = layersStr && String(layersStr).length ? String(layersStr) : '__query__';
+        var qLayerLabel = layersStr && String(layersStr).length ? String(layersStr) : I18n.t('openmaps.inspector_kind_query');
+        queryItemsById.set(id, {
+          id: id,
+          label: label,
+          source: title + ' · ' + (layersStr || ''),
+          kind: 'query',
+          mapId: mapId,
+          props: props,
+          bbox: null,
+          inspectorLayerKey: qLayerKey,
+          inspectorLayerLabel: qLayerLabel
+        });
+        queryListIds.push(id);
+      });
+      renderFullList();
+    }
+
+    function ingestWmsFromContent(contentEl, mapId, layersStr) {
+      if (!contentEl) return;
+      var map = maps.get(mapId);
+      var title = map ? map.title : '';
+      var rows = extractWmsGfiTablesFromContentRoot(contentEl);
+      rows.forEach(function(props, tix) {
+        if (!Object.keys(props).length) return;
+        var id = 'om-inspector-q-wms-' + mapId + '-' + tix + '-' + Date.now();
+        var label = Object.keys(props)[0] ? (Object.keys(props)[0] + ': ' + props[Object.keys(props)[0]]) : 'WMS';
+        var qLayerKeyW = layersStr && String(layersStr).length ? String(layersStr) : '__query__';
+        var qLayerLabelW = layersStr && String(layersStr).length ? String(layersStr) : I18n.t('openmaps.inspector_kind_query');
+        queryItemsById.set(id, {
+          id: id,
+          label: label.slice(0, 120),
+          source: title + ' · ' + (layersStr || ''),
+          kind: 'query',
+          mapId: mapId,
+          props: props,
+          bbox: null,
+          inspectorLayerKey: qLayerKeyW,
+          inspectorLayerLabel: qLayerLabelW
+        });
+        queryListIds.push(id);
+      });
+      renderFullList();
+    }
+
+    function maybeAutoIngest(isEsri, payload) {
+      if (Settings.get().inspectorQueryIngest !== true) return;
+      if (isEsri) ingestEsriResults(payload.json, payload.mapId, payload.layersStr);
+      else ingestWmsFromContent(payload.contentEl, payload.mapId, payload.layersStr);
+    }
+
+    function inspectorItemMatchesSidebarLayer(it, mapId, layerName) {
+      if (!it) return false;
+      if (String(it.mapId) !== String(mapId)) return false;
+      var mt0 = mapTitleForInspector(String(mapId));
+      return inspectorResolveItemLayerKey(it, mt0) === String(layerName);
+    }
+
+    /**
+     * Keep Map Inspector viewport/query inclusion aligned with **Map layers** sidebar eyes for one row;
+     * clear selection/hover tied to that layer so highlight symbols disappear from the map.
+     */
+    function applySidebarSubLayerToInspectorScan(mapId, layerName, visible) {
+      var mid = String(mapId);
+      var lk = String(layerName);
+      var sto = inspectorSourceStorageKey(mid, lk);
+      if (visible) delete inspectorSourceInclude[sto];
+      else inspectorSourceInclude[sto] = false;
+
+      function itemFor(id) {
+        return id ? (viewportItemsById.get(id) || queryItemsById.get(id)) : null;
+      }
+      function matches(id) {
+        return inspectorItemMatchesSidebarLayer(itemFor(id), mid, lk);
+      }
+      if (matches(selectedId)) {
+        hideInspectorCallout({ clearSelection: true });
+        selectedId = null;
+      }
+      if (matches(listHoverHighlightId)) listHoverHighlightId = null;
+      if (matches(mapHoverHighlightId)) {
+        mapHoverHighlightId = null;
+        cancelMapEsriHoverMotion();
+        mapEsriHoverLastKey = '';
+      }
+      cancelScheduledInspectorHoverHL();
+      try {
+        applyInspectorDualHighlights();
+      } catch (eDH) { /* ignore */ }
+      try {
+        syncInspectorListRowHoverClasses();
+      } catch (eSL) { /* ignore */ }
+    }
+
+    openMapsInspectorApi = {
+      notifyHandlesChanged: function() {
+        if (!isInspectorWinOpen()) return;
+        lastInspectorViewportBucket = null;
+        syncMapGroupDefaults();
+        // Sub-layer eyes already end in updateLayers → here; previously we only scheduled a debounced
+        // viewport pass, so MI tree/counts and vector rows lagged like a pan. Match refreshSourcesTree:
+        // rebuild immediately from the current extent (runViewportIndex ends with renderFullList).
+        if (moveTimer) clearTimeout(moveTimer);
+        moveTimer = null;
+        runViewportIndex(true);
+      },
+      refreshSourcesTree: function() {
+        if (!isInspectorWinOpen()) return;
+        lastInspectorViewportBucket = null;
+        renderFullList();
+        scheduleViewportRefresh();
+      },
+      /** ESRI_FEATURE bbox query finished (or cache hit): layer features were replaced; refresh inspector refs for selection highlight. */
+      notifyEsriFeatureLayerRefreshed: function() {
+        if (!isInspectorWinOpen()) return;
+        if (inspectorVectorStaleTimer) clearTimeout(inspectorVectorStaleTimer);
+        inspectorVectorStaleTimer = setTimeout(function() {
+          inspectorVectorStaleTimer = null;
+          if (!isInspectorWinOpen()) return;
+          refreshInspectorInMemoryVectorRefs();
+          renderFullList();
+        }, 0);
+      },
+      ingestEsriResults: ingestEsriResults,
+      ingestWmsFromContent: ingestWmsFromContent,
+      maybeAutoIngest: maybeAutoIngest,
+      isInspectorOpen: function() { return isInspectorWinOpen(); },
+      pinHighlightOnTop: pinInspectorHighlightStack,
+      getInspectorOverlayLayersTopToBottom: getInspectorOverlayLayersTopToBottom,
+      applySidebarSubLayerToInspectorScan: applySidebarSubLayerToInspectorScan
+    };
+  }
+
   //#region Create tab and layer group
   var tab = await (async function() {
-    const {tabLabel, tabPane} = W.userscripts.registerSidebarTab('openMaps');
+    var tabLabel;
+    var tabPane;
+    if (openMapsWmeSdk && openMapsWmeSdk.Sidebar && typeof openMapsWmeSdk.Sidebar.registerScriptTab === 'function') {
+      try {
+        var regSdk = await openMapsWmeSdk.Sidebar.registerScriptTab();
+        tabLabel = regSdk.tabLabel;
+        tabPane = regSdk.tabPane;
+      } catch (eSdkTab) {
+        try {
+          log('SDK Sidebar.registerScriptTab failed; using W.userscripts: ' + (eSdkTab && eSdkTab.message ? eSdkTab.message : eSdkTab));
+        } catch (eL) { /* ignore */ }
+        var leg0 = W.userscripts.registerSidebarTab('openMaps');
+        tabLabel = leg0.tabLabel;
+        tabPane = leg0.tabPane;
+        if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
+      }
+    } else {
+      var leg1 = W.userscripts.registerSidebarTab('openMaps');
+      tabLabel = leg1.tabLabel;
+      tabPane = leg1.tabPane;
+      if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
+    }
 
     tabLabel.innerHTML = '<span class="fa"></span>';
     tabLabel.title = I18n.t('openmaps.tab_title');
     tabPane.id = 'sidepanel-openMaps';
 
-    await W.userscripts.waitForElementConnected(tabPane);
-
-    return Promise.resolve(tabPane);
+    return tabPane;
   })();
 
   if (pendingUpdateNoticeMessage) {
@@ -3747,23 +8996,57 @@ async function onWmeReady() {
   // New map layer drawer group
   var omGroup = createLayerToggler(null, true, I18n.t('openmaps.layer_group_title'), null);
 
-// Satellite imagery toggle
+// Satellite imagery toggle (prefer WME SDK Map.* — WME_LAYER_NAMES has no satellite; layer name stays the internal string)
 // --- CACHED SATELLITE IMAGERY TOGGLE ---
-  const wazeSatLayer = W.map.getLayerByName('satellite_imagery');
+  var OPEN_MAPS_SAT_LAYER_NAME = 'satellite_imagery';
+  var wazeSatLayer = W.map.getLayerByName(OPEN_MAPS_SAT_LAYER_NAME);
   const satImagery = document.createElement('wz-checkbox');
-  satImagery.checked = wazeSatLayer.getVisibility();
-
-  // Listen for the component to "change" instead of "click"
-  satImagery.addEventListener('change', function(e) {
-    wazeSatLayer.setVisibility(e.target.checked);
-  });
-
-  wazeSatLayer.events.register('visibilitychanged', null, function() {
-    // Keep in sync if toggled via Shift+I
-    if (satImagery.checked !== wazeSatLayer.getVisibility()) {
-      satImagery.checked = wazeSatLayer.getVisibility();
+  var satUseSdk = false;
+  if (openMapsWmeSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.isLayerVisible === 'function') {
+    try {
+      satImagery.checked = openMapsWmeSdk.Map.isLayerVisible({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
+      satUseSdk = true;
+    } catch (eSatSdk) {
+      satUseSdk = false;
     }
+  }
+  if (!satUseSdk) {
+    satImagery.checked = wazeSatLayer.getVisibility();
+  }
+
+  satImagery.addEventListener('change', function(e) {
+    var on = e.target.checked;
+    if (satUseSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.setLayerVisibility === 'function') {
+      try {
+        openMapsWmeSdk.Map.setLayerVisibility({ layerName: OPEN_MAPS_SAT_LAYER_NAME, visibility: on });
+        return;
+      } catch (eSet) { /* fall through */ }
+    }
+    wazeSatLayer.setVisibility(on);
   });
+
+  if (satUseSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.trackLayerEvents === 'function') {
+    try {
+      openMapsWmeSdk.Events.trackLayerEvents({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
+    } catch (eTr) { /* ignore */ }
+    try {
+      openMapsWmeSdk.Events.on({
+        eventName: 'wme-layer-visibility-changed',
+        eventHandler: function(payload) {
+          if (!payload || payload.layerName !== OPEN_MAPS_SAT_LAYER_NAME) return;
+          try {
+            satImagery.checked = openMapsWmeSdk.Map.isLayerVisible({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
+          } catch (eIs) { /* ignore */ }
+        }
+      });
+    } catch (eOn) { /* ignore */ }
+  } else {
+    wazeSatLayer.events.register('visibilitychanged', null, function() {
+      if (satImagery.checked !== wazeSatLayer.getVisibility()) {
+        satImagery.checked = wazeSatLayer.getVisibility();
+      }
+    });
+  }
 
   satImagery.textContent = I18n.t('openmaps.satellite_imagery');
   tab.appendChild(satImagery);
@@ -3818,6 +9101,8 @@ var handleList = document.createElement('div');
   handleList.className = 'openmaps-map-list';
   tab.appendChild(handleList);
 
+  initOpenMapsInspector(tab);
+
   // --- SMART DRAG & DROP ENGINE ---
   function refreshMapDrag() {
     sortable(handleList, {
@@ -3831,31 +9116,669 @@ var handleList = document.createElement('div');
     listEl.addEventListener('sortupdate', onMapSort);
   }
 
+  var openMapsOverlayAddLayerPinTimer = null;
+  var openMapsOverlayMoveEndPinTimer = null;
+  /** Debounce for moveend stack pin — constant reordering during pan/zoom can break WME satellite tile loading. */
+  var OPEN_MAPS_OVERLAY_MOVEEND_PIN_MS = 220;
+  var openMapsOverlayAddLayerHooked = false;
+  var openMapsOverlayZTokSeq = 0;
+  var openMapsMapProtoResetZHooked = false;
+
+  function openMapsEnsureOverlayZStyleEl() {
+    var el = document.getElementById('openmaps-ol-overlay-z-rules');
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'openmaps-ol-overlay-z-rules';
+      el.type = 'text/css';
+      el.setAttribute('data-openmaps', 'overlay-z');
+      (document.head || document.documentElement).appendChild(el);
+    }
+    return el;
+  }
+
+  function openMapsTokenForOverlayLayerDiv(div) {
+    if (!div || !div.setAttribute) return null;
+    var t = div.getAttribute('data-openmaps-ol-ztok');
+    if (!t) {
+      openMapsOverlayZTokSeq++;
+      t = 'omz' + openMapsOverlayZTokSeq;
+      div.setAttribute('data-openmaps-ol-ztok', t);
+    }
+    if (div.classList && !div.classList.contains('openmaps-ol-overlay-z')) div.classList.add('openmaps-ol-overlay-z');
+    return t;
+  }
+
+  /**
+   * Build the same ordered overlay list as `pinOpenMapsOverlayStackTop` (inspector → ESRI bbox → ESRI main).
+   * @returns {Array}
+   */
+  function openMapsBuildOverlayPinOrdered() {
+    var ordered = [];
+    try {
+      if (openMapsInspectorApi && typeof openMapsInspectorApi.getInspectorOverlayLayersTopToBottom === 'function') {
+        ordered = openMapsInspectorApi.getInspectorOverlayLayersTopToBottom();
+      }
+    } catch (eOrd) {
+      ordered = [];
+    }
+    if (!Array.isArray(ordered)) ordered = [];
+    // GOOGLE_MY_MAPS: use syncOpenMapsLayerIndices only — the ESRI-style pin (top OL index + !important z + hoist)
+    // breaks WME satellite tile loading when My Maps is the sole overlay.
+    var esriList = handles.filter(function(h) {
+      return h.layer && h.map && h.map.type === 'ESRI_FEATURE' && openMapsHandleShouldPinOverlayVector(h);
+    });
+    esriList.forEach(function(h) {
+      if (h.bboxLayer) ordered.push(h.bboxLayer);
+      if (h.layer) ordered.push(h.layer);
+    });
+    return ordered;
+  }
+
+  function openMapsIsLiveOpenMapsEsriFeatureMainVector(L) {
+    return !!(L && L.CLASS_NAME === 'OpenLayers.Layer.Vector' && L.name &&
+      String(L.name).indexOf('OpenMaps_ESRI_FEATURE_') === 0);
+  }
+
+  function openMapsIsLiveOpenMapsGoogleMyMapsVector(L) {
+    return !!(L && L.CLASS_NAME === 'OpenLayers.Layer.Vector' && L.name &&
+      (String(L.name).indexOf('OpenMaps_GOOGLE_MY_MAPS_') === 0 || String(L.name).indexOf('OpenMaps_LOCAL_KML_') === 0));
+  }
+
+  function openMapsOverlayLayerIsOpenMapsBbox(L) {
+    if (!L) return false;
+    if (L.openMapsBboxMapId != null && L.openMapsBboxMapId !== '') return true;
+    var nm = L.name;
+    return nm != null && String(nm).indexOf('BBOX_') === 0;
+  }
+
+  function openMapsMapIdFromOverlayVectorLayer(L) {
+    if (!L) return null;
+    try {
+      if (L.openMapsMapId != null && L.openMapsMapId !== '') {
+        if (typeof L.openMapsMapId === 'number' && !isNaN(L.openMapsMapId)) return L.openMapsMapId;
+        var sId = String(L.openMapsMapId).trim();
+        if (/^-?\d+$/.test(sId)) return parseInt(sId, 10);
+        return L.openMapsMapId;
+      }
+      if (L.openMapsBboxMapId != null && L.openMapsBboxMapId !== '') {
+        if (typeof L.openMapsBboxMapId === 'number' && !isNaN(L.openMapsBboxMapId)) return L.openMapsBboxMapId;
+        var sB = String(L.openMapsBboxMapId).trim();
+        if (/^-?\d+$/.test(sB)) return parseInt(sB, 10);
+        return L.openMapsBboxMapId;
+      }
+    } catch (eMid) { /* ignore */ }
+    var nm = L.name;
+    if (nm == null) return null;
+    var s = String(nm);
+    if (s.indexOf('OpenMaps_ESRI_FEATURE_') === 0) {
+      var restE = s.slice('OpenMaps_ESRI_FEATURE_'.length);
+      if (/^-?\d+$/.test(restE)) {
+        var a = parseInt(restE, 10);
+      return isNaN(a) ? null : a;
+      }
+      return restE || null;
+    }
+    if (s.indexOf('OpenMaps_GOOGLE_MY_MAPS_') === 0) {
+      var tailG = s.slice('OpenMaps_GOOGLE_MY_MAPS_'.length);
+      return tailG || null;
+    }
+    if (s.indexOf('OpenMaps_LOCAL_KML_') === 0) {
+      var tailLk = s.slice('OpenMaps_LOCAL_KML_'.length);
+      return tailLk || null;
+    }
+    if (s.indexOf('BBOX_') === 0) {
+      var restB = s.slice('BBOX_'.length);
+      if (/^-?\d+$/.test(restB)) {
+        var b = parseInt(restB, 10);
+      return isNaN(b) ? null : b;
+      }
+      return restB || null;
+    }
+    return null;
+  }
+
+  function openMapsHandleForOverlayVectorLayer(L) {
+    var mid = openMapsMapIdFromOverlayVectorLayer(L);
+    if (mid == null || mid === '') return null;
+    for (var hi = 0; hi < handles.length; hi++) {
+      var hh = handles[hi];
+      if (hh && String(hh.mapId) === String(mid)) return hh;
+    }
+    return null;
+  }
+
+  /** ESRI_FEATURE only: OL top + CSS overlay pin vs WME Places (not used for GOOGLE_MY_MAPS — see sync-only note above). */
+  function openMapsHandleShouldPinOverlayVector(h) {
+    if (!h || !h.layer || !h.map) return false;
+    if (h.map.type !== 'ESRI_FEATURE') return false;
+    if (h.hidden || h.outOfArea) return false;
+    try {
+      if (!h.layer.getVisibility()) return false;
+    } catch (eVis) { return false; }
+    return true;
+  }
+
+  /** True when ESRI overlay pin or inspector overlays need the global `setZIndex` / stylesheet reapply path (skip when only My Maps / tiles). */
+  function openMapsOverlayPinStackHasWork() {
+    for (var pi = 0; pi < handles.length; pi++) {
+      var hp = handles[pi];
+      if (hp && hp.map && hp.map.type === 'ESRI_FEATURE' && openMapsHandleShouldPinOverlayVector(hp)) return true;
+    }
+    try {
+      if (openMapsInspectorApi && typeof openMapsInspectorApi.getInspectorOverlayLayersTopToBottom === 'function') {
+        var ins = openMapsInspectorApi.getInspectorOverlayLayersTopToBottom();
+        if (Array.isArray(ins) && ins.length > 0) return true;
+      }
+    } catch (eIns) { /* ignore */ }
+    return false;
+  }
+
+  /** True when no handle has an OL main/bbox layer and ESRI/inspector overlay-pin work is off — tile stack sync can short-circuit. */
+  function openMapsOpenLayersStackSyncIdle() {
+    if (handles.some(function(h) { return h && (h.layer || h.bboxLayer); })) return false;
+    if (typeof openMapsOverlayPinStackHasWork === 'function' && openMapsOverlayPinStackHasWork()) return false;
+    return true;
+  }
+
+  /**
+   * GOOGLE_MY_MAPS / LOCAL_KML: never participate in `syncOpenMapsLayerIndices` `setLayerIndex`.
+   * Even visible KML vectors were still reindexed above aerial on every sync/KML load and could break WME satellite tiles after pan/zoom.
+   * KML vectors stay at WME/OpenLayers default order after `addLayer`; tile/WMS/ESRI rows still stack above aerial.
+   */
+  function openMapsHandleParticipatesInLayerIndexSync(h) {
+    if (!h || !h.layer) return false;
+    if (h.map && openMapsMapTypeIsKmlVectorOverlay(h.map.type)) return false;
+    return true;
+  }
+
+  function openMapsOverlayExtraVectorShouldPin(L) {
+    if (!L) return false;
+    if (openMapsIsLiveOpenMapsGoogleMyMapsVector(L)) return false;
+    if (!(openMapsOverlayLayerIsOpenMapsBbox(L) || openMapsIsLiveOpenMapsEsriFeatureMainVector(L))) return false;
+    var hh = openMapsHandleForOverlayVectorLayer(L);
+    return !!(hh && openMapsHandleShouldPinOverlayVector(hh));
+  }
+
+  function openMapsHandleOrderIndexForOverlayLayer(L) {
+    var mid = openMapsMapIdFromOverlayVectorLayer(L);
+    if (mid == null || mid === '') return 1e9;
+    if (typeof mid === 'number' && isNaN(mid)) return 1e9;
+    for (var i = 0; i < handles.length; i++) {
+      if (handles[i] && String(handles[i].mapId) === String(mid)) return i;
+    }
+    return 1e9;
+  }
+
+  /**
+   * Resolve `ordered` to layers that actually appear on `olMap.layers` (no stale handle refs), then append any
+   * ESRI_FEATURE main or OpenMaps bbox vector still on the map but missing from that list — otherwise `setLayerIndex`
+   * is skipped and z-index tokens can stick to a detached `div` while idle symbols render on WME’s live layer.
+   * Swept layers are sorted by **handles** (Active Maps) order so repeated pins do not reshuffle FeatureServer stacks.
+   */
+  function openMapsLiveOverlayLayersForPinAndZ(olMap, ordered) {
+    var out = [];
+    var seen = Object.create(null);
+    if (!olMap || !olMap.layers) return out;
+    if (Array.isArray(ordered)) {
+      for (var i = 0; i < ordered.length; i++) {
+        var r = openMapsResolveLayerOnOlMap(olMap, ordered[i]);
+        if (!r || olMap.layers.indexOf(r) < 0) continue;
+        var nk = r.name;
+        if (nk == null || nk === '') continue;
+        if (seen[nk]) continue;
+        seen[nk] = true;
+        out.push(r);
+      }
+    }
+    var extras = [];
+    for (var j = 0; j < olMap.layers.length; j++) {
+      var L = olMap.layers[j];
+      if (!L || !L.name || seen[L.name]) continue;
+      if (L.CLASS_NAME !== 'OpenLayers.Layer.Vector') continue;
+      if (!openMapsOverlayExtraVectorShouldPin(L)) continue;
+      extras.push(L);
+    }
+    extras.sort(function(a, b) {
+      var ia = openMapsHandleOrderIndexForOverlayLayer(a);
+      var ib = openMapsHandleOrderIndexForOverlayLayer(b);
+      if (ia !== ib) return ia - ib;
+      var ab = openMapsOverlayLayerIsOpenMapsBbox(a);
+      var bb = openMapsOverlayLayerIsOpenMapsBbox(b);
+      if (ab !== bb) return ab ? -1 : 1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    for (var ex = 0; ex < extras.length; ex++) {
+      var E = extras[ex];
+      seen[E.name] = true;
+      out.push(E);
+    }
+    return out;
+  }
+
+  function openMapsWmeOlMapOrNull() {
+    try {
+      return (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+    } catch (eWm) {
+      return null;
+    }
+  }
+
+  /** Re-apply high `!important` z-index on overlay layer divs only (no `setLayerIndex`). */
+  function openMapsReapplyOverlayLayerDivZs(olMap) {
+    if (!olMap) return;
+    var wmeOm = openMapsWmeOlMapOrNull();
+    if (!wmeOm || olMap !== wmeOm) return;
+    if (!openMapsOverlayPinStackHasWork()) {
+      try {
+        var stNw = openMapsEnsureOverlayZStyleEl();
+        stNw.textContent = '';
+      } catch (eNw) { /* ignore */ }
+      return;
+    }
+    var ord = openMapsBuildOverlayPinOrdered();
+    if (!ord.length) {
+      try {
+        var st0 = openMapsEnsureOverlayZStyleEl();
+        st0.textContent = '';
+      } catch (eClr) { /* ignore */ }
+      return;
+    }
+    applyOpenMapsOverlayLayerDivZ(olMap, ord);
+  }
+
+  /**
+   * OpenLayers 2 `Layer.setZIndex` does `div.style.zIndex = n`, which removes a prior inline `z-index` with
+   * `!important`. WME/OL call this after redraw and `resetLayersZIndex`, so idle ESRI symbols sink under Places.
+   */
+  function openMapsScheduleReapplyOverlayLayerDivZs(olMap) {
+    if (!openMapsOverlayPinStackHasWork()) return;
+    if (!olMap || olMap.__openmapsReapplyZsRaf != null) return;
+    var wmeOmS = openMapsWmeOlMapOrNull();
+    if (!wmeOmS || olMap !== wmeOmS) return;
+    olMap.__openmapsReapplyZsRaf = requestAnimationFrame(function() {
+      olMap.__openmapsReapplyZsRaf = null;
+      try {
+        openMapsReapplyOverlayLayerDivZs(olMap);
+      } catch (eR) { /* ignore */ }
+    });
+  }
+
+  var openMapsLayerSetZIndexHooked = false;
+
+  /**
+   * Polyfill / coexistence hook (not in WME SDK): OpenLayers 2 applies plain inline `z-index` in
+   * `Layer.setZIndex` / `Map.resetLayersZIndex`, which clears our overlay stacking vs WME Places.
+   * Re-applies only when the map instance is `W.map.getOLMap()`; other OL maps are ignored in the hook body.
+   */
+  function ensureOpenMapsLayerSetZIndexHook() {
+    if (openMapsLayerSetZIndexHooked) return;
+    if (typeof OpenLayers === 'undefined' || !OpenLayers.Layer || !OpenLayers.Layer.prototype) return;
+    var proto = OpenLayers.Layer.prototype;
+    if (typeof proto.setZIndex !== 'function') return;
+    openMapsLayerSetZIndexHooked = true;
+    var origSetZ = proto.setZIndex;
+    proto.setZIndex = function(zIndex) {
+      origSetZ.apply(this, arguments);
+      try {
+        var om = this.map;
+        if (om) openMapsScheduleReapplyOverlayLayerDivZs(om);
+      } catch (eZ) { /* ignore */ }
+    };
+  }
+
+  /** Companion to `ensureOpenMapsLayerSetZIndexHook`: wraps `OpenLayers.Map.prototype.resetLayersZIndex`; reapplies only for `W.map.getOLMap()`. */
+  function ensureOpenMapsMapPrototypeResetLayersZIndexHook() {
+    if (openMapsMapProtoResetZHooked) return;
+    if (typeof OpenLayers === 'undefined' || !OpenLayers.Map || !OpenLayers.Map.prototype) return;
+    var proto = OpenLayers.Map.prototype;
+    var innerProto = proto.resetLayersZIndex;
+    if (typeof innerProto !== 'function') return;
+    openMapsMapProtoResetZHooked = true;
+    proto.resetLayersZIndex = function() {
+      var r = innerProto.apply(this, arguments);
+      try {
+        var wmeOmP = openMapsWmeOlMapOrNull();
+        if (wmeOmP && this === wmeOmP) openMapsReapplyOverlayLayerDivZs(this);
+      } catch (ePZ) { /* ignore */ }
+      return r;
+    };
+  }
+
+  function ensureOpenMapsMapResetLayersZIndexHook(olMap) {
+    ensureOpenMapsMapPrototypeResetLayersZIndexHook();
+    if (!olMap || olMap.__openmapsResetZHooked) return;
+    var inner = olMap.resetLayersZIndex;
+    if (typeof inner !== 'function') return;
+    olMap.__openmapsResetZHooked = true;
+    olMap.resetLayersZIndex = function() {
+      var r = inner.apply(olMap, arguments);
+      try {
+        openMapsReapplyOverlayLayerDivZs(olMap);
+      } catch (eRZ) { /* ignore */ }
+      return r;
+    };
+  }
+
+  /**
+   * WME may register a different `OpenLayers.Layer` instance on `olMap.layers` than the object we keep on
+   * the map handle (wrapper/proxy or internal replacement). `indexOf(handleLayer)` is then −1, so
+   * `setLayerIndex` and `layer.div` styling no-op or hit a detached div — default ESRI_FEATURE symbols stay
+   * under native layers while inspector-only layers (still the same refs) pin correctly. Match by
+   * `openMapsMapId` (ESRI_FEATURE) then `name` (unique per map row for ESRI_FEATURE since 2026.04.03.16).
+   */
+  function openMapsResolveLayerOnOlMap(olMap, lyr) {
+    if (!olMap || !olMap.layers || !lyr) return null;
+    try {
+      if (olMap.layers.indexOf(lyr) >= 0) return lyr;
+    } catch (eR) {
+      return null;
+    }
+    var mid = lyr.openMapsMapId;
+    var list = olMap.layers;
+    if (mid != null && mid !== '') {
+      for (var mi = 0; mi < list.length; mi++) {
+        var candM = list[mi];
+        if (candM && candM.openMapsMapId === mid) return candM;
+      }
+    }
+    var nm = lyr.name;
+    if (nm == null || nm === '') return null;
+    for (var li = 0; li < list.length; li++) {
+      var cand = list[li];
+      if (cand && cand.name === nm) return cand;
+    }
+    return null;
+  }
+
+  /** Resolve catalog `mapId` from the **live** hit layer (handle ref may be stale after WME replaces OL.Vector). */
+  function openMapsMapIdFromEsriFeatureHitLayer(hitLy) {
+    if (!hitLy) return null;
+    try {
+      if (hitLy.openMapsMapId != null && hitLy.openMapsMapId !== '') {
+        if (typeof hitLy.openMapsMapId === 'number' && !isNaN(hitLy.openMapsMapId)) return hitLy.openMapsMapId;
+        var sHit = String(hitLy.openMapsMapId).trim();
+        if (/^-?\d+$/.test(sHit)) return parseInt(sHit, 10);
+        return hitLy.openMapsMapId;
+      }
+    } catch (e0) { /* ignore */ }
+    var nm = hitLy.name;
+    if (nm != null && String(nm).indexOf('OpenMaps_ESRI_FEATURE_') === 0) {
+      var restEf = String(nm).slice('OpenMaps_ESRI_FEATURE_'.length);
+      if (/^-?\d+$/.test(restEf)) {
+        var idn = parseInt(restEf, 10);
+      if (!isNaN(idn)) return idn;
+      }
+    }
+    if (nm != null && String(nm).indexOf('OpenMaps_GOOGLE_MY_MAPS_') === 0) {
+      var idg = String(nm).slice('OpenMaps_GOOGLE_MY_MAPS_'.length);
+      return idg || null;
+    }
+    if (nm != null && String(nm).indexOf('OpenMaps_LOCAL_KML_') === 0) {
+      var idlk = String(nm).slice('OpenMaps_LOCAL_KML_'.length);
+      return idlk || null;
+    }
+    var omH = openMapsWmeOlMapOrNull();
+    for (var hi = 0; hi < handles.length; hi++) {
+      var h = handles[hi];
+      if (!h || !h.map) continue;
+      if (h.map.type !== 'ESRI_FEATURE' && h.map.type !== 'GOOGLE_MY_MAPS' && h.map.type !== 'LOCAL_KML') continue;
+      if (h.layer === hitLy) return h.mapId;
+      try {
+        if (omH && openMapsResolveLayerOnOlMap(omH, h.layer) === hitLy) return h.mapId;
+      } catch (eH) { /* ignore */ }
+    }
+    return null;
+  }
+
+  /** When OL layer divs are direct children of `viewPortDiv`, move ours to the end so paint order wins z-index ties. */
+  function openMapsHoistOverlayLayerDivsInViewport(olMap, live) {
+    if (!olMap || !olMap.viewPortDiv || !live || !live.length) return;
+    var vp = olMap.viewPortDiv;
+    try {
+      for (var hi = 0; hi < live.length; hi++) {
+        var div = live[hi] && live[hi].div;
+        if (!div || div.nodeType !== 1) continue;
+        if (div.parentNode === vp) vp.appendChild(div);
+      }
+    } catch (eHoist) { /* ignore */ }
+  }
+
+  /**
+   * WME Places and other native vectors often set CSS z-index on layer divs; OpenLayers layer index alone
+   * does not change stacking within the map viewport. Frontmost layer in the array gets the highest z-index.
+   */
+  /**
+   * Pin overlay stacking via a stylesheet with `!important`. OpenLayers 2 assigns `div.style.zIndex` without
+   * `!important`, which overrides a prior inline `setProperty(..., 'important')` on the same declaration.
+   * Author `!important` rules in a stylesheet still beat non-important inline z-index, so idle ESRI symbols
+   * stay above WME Places after `resetLayersZIndex` / redraw.
+   *
+   * **`pointer-events: none`**: overlay vectors are siblings of WME Places layer divs; if our canvas is the top
+   * hit target, Places never receives clicks (events do not bubble across sibling subtrees). ESRI picks use
+   * document capture + `evt.xy` hit-testing; OL `mousemove` still targets the map below.
+   */
+  function applyOpenMapsOverlayZToLayerDiv(lyrZ, zStr, cssChunks, mapCssPfx) {
+    if (!lyrZ || !lyrZ.div) return;
+    try {
+      var div = lyrZ.div;
+      div.style.position = div.style.position || 'absolute';
+      var tok = openMapsTokenForOverlayLayerDiv(div);
+      if (tok && cssChunks) {
+        var pfx = mapCssPfx ? String(mapCssPfx) : '';
+        var sel = '.openmaps-ol-overlay-z[data-openmaps-ol-ztok="' + tok + '"]';
+        cssChunks.push(
+          pfx + sel + '{z-index:' + zStr + '!important;position:absolute!important;pointer-events:none!important;}',
+          pfx + sel + ' canvas,' + pfx + sel + ' svg{z-index:' + zStr + '!important;position:relative!important;pointer-events:none!important;}'
+        );
+      }
+    } catch (eZ) { /* ignore */ }
+  }
+
+  function applyOpenMapsOverlayLayerDivZFromLive(olMap, live) {
+    if (!live || !live.length) return;
+    // Assign from the top of the 32-bit CSS z-index range downward. The old domZBase+n-zi formula left the
+    // backmost layer (usually the main ESRI_FEATURE vector with all default symbols) at only "base+1" while
+    // inspector lift/halo layers sat ~base+n. WME Places often uses values *between* those, so default symbols
+    // painted under Places while hover/selection clones (on lift layers) still looked correct.
+    var zTop = 2147483647;
+    var n = live.length;
+    var cssChunks = [];
+    var mapCssPfx = '';
+    try {
+      if (olMap && olMap.div && olMap.div.id) mapCssPfx = '#' + olMap.div.id + ' ';
+    } catch (eMq) { /* ignore */ }
+    for (var zi = 0; zi < n; zi++) {
+      applyOpenMapsOverlayZToLayerDiv(live[zi], String(zTop - zi), cssChunks, mapCssPfx);
+    }
+    try {
+      var st = openMapsEnsureOverlayZStyleEl();
+      st.textContent = '/* OpenMaps: overlay z-index (!important; survives OL inline zIndex) */\n' + cssChunks.join('');
+    } catch (eSt) { /* ignore */ }
+  }
+
+  function applyOpenMapsOverlayLayerDivZ(olMap, orderedRaw) {
+    var live = openMapsLiveOverlayLayersForPinAndZ(olMap, orderedRaw);
+    applyOpenMapsOverlayLayerDivZFromLive(olMap, live);
+  }
+
+  /**
+   * Single stack for Map Inspector overlays + geometry-only symbols + ESRI_FEATURE vectors above WME Places/POI.
+   * Order (frontmost first): highlight rings/halos/lifts → viewport-geom symbols → each ESRI bbox then main layer.
+   */
+  function pinOpenMapsOverlayStackTop(olMap) {
+    if (!olMap || !olMap.layers) return;
+    var rawOrdered = openMapsBuildOverlayPinOrdered();
+    var live = openMapsLiveOverlayLayersForPinAndZ(olMap, rawOrdered);
+    if (!live.length) {
+      try {
+        var stClr = openMapsEnsureOverlayZStyleEl();
+        stClr.textContent = '';
+      } catch (eClrPin) { /* ignore */ }
+      return;
+    }
+    ensureOpenMapsLayerSetZIndexHook();
+    ensureOpenMapsMapResetLayersZIndexHook(olMap);
+    var u = olMap.layers.length - 1;
+    for (var pi = 0; pi < live.length; pi++) {
+      var lyr = live[pi];
+      if (!lyr || olMap.layers.indexOf(lyr) < 0) continue;
+      var Ln = olMap.layers.length;
+      if (Ln < 1) return;
+      u = Math.min(u, Ln - 1);
+      olMap.setLayerIndex(lyr, Math.max(0, u));
+      u--;
+    }
+    applyOpenMapsOverlayLayerDivZFromLive(olMap, live);
+    openMapsHoistOverlayLayerDivsInViewport(olMap, live);
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        try {
+          var liveR = openMapsLiveOverlayLayersForPinAndZ(olMap, openMapsBuildOverlayPinOrdered());
+          if (!liveR.length) {
+            try {
+              var stRaf = openMapsEnsureOverlayZStyleEl();
+              stRaf.textContent = '';
+            } catch (eClrRaf) { /* ignore */ }
+          } else {
+          applyOpenMapsOverlayLayerDivZFromLive(olMap, liveR);
+          openMapsHoistOverlayLayerDivsInViewport(olMap, liveR);
+          }
+        } catch (eRaf) { /* ignore */ }
+      });
+    });
+  }
+
+  function ensureOpenMapsOverlayPinOnAddLayer(olMap) {
+    if (openMapsOverlayAddLayerHooked || !olMap || !olMap.events) return;
+    if (!openMapsOverlayPinStackHasWork()) return;
+    try {
+      openMapsOverlayAddLayerHooked = true;
+      ensureOpenMapsLayerSetZIndexHook();
+      ensureOpenMapsMapResetLayersZIndexHook(olMap);
+      olMap.events.register('addlayer', null, function() {
+        if (openMapsOverlayAddLayerPinTimer) clearTimeout(openMapsOverlayAddLayerPinTimer);
+        openMapsOverlayAddLayerPinTimer = setTimeout(function() {
+          openMapsOverlayAddLayerPinTimer = null;
+          try {
+            pinOpenMapsOverlayStackTop(olMap);
+          } catch (ePin) { /* ignore */ }
+        }, 0);
+      });
+      olMap.events.register('moveend', null, function() {
+        if (openMapsOverlayMoveEndPinTimer) clearTimeout(openMapsOverlayMoveEndPinTimer);
+        openMapsOverlayMoveEndPinTimer = setTimeout(function() {
+          openMapsOverlayMoveEndPinTimer = null;
+          try {
+            pinOpenMapsOverlayStackTop(olMap);
+          } catch (eMov) { /* ignore */ }
+        }, OPEN_MAPS_OVERLAY_MOVEEND_PIN_MS);
+      });
+    } catch (eHook) { /* ignore */ }
+  }
+
+  /**
+   * Aerial / satellite floor in **OpenLayers stack order** (`getLayerIndex`), not raw `layers[]` enumeration index.
+   * Mixing `W.map.getLayerIndex` with `olMap.layers` loop positions broke `minForeignAbove` / tile slot math when those diverged.
+   */
+  function openMapsAerialStackFloorForSync(olMap, wazeLayers) {
+    var floor = 0;
+    if (olMap && olMap.layers && typeof olMap.getLayerIndex === 'function' && wazeLayers && wazeLayers.length) {
+      for (var wi = 0; wi < wazeLayers.length; wi++) {
+        var wl = wazeLayers[wi];
+        try {
+          if (wl && (wl.project === 'earthengine-legacy' || wl.name === OPEN_MAPS_SAT_LAYER_NAME)) {
+            if (olMap.layers.indexOf(wl) >= 0) {
+              var ix = olMap.getLayerIndex(wl);
+              if (ix > floor) floor = ix;
+            }
+          }
+        } catch (eW) { /* ignore */ }
+      }
+    }
+    if (floor > 0) return floor;
+    if (olMap && olMap.layers && typeof olMap.getLayerIndex === 'function') {
+      for (var j = 0; j < olMap.layers.length; j++) {
+        var L = olMap.layers[j];
+        if (!L || L.name == null) continue;
+        try {
+          if (String(L.name) === OPEN_MAPS_SAT_LAYER_NAME) return olMap.getLayerIndex(L);
+        } catch (eL) { /* ignore */ }
+      }
+    }
+    return 0;
+  }
+
   /** Stack OpenMaps tile layers above satellite: first row in sidebar = frontmost among our maps, but never above native WME layers (roads, etc.). */
   function syncOpenMapsLayerIndices() {
     const olMap = W.map.getOLMap();
+    var diagOn = typeof openMapsGmmDiagEnabled === 'function' && openMapsGmmDiagEnabled();
+    var diagHeavy = false;
+    if (diagOn) {
+      diagHeavy = handles.some(function(h) { return h && (h.layer || h.bboxLayer); }) ||
+        (typeof openMapsOverlayPinStackHasWork === 'function' && openMapsOverlayPinStackHasWork());
+    }
+    var nOlBefore = diagHeavy && olMap && olMap.layers ? olMap.layers.length : -1;
+    if (diagOn) {
+      openMapsGmmDiagPrintHelpOnce();
+    }
+    if (diagHeavy) {
+      openMapsGmmDiagMaybeWrapOlMapSetLayerIndex(olMap);
+      openMapsGmmDiagMaybeWrapOlMapRemoveLayer(olMap);
+      openMapsGmmDiagMaybeWrapWMapRemoveLayer();
+      openMapsGmmDiagOlStackSnapshot(olMap, 'sync:before');
+    }
+    try {
+    if (openMapsOpenLayersStackSyncIdle()) {
+      pinOpenMapsOverlayStackTop(olMap);
+      ensureOpenMapsOverlayPinOnAddLayer(olMap);
+      return;
+    }
     const wazeLayers = W.map.getLayers();
-    const aerialImageryIndex = Math.max(0, ...wazeLayers.map(l =>
-      l.project === 'earthengine-legacy' ? W.map.getLayerIndex(l) : 0
-    ));
+    const aerialImageryIndex = openMapsAerialStackFloorForSync(olMap, wazeLayers);
 
-    const ourLayers = new Set();
-    handles.forEach(h => {
-      if (h.layer) ourLayers.add(h.layer);
-      if (h.bboxLayer) ourLayers.add(h.bboxLayer);
+    // Use live OL refs: W.map.getLayers() entries may not be `===` handles[].layer (My Maps is added as raw OpenLayers.Vector).
+    const ourOlRefs = new Set();
+    handles.forEach((h) => {
+      if (h.layer) {
+        const rL = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer) : h.layer;
+        ourOlRefs.add(rL);
+      }
+      if (h.bboxLayer) {
+        const rB = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer) : h.bboxLayer;
+        ourOlRefs.add(rB);
+      }
     });
 
     let minForeignAbove = Infinity;
-    for (let li = 0; li < wazeLayers.length; li++) {
-      const layer = wazeLayers[li];
-      if (ourLayers.has(layer)) continue;
-      const idx = W.map.getLayerIndex(layer);
-      if (idx > aerialImageryIndex && idx < minForeignAbove) minForeignAbove = idx;
+    if (olMap && olMap.layers && typeof olMap.getLayerIndex === 'function') {
+      for (let li = 0; li < olMap.layers.length; li++) {
+        const L = olMap.layers[li];
+        if (!L || ourOlRefs.has(L)) continue;
+        const stackIx = olMap.getLayerIndex(L);
+        if (stackIx > aerialImageryIndex && stackIx < minForeignAbove) minForeignAbove = stackIx;
+      }
     }
 
-    if (!handles.some(h => h.layer)) return;
+    if (diagHeavy) {
+      var participatingN = handles.filter(h => h.layer && openMapsHandleParticipatesInLayerIndexSync(h)).length;
+      openMapsGmmDiagLog('sync:computed', {
+        aerialImageryIndex: aerialImageryIndex,
+        minForeignAbove: minForeignAbove === Infinity ? null : minForeignAbove,
+        wazeLayerCount: wazeLayers ? wazeLayers.length : null,
+        olLayerCount: olMap && olMap.layers ? olMap.layers.length : null,
+        handleWithLayer: handles.filter(h => h.layer).length,
+        participating: participatingN
+      });
+    }
 
-    const len = handles.length;
+    const participating = handles.filter(h => h.layer && openMapsHandleParticipatesInLayerIndexSync(h));
+    const len = participating.length;
+    if (len === 0) {
+      pinOpenMapsOverlayStackTop(olMap);
+      ensureOpenMapsOverlayPinOnAddLayer(olMap);
+      return;
+    }
+
     const floorZ = aerialImageryIndex + 1;
     let topIndex = aerialImageryIndex + len;
     if (minForeignAbove !== Infinity) {
@@ -3872,21 +9795,41 @@ var handleList = document.createElement('div');
       }
     }
 
-    handles.forEach((h, i) => {
+    handles.forEach((h) => {
       if (!h.layer) return;
-      const z = Math.max(floorZ, topIndex - i);
-      olMap.setLayerIndex(h.layer, z);
+      if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
+      const rank = participating.indexOf(h);
+      if (rank < 0) return;
+      const z = Math.max(floorZ, topIndex - rank);
+      const lyrOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
+      if (olMap.layers.indexOf(lyrOl) >= 0) olMap.setLayerIndex(lyrOl, z);
     });
 
     const maxOurZ = minForeignAbove === Infinity ? Infinity : minForeignAbove - 1;
     handles.forEach(h => {
       if (!h.layer || !h.bboxLayer) return;
-      const ti = W.map.getLayerIndex(h.layer);
+      if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
+      const mainOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
+      const bboxOl = openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer;
+      if (olMap.layers.indexOf(mainOl) < 0 || olMap.layers.indexOf(bboxOl) < 0) return;
+      const ti = olMap.getLayerIndex(mainOl);
       let bi = ti + 1;
       if (maxOurZ !== Infinity && bi > maxOurZ) bi = maxOurZ;
       if (bi <= ti) bi = ti;
-      olMap.setLayerIndex(h.bboxLayer, bi);
+      olMap.setLayerIndex(bboxOl, bi);
     });
+
+    pinOpenMapsOverlayStackTop(olMap);
+    ensureOpenMapsOverlayPinOnAddLayer(olMap);
+    } finally {
+      if (diagHeavy && olMap && olMap.layers) {
+        var nAfter = olMap.layers.length;
+        if (nOlBefore >= 0 && nAfter !== nOlBefore) {
+          openMapsGmmDiagLog('ALERT olMap.layers.length changed during sync', { before: nOlBefore, after: nAfter });
+        }
+        openMapsGmmDiagOlStackSnapshot(olMap, 'sync:after');
+      }
+    }
   }
 
 function onMapSort() {
@@ -3894,7 +9837,7 @@ function onMapSort() {
     const newHandles = [];
 
     nodes.forEach(node => {
-      const h = handles.find(handle => handle.mapId === parseInt(node.dataset.mapId));
+      const h = handles.find(handle => String(handle.mapId) === String(node.dataset.mapId));
       if (h) newHandles.push(h);
     });
     handles = newHandles;
@@ -3963,6 +9906,230 @@ function onMapSort() {
 
   tab.appendChild(addMapsHeader);
   tab.appendChild(addMapContainer);
+
+  var userMapsSection = document.createElement('div');
+  userMapsSection.className = 'openmaps-user-maps-section';
+  userMapsSection.style.marginBottom = '16px';
+  var userMapsTitleEl = document.createElement('h4');
+  userMapsTitleEl.style.cssText = 'margin:0 0 8px 0;font-size:1.15em;font-weight:bold;';
+  userMapsTitleEl.textContent = I18n.t('openmaps.user_maps_section_title');
+  var userMapsRow = document.createElement('div');
+  userMapsRow.style.cssText = 'display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;';
+  var userMapsInput = document.createElement('input');
+  userMapsInput.type = 'text';
+  userMapsInput.className = 'form-control openmaps-user-maps-input';
+  userMapsInput.placeholder = I18n.t('openmaps.user_maps_add_placeholder');
+  userMapsInput.style.cssText = 'flex:1 1 160px;min-width:120px;';
+  userMapsInput.setAttribute('autocomplete', 'off');
+  var userMapsBtn = document.createElement('wz-button');
+  userMapsBtn.setAttribute('size', 'sm');
+  userMapsBtn.setAttribute('color', 'primary');
+  userMapsBtn.className = 'openmaps-wz-btn-compact';
+  userMapsBtn.textContent = I18n.t('openmaps.user_maps_add_button');
+  var userMapsKmlFileInput = document.createElement('input');
+  userMapsKmlFileInput.type = 'file';
+  userMapsKmlFileInput.className = 'openmaps-user-maps-kml-file';
+  userMapsKmlFileInput.setAttribute('accept', '.kml,application/vnd.google-earth.kml+xml,text/xml,application/xml');
+  userMapsKmlFileInput.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+  userMapsKmlFileInput.setAttribute('tabindex', '-1');
+  userMapsKmlFileInput.setAttribute('aria-hidden', 'true');
+  var userMapsKmlUploadBtn = document.createElement('wz-button');
+  userMapsKmlUploadBtn.setAttribute('size', 'sm');
+  userMapsKmlUploadBtn.setAttribute('color', 'secondary');
+  userMapsKmlUploadBtn.className = 'openmaps-wz-btn-compact openmaps-user-maps-kml-upload';
+  userMapsKmlUploadBtn.textContent = I18n.t('openmaps.user_maps_kml_upload_button');
+  var userMapsMsg = document.createElement('div');
+  userMapsMsg.className = 'openmaps-user-maps-msg';
+  userMapsMsg.style.cssText = 'display:none;font-size:11px;color:#c5221f;margin-top:6px;line-height:1.35;';
+  var userMapsHintEl = document.createElement('div');
+  userMapsHintEl.className = 'openmaps-user-maps-hint';
+  userMapsHintEl.style.cssText = 'font-size:11px;color:#70757a;margin-top:6px;line-height:1.35;';
+  userMapsHintEl.textContent = I18n.t('openmaps.user_maps_hint');
+  var userMapsKmlHintEl = document.createElement('div');
+  userMapsKmlHintEl.className = 'openmaps-user-maps-kml-hint';
+  userMapsKmlHintEl.style.cssText = 'font-size:11px;color:#70757a;margin-top:6px;line-height:1.35;';
+  userMapsKmlHintEl.textContent = I18n.t('openmaps.user_maps_kml_upload_hint');
+  var userMapsOptInBanner = document.createElement('div');
+  userMapsOptInBanner.className = 'openmaps-user-maps-opt-in-banner';
+  userMapsOptInBanner.style.cssText = 'display:none;font-size:11px;color:#b06000;margin-top:8px;line-height:1.4;padding:8px;border-radius:6px;background:var(--background_variant,#fff8e1);border:1px solid var(--border_subtle,#f9a825);';
+  function syncUserMapsOptInBanner() {
+    var on = openMapsGoogleMyMapsIntegrationEnabled();
+    var retired = openMapsGoogleMyMapsHardRetiredInBuild();
+    userMapsOptInBanner.style.display = on ? 'none' : 'block';
+    userMapsOptInBanner.textContent = I18n.t(openMapsGoogleMyMapsOptInBlockedMessageKey());
+    userMapsInput.disabled = retired;
+    userMapsBtn.disabled = retired;
+    userMapsInput.style.opacity = retired ? '0.6' : '';
+    userMapsBtn.style.opacity = retired ? '0.6' : '';
+    userMapsHintEl.style.display = retired ? 'none' : '';
+  }
+  syncUserMapsOptInBanner();
+
+  function showUserMapsMsg(t) {
+    userMapsMsg.textContent = t || '';
+    userMapsMsg.style.display = t ? 'block' : 'none';
+  }
+
+  function openMapsSanitizeKmlFileBaseName(name) {
+    var n = String(name || '').replace(/[/\\]/g, '').trim();
+    if (!n) return I18n.t('openmaps.user_maps_kml_default_title');
+    if (/\.kml$/i.test(n)) n = n.slice(0, -4);
+    return n || I18n.t('openmaps.user_maps_kml_default_title');
+  }
+
+  function tryIngestLocalKmlText(kmlText, fileLabel) {
+    showUserMapsMsg('');
+    var text = String(kmlText || '');
+    if (text.length > OPEN_MAPS_LOCAL_KML_MAX_CHARS) {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_too_large'));
+      return;
+    }
+    if (text.indexOf('<kml') === -1 && text.indexOf('<Kml') === -1) {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_not_kml'));
+      return;
+    }
+    var sK = Settings.get();
+    if (!Array.isArray(sK.state.userMaps)) sK.state.userMaps = [];
+    if (sK.state.userMaps.some(function(m) { return m && m.type === 'LOCAL_KML' && m.kmlText === text; })) {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_duplicate'));
+      return;
+    }
+    var idK = openMapsNewUserMapId();
+    var titleK = openMapsSanitizeKmlFileBaseName(fileLabel);
+    var defK = {
+      id: idK,
+      title: titleK,
+      source: 'user',
+      touId: 'none',
+      area: 'user',
+      type: 'LOCAL_KML',
+      crs: 'EPSG:3857',
+      kmlText: text,
+      kmlFileName: String(fileLabel || '').slice(0, 512),
+      bbox: [-180, -85, 180, 85],
+      queryable: false,
+      layers: {
+        main: { title: 'KML', abstract: '', queryable: false }
+      },
+      default_layers: ['main'],
+      attribution: 'KML file'
+    };
+    sK.state.userMaps.push(defK);
+    maps.set(defK.id, defK);
+    Settings.put(sK);
+    selectMapToAdd(String(defK.id));
+    if (addMapSuggestions.style.display === 'block') populateAddMapSuggestions(addMapInput.value);
+  }
+
+  function tryAddGoogleMyMap() {
+    showUserMapsMsg('');
+    if (!openMapsGoogleMyMapsIntegrationEnabled()) {
+      showUserMapsMsg(I18n.t(openMapsGoogleMyMapsOptInBlockedMessageKey()));
+      return;
+    }
+    var parsedAdd = openMapsParseGoogleMyMapsInput(userMapsInput.value);
+    if (!parsedAdd) {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_add_invalid'));
+      return;
+    }
+    var sAdd = Settings.get();
+    if (!Array.isArray(sAdd.state.userMaps)) sAdd.state.userMaps = [];
+    if (sAdd.state.userMaps.some(function(m) { return m && m.type === 'GOOGLE_MY_MAPS' && m.mid === parsedAdd.mid; })) {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_add_duplicate'));
+      return;
+    }
+    var idNew = openMapsNewUserMapId();
+    var defNew = {
+      id: idNew,
+      title: I18n.t('openmaps.user_maps_default_title'),
+      source: 'user',
+      touId: 'google-mymaps',
+      area: 'user',
+      type: 'GOOGLE_MY_MAPS',
+      crs: 'EPSG:3857',
+      url: parsedAdd.kmlUrl,
+      mid: parsedAdd.mid,
+      originalUrl: parsedAdd.originalUrl,
+      bbox: [-180, -85, 180, 85],
+      queryable: false,
+      layers: {
+        main: { title: 'KML', abstract: '', queryable: false }
+      },
+      default_layers: ['main'],
+      attribution: 'Google My Maps'
+    };
+    sAdd.state.userMaps.push(defNew);
+    maps.set(defNew.id, defNew);
+    Settings.put(sAdd);
+    userMapsInput.value = '';
+    selectMapToAdd(String(defNew.id));
+    if (addMapSuggestions.style.display === 'block') populateAddMapSuggestions(addMapInput.value);
+  }
+
+  userMapsBtn.addEventListener('click', function(evU) {
+    if (evU) evU.preventDefault();
+    tryAddGoogleMyMap();
+  });
+  userMapsInput.addEventListener('keydown', function(evK) {
+    if (evK.key === 'Enter') {
+      evK.preventDefault();
+      tryAddGoogleMyMap();
+    }
+  });
+
+  userMapsKmlUploadBtn.addEventListener('click', function(evF) {
+    if (evF) evF.preventDefault();
+    showUserMapsMsg('');
+    try {
+      userMapsKmlFileInput.value = '';
+    } catch (eClr) { /* ignore */ }
+    userMapsKmlFileInput.click();
+  });
+  userMapsKmlFileInput.addEventListener('change', function() {
+    var f = userMapsKmlFileInput.files && userMapsKmlFileInput.files[0];
+    if (!f) return;
+    var nameLower = String(f.name || '').toLowerCase();
+    if (!/\.kml$/.test(nameLower)) {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_not_kml'));
+      try {
+        userMapsKmlFileInput.value = '';
+      } catch (eC2) { /* ignore */ }
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function() {
+      var out = reader.result;
+      var str = typeof out === 'string' ? out : '';
+      if (!str && out != null) {
+        try {
+          str = String(out);
+        } catch (eStr) { str = ''; }
+      }
+      tryIngestLocalKmlText(str, f.name);
+      try {
+        userMapsKmlFileInput.value = '';
+      } catch (eC3) { /* ignore */ }
+    };
+    reader.onerror = function() {
+      showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_read_error'));
+      try {
+        userMapsKmlFileInput.value = '';
+      } catch (eC4) { /* ignore */ }
+    };
+    reader.readAsText(f);
+  });
+
+  userMapsRow.appendChild(userMapsInput);
+  userMapsRow.appendChild(userMapsBtn);
+  userMapsRow.appendChild(userMapsKmlUploadBtn);
+  userMapsSection.appendChild(userMapsKmlFileInput);
+  userMapsSection.appendChild(userMapsTitleEl);
+  userMapsSection.appendChild(userMapsRow);
+  userMapsSection.appendChild(userMapsMsg);
+  userMapsSection.appendChild(userMapsOptInBanner);
+  userMapsSection.appendChild(userMapsHintEl);
+  userMapsSection.appendChild(userMapsKmlHintEl);
+  tab.appendChild(userMapsSection);
 
   var addMapSuggestionsBlurTimer = null;
   var addMapSuggestionsPositionListenersOn = false;
@@ -4053,9 +10220,24 @@ function onMapSort() {
 
   // --- RESTORED: Tell the script to update the list when the map loads and moves! ---
   updateMapSelector();
-  W.map.events.register('moveend', null, updateMapSelector);
+  if (openMapsWmeSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.on === 'function') {
+    try {
+      openMapsWmeSdk.Events.on({ eventName: 'wme-map-move-end', eventHandler: updateMapSelector });
+      openMapsWmeSdk.Events.on({ eventName: 'wme-map-zoom-changed', eventHandler: updateMapSelector });
+    } catch (eMapSel) {
+      W.map.events.register('moveend', null, updateMapSelector);
+    }
+  } else {
+    W.map.events.register('moveend', null, updateMapSelector);
+  }
   // ----------------------------------------------------------------------------------
   // --------------------------------------
+
+  try {
+    document.documentElement.classList.remove('openmaps-unlock-wme-sidebar');
+    var omUnlockStyle = document.getElementById('openmaps-wme-sidebar-unlock-style');
+    if (omUnlockStyle && omUnlockStyle.parentNode) omUnlockStyle.parentNode.removeChild(omUnlockStyle);
+  } catch (eOmUnlock) {}
 
   var footer = document.createElement('div');
   footer.className = 'openmaps-sidebar-footer';
@@ -4102,36 +10284,9 @@ function onMapSort() {
 
   //#endregion
 
-  //#region Reload previous map(s)
-  if (Settings.exists()) {
-    var settings = Settings.get();
-    settings.state.active.forEach(function(mapHandle, i) {
-      if (!maps.has(mapHandle.mapId)) { // no strict equal as null should fail as well
-        settings.state.active.splice(i, 1);
-        Settings.put(settings);
-        return;
-      }
-      handles.push(new MapHandle(maps.get(mapHandle.mapId), {
-        opacity: mapHandle.opacity,
-        layers: mapHandle.layers,
-        hidden: mapHandle.hidden,
-        transparent: mapHandle.transparent,
-        improveMap: mapHandle.improveMap
-      }));
-      saveMapState();
-    });
-  }
-//#endregion
-
-  // --- NEW: Trigger the Background ToU Engine on boot! ---
-  runToUBackgroundChecks();
-
- // FIX: Force the search list to recalculate AFTER saved maps are restored!
-  updateMapSelector();
-    refreshMapDrag(); // Make saved maps draggable on boot!
-
   //#region Implement map query support
   // Add the control to catch a click on the map area for retrieving map information
+  var lastQueryInspectorPayload = null;
   var queryWindowContent, queryWindowOriginalContent;
   var queryWindow = document.createElement('div');
   queryWindow.className = 'open-maps-query-window';
@@ -4197,6 +10352,22 @@ function onMapSort() {
     }
   });
   queryWindow.appendChild(queryWindowQuery);
+  var queryWindowInspector = document.createElement('wz-button');
+  queryWindowInspector.setAttribute('color', 'clear-icon');
+  queryWindowInspector.setAttribute('size', 'sm');
+  queryWindowInspector.className = 'open-maps-query-window-button-left open-maps-query-window-toolbar-wz';
+  queryWindowInspector.innerHTML = '<i class="fa fa-fw fa-list-alt" aria-hidden="true"></i>';
+  queryWindowInspector.dataset.placement = 'right';
+  queryWindowInspector.setAttribute('aria-label', I18n.t('openmaps.inspector_query_add_btn'));
+  queryWindowInspector.title = I18n.t('openmaps.inspector_query_add_btn_tooltip');
+  Tooltips.add(queryWindowInspector, I18n.t('openmaps.inspector_query_add_btn_tooltip'));
+  queryWindowInspector.addEventListener('click', function() {
+    if (!openMapsInspectorApi || !lastQueryInspectorPayload) return;
+    var p = lastQueryInspectorPayload;
+    if (p.type === 'esri') openMapsInspectorApi.ingestEsriResults(p.json, p.mapId, p.layersStr);
+    else if (p.type === 'wms') openMapsInspectorApi.ingestWmsFromContent(p.contentEl, p.mapId, p.layersStr);
+  });
+  queryWindow.appendChild(queryWindowInspector);
   var queryWindowClose = document.createElement('wz-button');
   queryWindowClose.setAttribute('color', 'clear-icon');
   queryWindowClose.setAttribute('size', 'sm');
@@ -4268,15 +10439,65 @@ function onMapSort() {
     'click': function(e) {
       getFeatureInfoControl.deactivate();
       getFeatureInfoControl.params.callback();
-var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatureInfo&STYLES=&BBOX=' + getMapExtent().toBBOX() +
+      lastQueryInspectorPayload = null;
+      var mapId = getFeatureInfoControl.params?.id;
+      var queriedMap = mapId ? maps.get(mapId) : null;
+      var isEsri = queriedMap && queriedMap.type === 'ESRI';
+      var isEsriFeature = queriedMap && queriedMap.type === 'ESRI_FEATURE';
+      var queryUrl = '';
+      if (isEsri || isEsriFeature) {
+        // ArcGIS REST Identify (MapServer)
+        var olMap = (W && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+        var ll = null;
+        try {
+          if (olMap && typeof olMap.getLonLatFromPixel === 'function') ll = olMap.getLonLatFromPixel(e.xy);
+          else if (olMap && typeof olMap.getLonLatFromViewPortPx === 'function') ll = olMap.getLonLatFromViewPortPx(e.xy);
+        } catch (err) {
+          ll = null;
+        }
+        var x = ll ? ll.lon : null;
+        var y = ll ? ll.lat : null;
+        if (isEsriFeature) {
+          // ArcGIS FeatureServer point/line/polygon query around click
+          // Distance is in meters for WebMercator when units=esriSRUnit_Meter.
+          var base = String(getFeatureInfoControl.params.url || '').replace(/\/+$/, '');
+          queryUrl =
+            base +
+            '/query?f=json&where=' + encodeURIComponent('1=1') +
+            '&geometry=' + encodeURIComponent(String(x) + ',' + String(y)) +
+            '&geometryType=esriGeometryPoint&inSR=3857&outSR=3857' +
+            '&spatialRel=esriSpatialRelIntersects&distance=25&units=esriSRUnit_Meter' +
+            '&returnGeometry=false&outFields=*' +
+            '&resultRecordCount=25';
+        } else {
+          var extent = getMapExtent();
+          var sz = W.map.getSize();
+          var identifyLayers = getFeatureInfoControl.params.layers || '';
+          // Identify expects `layers=all:<ids>` (or omit for all). Filter to numeric layer ids only.
+          var esriIds = String(identifyLayers || '')
+            .split(',')
+            .map(s => String(s).trim())
+            .filter(s => s && /^-?\d+$/.test(s));
+          var layersParam = esriIds.length ? ('layers=all:' + esriIds.join(',')) : 'layers=all';
+          queryUrl =
+            getFeatureInfoControl.params.url.replace(/\/+$/, '') +
+            '/identify?f=json&geometry=' + encodeURIComponent(String(x) + ',' + String(y)) +
+            '&geometryType=esriGeometryPoint&sr=3857' +
+            '&tolerance=6&returnGeometry=false' +
+            '&mapExtent=' + encodeURIComponent(extent.toBBOX()) +
+            '&imageDisplay=' + encodeURIComponent(String(sz.w) + ',' + String(sz.h) + ',96') +
+            '&' + layersParam;
+        }
+      } else {
+        // WMS GetFeatureInfo
+        queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatureInfo&STYLES=&BBOX=' + getMapExtent().toBBOX() +
           '&LAYERS=' + getFeatureInfoControl.params.layers + '&QUERY_LAYERS=' + getFeatureInfoControl.params.layers +
           '&HEIGHT=' + W.map.getSize().h + '&WIDTH=' + W.map.getSize().w +
           // FIX: Added FEATURE_COUNT=50 to force the server to return multiple overlapping layers/objects!
           '&VERSION=1.3.0&CRS=EPSG:3857&I=' + e.xy.x + '&J=' + e.xy.y + '&FEATURE_COUNT=50&INFO_FORMAT=text/html';
+      }
       // --- MODERNIZED DYNAMIC TITLE ---
           // Uses Optional Chaining to prevent null crashes and Template Literals for the string
-          var mapId = getFeatureInfoControl.params?.id;
-          var queriedMap = mapId ? maps.get(mapId) : null;
           queryWindowTitle.textContent = queriedMap ? I18n.t('openmaps.query_results_for').replace(/\{title\}/g, queriedMap.title) : I18n.t('openmaps.query_window_title');
       // --------------------------------
       queryWindowLoading.style.display = 'block';
@@ -4290,31 +10511,115 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
       GM_xmlhttpRequest({
         method: 'GET',
         headers: {
-          Accept: 'text/xml'
+          Accept: (isEsri || isEsriFeature) ? 'application/json' : 'text/xml'
         },
         url: queryUrl,
         timeout: 10000,
         onload: function(response) {
           queryWindowLoading.style.display = 'none';
           if (response.status == 200) {
-            if (!response.responseXML) {
-              response.responseXML = new DOMParser().parseFromString(response.responseText, "text/xml");
-            }
-            // While probably not 100% waterproof, at least this should counter most XSS vectors
-            var unwantedNodes = response.responseXML.querySelectorAll('javascript,iframe,frameset,applet,embed,object,style');
-            for (let i = 0; i < unwantedNodes.length; i++) {
-              unwantedNodes[i].parentNode.removeChild(unwantedNodes[i]);
-            }
-            var body = response.responseXML.querySelector('body');
-            var content = body ? body.textContent.trim() : '';
-            if (body && content.length != 0) {
-                removeUnsafeAttributes(body);
-                  queryWindowOriginalContent.innerHTML = body.innerHTML;
-                  setBorders(queryWindowOriginalContent)
-                  queryWindowContent.innerHTML = body.innerHTML;
-                  maps.get(mapId).query_filters.forEach((func) => {
-                    func(queryWindowContent, maps.get(mapId));
+            if (isEsri || isEsriFeature) {
+              var json = null;
+              try {
+                json = JSON.parse(response.responseText || '{}');
+              } catch (err) {
+                json = null;
+              }
+
+              // Original
+              var pre = document.createElement('pre');
+              pre.style.whiteSpace = 'pre-wrap';
+              pre.textContent = json ? JSON.stringify(json, null, 2) : (response.responseText || '');
+              queryWindowOriginalContent.appendChild(pre);
+
+              // Processed: results → table
+              var results = [];
+              if (isEsriFeature) {
+                var feats = (json && Array.isArray(json.features)) ? json.features : [];
+                results = feats.map(function(f) {
+                  return {
+                    layerName: queriedMap?.title || 'FeatureServer',
+                    value: (f && f.attributes) ? (f.attributes.name || f.attributes.title || f.attributes.NAME || '') : '',
+                    attributes: (f && f.attributes) ? f.attributes : {}
+                  };
+                });
+              } else {
+                results = (json && Array.isArray(json.results)) ? json.results : [];
+              }
+              if (!results.length) {
+                querySymbol.style.color = '#999';
+                queryWindowContent.appendChild(querySymbol);
+                var emptyResponse = document.createElement('p');
+                emptyResponse.textContent = I18n.t('openmaps.query_empty_response');
+                queryWindowContent.appendChild(emptyResponse);
+              } else {
+                results.forEach(function(r, idx) {
+                  var h = document.createElement('h3');
+                  h.style.margin = '8px 0 6px';
+                  h.style.fontSize = '15px';
+                  h.textContent = (r.layerName ? r.layerName : 'Result') + (r.value ? (' — ' + r.value) : '') + (results.length > 1 ? (' (#' + (idx + 1) + ')') : '');
+                  queryWindowContent.appendChild(h);
+
+                  var attrs = r && r.attributes && typeof r.attributes === 'object' ? r.attributes : {};
+                  var keys = Object.keys(attrs);
+                  if (!keys.length) return;
+                  var table = document.createElement('table');
+                  table.border = '1';
+                  table.style.borderCollapse = 'collapse';
+                  table.style.width = '100%';
+                  keys.forEach(function(k) {
+                    var tr = document.createElement('tr');
+                    var tdK = document.createElement('td');
+                    tdK.style.fontWeight = '600';
+                    tdK.style.padding = '4px 6px';
+                    tdK.textContent = k;
+                    var tdV = document.createElement('td');
+                    tdV.style.padding = '4px 6px';
+                    tdV.textContent = String(attrs[k]);
+                    tr.appendChild(tdK);
+                    tr.appendChild(tdV);
+                    table.appendChild(tr);
                   });
+                  queryWindowContent.appendChild(table);
+                });
+                lastQueryInspectorPayload = {
+                  type: isEsriFeature ? 'esri_feature' : 'esri',
+                  json: json,
+                  mapId: mapId,
+                  layersStr: getFeatureInfoControl.params.layers || ''
+                };
+                if (openMapsInspectorApi) {
+                  if (!isEsriFeature) {
+                    openMapsInspectorApi.maybeAutoIngest(true, {
+                      json: json,
+                      mapId: mapId,
+                      layersStr: getFeatureInfoControl.params.layers || ''
+                    });
+                  }
+                }
+              }
+            } else {
+              if (!response.responseXML) {
+                response.responseXML = new DOMParser().parseFromString(response.responseText, "text/xml");
+              }
+              // While probably not 100% waterproof, at least this should counter most XSS vectors
+              var unwantedNodes = response.responseXML.querySelectorAll('javascript,iframe,frameset,applet,embed,object,style');
+              for (let i = 0; i < unwantedNodes.length; i++) {
+                unwantedNodes[i].parentNode.removeChild(unwantedNodes[i]);
+              }
+              var body = response.responseXML.querySelector('body');
+              var content = body ? body.textContent.trim() : '';
+              if (body && content.length != 0) {
+                  removeUnsafeAttributes(body);
+                    queryWindowOriginalContent.innerHTML = body.innerHTML;
+                    setBorders(queryWindowOriginalContent)
+                    queryWindowContent.innerHTML = body.innerHTML;
+                    var qfs = maps.get(mapId)?.query_filters;
+                    if (Array.isArray(qfs)) {
+                      qfs.forEach((func) => {
+                        func(queryWindowContent, maps.get(mapId));
+                      });
+                    }
 
              // --- COMPACT URL COPIER FOR QUERY WINDOW ---
                   // Generates two compact copiers using the universal engine
@@ -4325,6 +10630,20 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
                   queryWindowContent.insertBefore(copier1, queryWindowContent.firstChild);
                   queryWindowOriginalContent.insertBefore(copier2, queryWindowOriginalContent.firstChild);
                   // -------------------------------------------
+
+                  lastQueryInspectorPayload = {
+                    type: 'wms',
+                    contentEl: queryWindowContent,
+                    mapId: mapId,
+                    layersStr: getFeatureInfoControl.params.layers || ''
+                  };
+                  if (openMapsInspectorApi) {
+                    openMapsInspectorApi.maybeAutoIngest(false, {
+                      contentEl: queryWindowContent,
+                      mapId: mapId,
+                      layersStr: getFeatureInfoControl.params.layers || ''
+                    });
+                  }
 
                   queryWindow.style.display = 'block';
               var escHandler = function(e) {
@@ -4346,6 +10665,7 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
               var emptyResponseAdvice = document.createElement('p');
               emptyResponseAdvice.innerHTML = I18n.t('openmaps.query_empty_response_advice').replace("{hotkey}", "<kbd>" + (/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform) ? "Cmd" : "Ctrl") + "+0</kbd>");
               queryWindowContent.appendChild(emptyResponseAdvice);
+            }
             }
           } else {
             log(response);
@@ -4609,6 +10929,31 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
 
 ///#region UI support functions
     // --- UNIVERSAL CLIPBOARD COPIER ---
+  function omCopyTextToClipboard(text) {
+    if (text == null) return Promise.reject(new Error('Nothing to copy'));
+    var s = String(text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(s);
+    }
+    return new Promise(function(resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = s;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed; top:-1000px; left:-1000px; opacity:0; pointer-events:none;';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        document.body.removeChild(ta);
+        if (ok) resolve();
+        else reject(new Error('Copy failed'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   function createClipboardCopier(labelText, copyValue, compact) {
     var container = document.createElement('div');
     container.style.cssText = 'margin-bottom:10px; font-family:monospace; border-radius:4px; display:flex; justify-content:space-between; align-items:center; gap:8px;';
@@ -4645,7 +10990,7 @@ var queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatu
     copyBtn.title = 'Copy to clipboard';
     copyBtn.style.flexShrink = '0';
     copyBtn.addEventListener('click', function() {
-      navigator.clipboard.writeText(copyValue).then(function() {
+      omCopyTextToClipboard(copyValue).then(function() {
         copyBtn.setAttribute('color', 'positive');
         copyBtn.innerHTML = successHtml;
         setTimeout(function() {
@@ -4734,6 +11079,7 @@ var layerItem = document.createElement('li');
 function getNotAddedMaps() {
     var out = [];
     maps.forEach(function(map) {
+      if (map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) return;
       if (!handles.some(function(h) { return map.id == h.mapId; })) out.push(map);
     });
     return out;
@@ -4818,9 +11164,18 @@ function getNotAddedMaps() {
   }
 
 function selectMapToAdd(mapId) {
-    var addedMap = maps.get(parseInt(mapId, 10));
+    var addedMap = maps.get(mapId);
+    if (!addedMap && mapId != null && mapId !== '') {
+      var n = Number(mapId);
+      if (!isNaN(n)) addedMap = maps.get(n);
+    }
     if (!addedMap) return;
+    if (addedMap.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
+      log(I18n.t(openMapsGoogleMyMapsOptInBlockedMessageKey()));
+      return;
+    }
     handles.push(new MapHandle(addedMap));
+    if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
     if (addedMap.touId !== 'none' && TOU_REGISTRY[addedMap.touId] && !isTouAccepted(addedMap.touId)) {
       showTouGateNotice(addedMap.title);
     }
@@ -4883,7 +11238,7 @@ function populateAddMapSuggestions(filterText) {
       row.addEventListener('click', function() {
         selectMapToAdd(row.dataset.mapId);
       });
-      if (map.area) {
+      if (map.area && map.area !== 'user') {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
         flagImg.alt = '';
@@ -4945,6 +11300,15 @@ function updateMapSelector() {
     }
 
     handles.forEach(function(handle) {
+      var mapSel = maps.get(handle.mapId);
+      if (mapSel && (mapSel.type === 'LOCAL_KML' || mapSel.type === 'GOOGLE_MY_MAPS')) {
+        if (handle.outOfArea) {
+          handle.outOfArea = false;
+          if (handle.layer) handle.layer.setVisibility(!handle.hidden);
+          if (handle.updateVisibility) handle.updateVisibility();
+        }
+        return;
+      }
       var handleIsLocal = localMaps.some((map) => map.id == handle.mapId);
       if (handleIsLocal && handle.outOfArea) {
         handle.outOfArea = false;
@@ -4960,6 +11324,48 @@ function updateMapSelector() {
     syncAddMapViewportHint();
     applyActiveMapsFilter();
   }
+
+/** Esri REST JSON geometry → OpenLayers.Geometry (EPSG:3857 coords). Shared by ESRI_FEATURE overlay and Map Inspector. */
+function openMapsEsriGeometryToOpenLayers(g) {
+  if (!g || typeof OpenLayers === 'undefined') return null;
+  try {
+    if (g.x !== undefined && g.y !== undefined) {
+      return new OpenLayers.Geometry.Point(Number(g.x), Number(g.y));
+    }
+    if (g.rings && g.rings.length) {
+      var linears = [];
+      for (var ri = 0; ri < g.rings.length; ri++) {
+        var ring = g.rings[ri];
+        if (!ring || !ring.length) continue;
+        var pts = [];
+        for (var pi = 0; pi < ring.length; pi++) {
+          pts.push(new OpenLayers.Geometry.Point(ring[pi][0], ring[pi][1]));
+        }
+        linears.push(new OpenLayers.Geometry.LinearRing(pts));
+      }
+      if (!linears.length) return null;
+      return new OpenLayers.Geometry.Polygon(linears);
+    }
+    if (g.paths && g.paths.length) {
+      var lines = [];
+      for (var pi2 = 0; pi2 < g.paths.length; pi2++) {
+        var path = g.paths[pi2];
+        if (!path || !path.length) continue;
+        var pts2 = [];
+        for (var pj = 0; pj < path.length; pj++) {
+          pts2.push(new OpenLayers.Geometry.Point(path[pj][0], path[pj][1]));
+        }
+        lines.push(new OpenLayers.Geometry.LineString(pts2));
+      }
+      if (!lines.length) return null;
+      if (lines.length === 1) return lines[0];
+      return new OpenLayers.Geometry.MultiLineString(lines);
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
 
 function getMapExtent() {
     // Directly access the underlying OpenLayers map instance for stability
@@ -5257,6 +11663,25 @@ function loadTileError(tile, callback) {
     }
   }
 
+  function openMapsNormalizePixelManipulations(list) {
+    if (!Array.isArray(list)) return null;
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var k = String(list[i] || '').trim();
+      if (!k) continue;
+      if (!tileManipulations.hasOwnProperty(k)) continue;
+      if (seen[k]) continue;
+      seen[k] = true;
+      out.push(k);
+    }
+    return out;
+  }
+
+  function openMapsAvailablePixelManipulationOps() {
+    return Object.keys(tileManipulations).slice().sort();
+  }
+
   // Manipulate a map tile received from the source
   function manipulateTile(event, manipulations) {
     if (event.aborted || !event.tile || !event.tile.imgDiv) {
@@ -5292,6 +11717,7 @@ function loadTileError(tile, callback) {
         layers: handle.getLayersForPersistence ? handle.getLayersForPersistence() : handle.mapLayers,
         hidden: handle.hidden,
         transparent: handle.transparent,
+        layerSpecificStyle: handle.layerSpecificStyle,
         improveMap: handle.improveMap,
         displayBbox: handle.displayBbox,
         brightness: handle.brightness,
@@ -5299,12 +11725,332 @@ function loadTileError(tile, callback) {
         saturate: handle.saturate,
         hue: handle.hue,
         gamma: handle.gamma,
-        invert: handle.invert
+        invert: handle.invert,
+        blendMode: handle.blendMode,
+        pixelManipulationsOverride: handle.pixelManipulationsOverride,
+        wmsArcgisRestViewportProbe: handle.wmsArcgisRestViewportProbe !== false
       };
       settings.state.active.push(handleState);
     });
     Settings.put(settings);
   }
+
+  /**
+   * Persisted `settings.state.userMaps` entries are merged into the runtime `maps` registry so
+   * `mapId` in saved active state resolves after reload. `GOOGLE_MY_MAPS` uses KML over the network.
+   * Outlook: add user WMS / ArcGIS MapServer / XYZ by storing the same map-definition shape as catalog entries here.
+   */
+  function mergeOpenMapsUserMapDefinitionsIntoRegistry() {
+    var s = Settings.get();
+    if (!Array.isArray(s.state.userMaps)) return;
+    s.state.userMaps.forEach(function(um) {
+      if (um && um.id != null && um.id !== '') maps.set(um.id, um);
+    });
+  }
+
+  function openMapsRemoveUserMapDefinition(mapId) {
+    var s = Settings.get();
+    if (!Array.isArray(s.state.userMaps)) return;
+    var next = s.state.userMaps.filter(function(m) { return !m || m.id !== mapId; });
+    if (next.length === s.state.userMaps.length) return;
+    s.state.userMaps = next;
+    maps.delete(mapId);
+    Settings.put(s);
+    var idxFav = s.state.favoriteMapIds.indexOf(mapId);
+    if (idxFav !== -1) {
+      s.state.favoriteMapIds.splice(idxFav, 1);
+      Settings.put(s);
+    }
+  }
+
+  function openMapsNewUserMapId() {
+    try {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'om-um-' + crypto.randomUUID();
+    } catch (eId) { /* ignore */ }
+    return 'om-um-' + String(Date.now()) + '-' + String(Math.random()).slice(2, 11);
+  }
+
+  function openMapsGoogleMyMapsKmlUrlFromMid(mid) {
+    var m = String(mid || '').trim();
+    if (!m) return null;
+    return 'https://www.google.com/maps/d/kml?mid=' + encodeURIComponent(m) + '&forcekml=1';
+  }
+
+  /** @returns {{ mid: string, kmlUrl: string, originalUrl: string|null }|null} */
+  function openMapsParseGoogleMyMapsInput(raw) {
+    var t = String(raw || '').trim();
+    if (!t) return null;
+    t = t.replace(/^[\s"'<(]+|[\s"'>)]+$/g, '').replace(/[\s\)\].,;>]+$/g, '');
+    if (!t) return null;
+    var mid = null;
+    if (/^https?:\/\//i.test(t)) {
+      try {
+        var u = new URL(t);
+        mid = u.searchParams.get('mid');
+        if (!mid && u.hash) {
+          var hash = u.hash.replace(/^#/, '');
+          var hp = new URLSearchParams(hash);
+          mid = hp.get('mid');
+          if (!mid) {
+            var hm = hash.match(/(?:^|&)mid=([^&]+)/i);
+            if (hm) {
+              try {
+                mid = decodeURIComponent(hm[1]);
+              } catch (eH) {
+                mid = hm[1];
+              }
+            }
+          }
+        }
+      } catch (eUrl) { /* ignore */ }
+    }
+    if (!mid) {
+      var m = t.match(/[#&?]mid=([^&?#\s]+)/i);
+      if (m) {
+        try {
+          mid = decodeURIComponent(m[1]);
+        } catch (eDec) {
+          mid = m[1];
+        }
+      }
+    }
+    if (!mid && /^[a-zA-Z0-9_-]{12,}$/.test(t) && t.indexOf('/') === -1 && t.indexOf(' ') === -1) mid = t;
+    if (!mid) return null;
+    mid = String(mid).trim();
+    if (!mid) return null;
+    var kmlUrl;
+    if (/^https?:\/\//i.test(t) && /\/kml/i.test(t)) kmlUrl = t.split('#')[0];
+    else kmlUrl = openMapsGoogleMyMapsKmlUrlFromMid(mid);
+    return { mid: mid, kmlUrl: kmlUrl, originalUrl: /^https?:\/\//i.test(t) ? t.split('#')[0] : null };
+  }
+
+  //#region Reload previous map(s)
+  // IMPORTANT: This must run after tileManipulations + pixel manipulation helpers are initialized,
+  // because MapHandle's edit panel can reference them during boot.
+  mergeOpenMapsUserMapDefinitionsIntoRegistry();
+  function openMapsShouldRestoreGoogleMyMapsActiveRow(restoredMap, persistedActiveRow) {
+    if (!restoredMap || restoredMap.type === 'LOCAL_KML') return true;
+    if (restoredMap.type !== 'GOOGLE_MY_MAPS') return true;
+    if (!openMapsGoogleMyMapsIntegrationEnabled()) return false;
+    try {
+      if (!isTouAccepted(restoredMap.touId) && persistedActiveRow.hidden) return false;
+    } catch (eTouR) { /* ignore */ }
+    return true;
+  }
+  if (Settings.exists()) {
+    var settings = Settings.get();
+    settings.state.active.forEach(function(mapHandle) {
+      if (!maps.has(mapHandle.mapId)) return;
+      var restoredMap = maps.get(mapHandle.mapId);
+      if (!openMapsShouldRestoreGoogleMyMapsActiveRow(restoredMap, mapHandle)) return;
+      handles.push(new MapHandle(restoredMap, {
+        opacity: mapHandle.opacity,
+        layers: mapHandle.layers,
+        hidden: mapHandle.hidden,
+        transparent: mapHandle.transparent,
+        improveMap: mapHandle.improveMap,
+        displayBbox: mapHandle.displayBbox,
+        brightness: mapHandle.brightness,
+        contrast: mapHandle.contrast,
+        saturate: mapHandle.saturate,
+        hue: mapHandle.hue,
+        gamma: mapHandle.gamma,
+        invert: mapHandle.invert,
+        blendMode: mapHandle.blendMode,
+        pixelManipulationsOverride: mapHandle.pixelManipulationsOverride,
+        wmsArcgisRestViewportProbe: mapHandle.wmsArcgisRestViewportProbe
+      }));
+    });
+    saveMapState();
+    if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
+  }
+  //#endregion
+
+  // --- NEW: Trigger the Background ToU Engine on boot! ---
+  runToUBackgroundChecks();
+
+  // FIX: Force the search list to recalculate AFTER saved maps are restored!
+  updateMapSelector();
+  refreshMapDrag(); // Make saved maps draggable on boot!
+
+  var OPEN_MAPS_TROUBLESHOOT_STORAGE_KEY = 'openmaps-troubleshoot';
+
+  function openMapsPrintTroubleshootStatus(reason) {
+    try {
+      var lsEn = null;
+      var lsDis = null;
+      try {
+        lsEn = localStorage.getItem('openmaps-enable-google-mymaps');
+        lsDis = localStorage.getItem('openmaps-disable-google-mymaps');
+      } catch (eLs) { /* ignore */ }
+      var olm = (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+      var olLayers = olm && olm.layers;
+      var olLen = olLayers ? olLayers.length : null;
+      var olShown = null;
+      if (olLayers) {
+        var os = 0;
+        for (var oi = 0; oi < olLayers.length; oi++) {
+          try {
+            if (olLayers[oi] && olLayers[oi].getVisibility && olLayers[oi].getVisibility()) os++;
+          } catch (eV) { /* ignore */ }
+        }
+        olShown = os;
+      }
+      var wazeLen = null;
+      try {
+        if (typeof W !== 'undefined' && W.map && typeof W.map.getLayers === 'function') wazeLen = W.map.getLayers().length;
+      } catch (eWz) { /* ignore */ }
+      var byType = Object.create(null);
+      var gmmRows = [];
+      handles.forEach(function(h) {
+        var m = maps.get(h.mapId);
+        var t = m && m.type ? m.type : '?';
+        byType[t] = (byType[t] || 0) + 1;
+        if (m && m.type === 'GOOGLE_MY_MAPS') {
+          var visNames = [];
+          if (h.mapLayers && h.mapLayers.length) {
+            h.mapLayers.forEach(function(l) {
+              if (l && l.visible) visNames.push(l.name);
+            });
+          }
+          var touOk = isTouAccepted(m.touId);
+          var eligVec = openMapsGoogleMyMapsIntegrationEnabled() && visNames.length > 0 && !h.hidden && !h.outOfArea && touOk;
+          gmmRows.push({
+            mapId: h.mapId,
+            title: m.title,
+            mid: m.mid,
+            hidden: !!h.hidden,
+            outOfArea: !!h.outOfArea,
+            sublayersOn: visNames,
+            touAccepted: touOk,
+            hasOlVector: !!h.layer,
+            eligibleForOlVector: eligVec,
+            kmlUrlPrefix: m.url ? String(m.url).slice(0, 96) : null
+          });
+        }
+      });
+      var handlesWithLayer = 0;
+      handles.forEach(function(hx) {
+        if (hx && hx.layer) handlesWithLayer++;
+      });
+      var anyGmmVector = gmmRows.some(function(r) { return r.hasOlVector; });
+      var anyGmmEligible = gmmRows.some(function(r) { return r.eligibleForOlVector; });
+      var gmmRowCount = gmmRows.length;
+      var overlayPinWork = false;
+      try {
+        overlayPinWork = typeof openMapsOverlayPinStackHasWork === 'function' && openMapsOverlayPinStackHasWork();
+      } catch (ePin) { /* ignore */ }
+      var handlesWithOlOrBbox = 0;
+      handles.forEach(function(h) {
+        if (h && (h.layer || h.bboxLayer)) handlesWithOlOrBbox++;
+      });
+      var gmmDiagLs = false;
+      try {
+        gmmDiagLs = localStorage.getItem('openmaps-gmm-diag') === '1';
+      } catch (eGmmLs) { /* ignore */ }
+      var gmmDiagHeavyHooksActive = gmmDiagLs && (handlesWithOlOrBbox > 0 || overlayPinWork);
+      var satelliteDebugHint;
+      if (handlesWithLayer === 0) {
+        if (handles.length === 0) {
+          satelliteDebugHint = 'No Active Maps rows — OpenMaps attaches no OL layers. If satellite breaks, disable OpenMaps in Tampermonkey and reload; if it still breaks, the cause is outside this script (WME, browser, GPU, other extensions).';
+        } else {
+          var typeKeys = Object.keys(byType);
+          var onlySavedGmm = gmmRowCount === handles.length && typeKeys.length === 1 && typeKeys[0] === 'GOOGLE_MY_MAPS';
+          if (onlySavedGmm) {
+            satelliteDebugHint = 'Google My Map row(s) still in Active Maps but **no OL layer is attached** (hidden / Terms / etc.). OpenMaps is **not** running tile `setLayerIndex` stacking for your maps. Use **Remove** on the card to delete the saved row, or reload on **v2026.04.04.29+**: a row that is **hidden** and **Terms not accepted** is **not restored** into Active Maps (map stays under Your maps). To isolate satellite: disable OpenMaps entirely and reload — if tiles still fail, cause is outside this script.';
+          } else {
+            satelliteDebugHint = 'Active Maps row(s) exist but **handlesWithOpenLayersLayer is 0** — no OpenMaps map layer on the OL stack. Overlay stacking from OpenMaps sources is inactive. Disable OpenMaps in Tampermonkey and reload to test whether satellite failure is external.';
+          }
+        }
+      } else if (!gmmRowCount) {
+        satelliteDebugHint = 'No My Maps rows; other OpenMaps layers with OL attachments may still affect stacking — reduce them or disable the script to test.';
+      } else if (anyGmmVector) {
+        satelliteDebugHint = 'GMM OL vector exists — correlate with KML/sync timing.';
+      } else if (anyGmmEligible) {
+        satelliteDebugHint = 'My Maps eligible to draw but no OL vector yet — KML may be loading or attach failed; if satellite breaks persistently, also check other overlays (WMS/XYZ/ESRI).';
+      } else {
+        satelliteDebugHint = 'My Maps row(s) in list but none eligible to draw (hidden, out of area, Terms not accepted, or sublayers off) — no KML vector expected. With other OL layers active, stacking may still matter; with none, disable OpenMaps to confirm satellite cause is elsewhere.';
+      }
+      var satelliteInvestigationHypotheses = [
+        {
+          id: 'tile_stack_sync',
+          hypothesis: 'OpenMaps syncOpenMapsLayerIndices reorders participating OL layers (tiles/WMS/ESRI) and perturbs WME aerial or Earth Engine ordering.',
+          eliminateIf: 'handlesWithOpenLayersLayer === 0 and overlayPinStackHasWork === false — OpenMaps does not run setLayerIndex for its overlays in that state.'
+        },
+        {
+          id: 'gmm_vector',
+          hypothesis: 'A live Google My Maps OpenLayers.Vector (KML) stresses WebGL, layer order, or the browser connection pool next to satellite tiles.',
+          eliminateIf: 'Every My Map row has hasOlVector false and eligibleForOlVector false — no KML vector is on the map.'
+        },
+        {
+          id: 'gmm_handle_no_vector',
+          hypothesis: 'A persisted GOOGLE_MY_MAPS Active Maps row still runs OpenMaps logic (updateLayers, saveMapState, scheduling) that affects WME even when no OL layer is attached.',
+          eliminateIf: 'Remove only that sidebar row (no full tab reload); if satellite recovers immediately, prioritize handle lifecycle. From v2026.04.04.29, **hidden + Terms not accepted** is not restored on load — `saveMapState` after boot drops it from persisted active.'
+        },
+        {
+          id: 'overlay_pin_esri_inspector',
+          hypothesis: 'ESRI_FEATURE or Map Inspector overlay pinning (z-index hooks, setLayerIndex pin stack) interferes with native WME layers including aerial.',
+          eliminateIf: 'overlayPinStackHasWork === false and no inspector-only overlays — pin stack path is idle.'
+        },
+        {
+          id: 'wme_gpu_other_scripts',
+          hypothesis: 'WME build regression, GPU/WebGL loss, hardware acceleration, or another userscript/extension alters tiles independently of OpenMaps.',
+          eliminateIf: 'Disable OpenMaps entirely and hard-reload; if satellite still fails, cause is outside this script.'
+        }
+      ];
+      var payload = {
+        when: reason || 'manual',
+        openMapsVersion: typeof OPEN_MAPS_VERSION !== 'undefined' ? OPEN_MAPS_VERSION : null,
+        tampermonkeyScriptVersion: typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version ? GM_info.script.version : null,
+        noteBridgeVsBody: 'Trust openMapsVersion for injected script body. GM_info.script.version is the bridge/wrapper @version and may be older.',
+        gmmRolloutStage: typeof OPEN_MAPS_GMM_ROLLOUT_STAGE !== 'undefined' ? OPEN_MAPS_GMM_ROLLOUT_STAGE : null,
+        featureGoogleMyMapsInBuild: typeof OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS !== 'undefined' ? OPEN_MAPS_FEATURE_GOOGLE_MY_MAPS : null,
+        integrationEnabled: openMapsGoogleMyMapsIntegrationEnabled(),
+        lsEnableMyMapsRaw: lsEn,
+        lsDisableMyMapsRaw: lsDis,
+        noteEnableKey: 'Drawing requires localStorage openmaps-enable-google-mymaps === "1" (string one), not "0" or empty.',
+        gmmDiagOn: gmmDiagLs,
+        gmmDiagHeavyHooksActive: gmmDiagHeavyHooksActive,
+        noteGmmDiag: 'openmaps-gmm-diag only adds console tracing around OL stack order. Ruled out as a satellite tile / aerial imagery failure mode; use hypotheses below instead.',
+        ruledOutNonSuspects: [
+          'openmaps-gmm-diag (verbose OL tracing — not on the satellite tile request path)'
+        ],
+        satelliteInvestigationHypotheses: satelliteInvestigationHypotheses,
+        handleCount: handles.length,
+        handlesWithOpenLayersLayer: handlesWithLayer,
+        handlesByType: byType,
+        googleMyMapsActiveRows: gmmRows,
+        olMapLayerCount: olLen,
+        olMapLayersVisibleCount: olShown,
+        noteOlVisibility: 'Many WME layers report getVisibility() false; olMapLayersVisibleCount << olMapLayerCount is normal.',
+        wmeMapGetLayersCount: wazeLen,
+        overlayPinStackHasWork: overlayPinWork,
+        satelliteDebugHint: satelliteDebugHint
+      };
+      console.info('[OpenMaps troubleshoot]', JSON.stringify(payload, null, 2));
+      console.info('[OpenMaps troubleshoot] ' + payload.satelliteDebugHint);
+      console.info('[OpenMaps troubleshoot] Re-run: openMapsPrintTroubleshootStatus("after pan") — lowercase open; alias OpenMapsPrintTroubleshootStatus same function');
+    } catch (e) {
+      console.warn('[OpenMaps troubleshoot] failed', e);
+    }
+  }
+
+  try {
+    if (typeof unsafeWindow !== 'undefined') {
+      unsafeWindow.openMapsPrintTroubleshootStatus = openMapsPrintTroubleshootStatus;
+      unsafeWindow.OpenMapsPrintTroubleshootStatus = openMapsPrintTroubleshootStatus;
+      unsafeWindow.openMapsKmlDiagDumpAllHandles = openMapsKmlDiagDumpAllHandles;
+      unsafeWindow.openMapsKmlDiagEnabled = openMapsKmlDiagEnabled;
+      unsafeWindow.openMapsKmlDiagLog = openMapsKmlDiagLog;
+    }
+  } catch (eUw) { /* ignore */ }
+
+  try {
+    if (localStorage.getItem(OPEN_MAPS_TROUBLESHOOT_STORAGE_KEY) === '1') {
+      console.info('[OpenMaps troubleshoot] Key openmaps-troubleshoot=1 — snapshot after boot. Remove: localStorage.removeItem("' + OPEN_MAPS_TROUBLESHOOT_STORAGE_KEY + '")');
+      openMapsPrintTroubleshootStatus('boot');
+    }
+  } catch (eTr) { /* ignore */ }
 
   /** Session cache for WMS GetCapabilities / ESRI MapServer JSON (one entry per map id + url). */
   var sessionLayerCatalog = {};
@@ -5318,6 +12064,15 @@ function loadTileError(tile, callback) {
     return isWMS
       ? map.url + (map.url.indexOf('?') > -1 ? '&' : '?') + 'SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities'
       : map.url + '?f=pjson';
+  }
+
+  /** ArcGIS REST MapServer base when `url` is an Esri WMS endpoint (…/MapServer/WMSServer); else null. Shared by Map Inspector and map options. */
+  function openMapsArcgisRestBaseFromWmsUrl(u) {
+    if (!u || typeof u !== 'string') return null;
+    var s = u.replace(/\/+$/, '').split('?')[0];
+    var m = s.match(/^(https?:\/\/[^/]+)\/(arcgis\d*)\/services\/(.+)\/(MapServer)\/WMSServer$/i);
+    if (m) return m[1] + '/' + m[2] + '/rest/services/' + m[3] + '/' + m[4];
+    return null;
   }
 
   /** True when fetchLayerCatalogSession will wait on the network (or an in-flight request), not a synchronous cache hit. */
@@ -5436,6 +12191,11 @@ function loadTileError(tile, callback) {
       url: capUrl,
       onload: function(res) {
         var entry = sessionLayerCatalog[key];
+        if (!entry) {
+          // Ultra-defensive: if something cleared the session entry, do not crash the whole script.
+          // (Observed in bridge builds as an uncaught 'forEach' TypeError.)
+          sessionLayerCatalog[key] = entry = { status: 'loading', layers: [], waiters: [] };
+        }
         entry.raw = res.responseText;
         entry.capUrl = capUrl;
         var httpErr = res.status && res.status >= 400;
@@ -5456,14 +12216,17 @@ function loadTileError(tile, callback) {
         }
         var waiters = entry.waiters || [];
         delete entry.waiters;
+        if (!Array.isArray(waiters)) waiters = [];
         waiters.forEach(function(cb) { if (cb) cb(entry.status === 'error' ? new Error(entry.error || 'parse') : null, entry); });
       },
       onerror: function() {
         var entry = sessionLayerCatalog[key];
+        if (!entry) sessionLayerCatalog[key] = entry = { status: 'loading', layers: [], waiters: [] };
         entry.status = 'error';
         entry.error = 'network';
         var waiters = entry.waiters || [];
         delete entry.waiters;
+        if (!Array.isArray(waiters)) waiters = [];
         waiters.forEach(function(cb) { if (cb) cb(new Error('network'), entry); });
       }
     });
@@ -5474,13 +12237,24 @@ function MapHandle(map, options) {
 
     // --- 1. STATE INITIALIZATION ---
     this.layer = null;
+    /** Map definition (type, title, bbox, layers, …). Required by KML/GMM helpers (`mapHandle.map`). */
+    this.map = map;
     this.mapId = map.id;
     this.mapLayers = [];
     this.opacity = (options && options.opacity ? options.opacity : "100");
     this.hidden = (options && options.hidden ? true : false);
     this.transparent = (options && !options.transparent || map.format == 'image/jpeg' ? false : true);
-    this.improveMap = (options && options.improveMap != undefined ? options.improveMap : true);
+    this.layerSpecificStyle = (options && options.layerSpecificStyle ? true : false);
+    // Default: only enable pixel manipulations automatically when the catalog defines defaults for this map.
+    // (Maps without catalog defaults should start with Apply pixel manipulations = OFF.)
+    this.improveMap = (options && options.improveMap !== undefined)
+      ? options.improveMap
+      : !!map.pixelManipulations;
+    this.pixelManipulationsOverride = (options && options.pixelManipulationsOverride !== undefined)
+      ? openMapsNormalizePixelManipulations(options.pixelManipulationsOverride)
+      : null;
     this.displayBbox = (options && options.displayBbox ? true : false);
+    if (map.area === 'UN') this.displayBbox = false;
     // NEW: Image Adjustment State
     this.brightness = (options && options.brightness !== undefined ? options.brightness : 100);
     this.contrast = (options && options.contrast !== undefined ? options.contrast : 100);
@@ -5489,6 +12263,7 @@ function MapHandle(map, options) {
     this.gamma = (options && options.gamma !== undefined ? options.gamma : 100);
     this.invert = (options && options.invert ? true : false);
     this.blendMode = (options && options.blendMode ? options.blendMode : 'normal');
+    this.wmsArcgisRestViewportProbe = (options && options.wmsArcgisRestViewportProbe === false) ? false : true;
     this.layerUI = [];
     this.cloudLayerMeta = {};
     this.pendingSavedLayers = [];
@@ -5504,7 +12279,8 @@ function MapHandle(map, options) {
     // Bounding Box Math (Safely split to prevent OpenLayers NaN corruption)
     this.area = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(new OpenLayers.Projection('EPSG:4326'), W.map.getProjectionObject());
     const currentExtent = getMapExtent();
-    this.outOfArea = currentExtent ? !this.area.intersectsBounds(currentExtent) : true;
+    var kmlVectorOverlay = map.type === 'LOCAL_KML' || map.type === 'GOOGLE_MY_MAPS';
+    this.outOfArea = kmlVectorOverlay ? false : (currentExtent ? !this.area.intersectsBounds(currentExtent) : true);
 
     // UI Element References
     var UI = { touDetails: null, mapLayersNoActiveMark: null, mapLayersSubContainer: null, mapLayersDetailsRoot: null, orphanHintEl: null, layerCatalogLoadingEl: null };
@@ -5533,11 +12309,116 @@ function MapHandle(map, options) {
       return line;
     }
 
+    function getMapLayerNamesForCopy(mode) {
+      var names = [];
+      if (mode === 'enabledOnly') {
+        self.getLayersForPersistence().forEach(function(l) {
+          if (l.visible) names.push(l.name);
+        });
+        return names;
+      }
+
+      self.getLayersForPersistence().forEach(function(l) {
+        names.push(l.name);
+      });
+
+      // Keep any curated-but-missing layers as well (defensive, should already be covered above)
+      if (map && map.layers) {
+        Object.keys(map.layers).forEach(function(n) { names.push(n); });
+      }
+
+      // Dedup while keeping first occurrence order
+      var seen = {};
+      return names.filter(function(n) {
+        if (!n) return false;
+        if (seen[n]) return false;
+        seen[n] = true;
+        return true;
+      });
+    }
+
+    function getEnabledLayerNamesForCopy() {
+      var enabled = [];
+      self.getLayersForPersistence().forEach(function(l) {
+        if (l.visible) enabled.push(l.name);
+      });
+      return enabled;
+    }
+
+    function buildMapDefinitionSnippet(copyMode) {
+      // copyMode: 'allKeepDefaults' | 'allMakeEnabledDefault' | 'enabledOnlyMakeDefault'
+      var layerMode = (copyMode === 'enabledOnlyMakeDefault') ? 'enabledOnly' : 'all';
+      var names = getMapLayerNamesForCopy(layerMode);
+      var enabledNames = getEnabledLayerNamesForCopy();
+
+      var defaultLayers;
+      if (copyMode === 'allKeepDefaults') defaultLayers = (map.default_layers || []).slice();
+      else defaultLayers = enabledNames.slice();
+
+      function pushLine(arr, k, v, force) {
+        if (!force && (v === undefined || v === null)) return;
+        arr.push('      ' + k + ': ' + v + ',');
+      }
+
+      function formatQueryFilters(qf) {
+        if (!qf) return null;
+        if (!Array.isArray(qf)) return null;
+        var parts = qf.map(function(fn) {
+          if (!fn) return null;
+          if (typeof fn === 'string') return fn;
+          if (typeof fn === 'function' && fn.name) return fn.name;
+          return null;
+        }).filter(Boolean);
+        if (parts.length === 0) return null;
+        return '[ ' + parts.join(', ') + ' ]';
+      }
+
+      var lines = [];
+      lines.push('    {');
+      pushLine(lines, 'id', JSON.stringify(map.id), true);
+      pushLine(lines, 'title', JSON.stringify(map.title), true);
+      pushLine(lines, 'touId', JSON.stringify(map.touId), !!map.touId);
+      pushLine(lines, 'favicon', String(!!map.favicon), !!map.favicon);
+      pushLine(lines, 'icon', JSON.stringify(map.icon), !!map.icon);
+      pushLine(lines, 'type', JSON.stringify(map.type || 'WMS'), true);
+      pushLine(lines, 'url', JSON.stringify(map.url), true);
+      pushLine(lines, 'queryUrl', JSON.stringify(map.queryUrl), !!map.queryUrl);
+      pushLine(lines, 'crs', JSON.stringify(map.crs), !!map.crs);
+      if (map.bbox) pushLine(lines, 'bbox', JSON.stringify(map.bbox), true);
+      if (map.zoomRange) pushLine(lines, 'zoomRange', JSON.stringify(map.zoomRange), true);
+      pushLine(lines, 'format', JSON.stringify(map.format), !!map.format);
+      pushLine(lines, 'transparent', String(!!map.transparent), map.transparent !== undefined);
+      pushLine(lines, 'area', JSON.stringify(map.area), !!map.area);
+      pushLine(lines, 'tile_size', String(map.tile_size), map.tile_size !== undefined);
+      pushLine(lines, 'abstract', JSON.stringify(map.abstract), !!map.abstract);
+      pushLine(lines, 'attribution', JSON.stringify(map.attribution), !!map.attribution);
+      pushLine(lines, 'pixelManipulations', JSON.stringify(map.pixelManipulations), !!map.pixelManipulations);
+      pushLine(lines, 'queryable', String(!!map.queryable), map.queryable !== undefined);
+      var qf = formatQueryFilters(map.query_filters);
+      if (qf) pushLine(lines, 'query_filters', qf, true);
+      pushLine(lines, 'default_layers', JSON.stringify(defaultLayers, null, 0), true);
+
+      lines.push('      layers: {');
+      names.forEach(function(n) {
+        lines.push(buildLayerDefinitionSnippet(n));
+      });
+      lines.push('      }');
+      lines.push('    },');
+      return lines.join('\n');
+    }
+
     function getLayerOriginTooltip(name) {
-      var kind = getLayerOriginKind(name);
-      var base = kind === 'curated' ? I18n.t('openmaps.layer_origin_curated') : (kind === 'cloud' ? I18n.t('openmaps.layer_origin_cloud') : I18n.t('openmaps.layer_origin_unknown'));
-      if (map.default_layers.indexOf(name) !== -1) base += ' · ' + I18n.t('openmaps.layer_origin_default');
-      return base;
+      var parts = [];
+      if (map.type === 'LOCAL_KML') parts.push(I18n.t('openmaps.layer_tag_user_upload'));
+      else if (map.type === 'GOOGLE_MY_MAPS') parts.push(I18n.t('openmaps.layer_tag_google_mymaps'));
+      else {
+        var kind = getLayerOriginKind(name);
+        if (kind === 'curated') parts.push(I18n.t('openmaps.layer_tag_curated'));
+        else if (kind === 'cloud') parts.push(I18n.t('openmaps.layer_tag_cloud'));
+        else parts.push(I18n.t('openmaps.layer_tag_unknown'));
+      }
+      if (map.default_layers.indexOf(name) !== -1) parts.push(I18n.t('openmaps.layer_tag_default'));
+      return parts.join(' · ');
     }
 
     this.getLayersForPersistence = function() {
@@ -5633,18 +12514,19 @@ function updateTileLoader() {
     }
 
    this.clearError = function() {
-      try {
-        $(UI.error).tooltip('destroy');
-      } catch (err) {}
-      UI.error.removeAttribute('data-original-title');
-      UI.error.title = '';
-      Tooltips.add(UI.error, I18n.t('openmaps.retrieving_error'), true);
+      Tooltips.remove(UI.error);
       UI.error.style.display = 'none';
     };
 
 
     // --- 3. UI GENERATORS ---
-function buildMainCard() {
+  function openMapsMapHasZoomMeta(m) {
+    var wmsFloorRaw = m.wmsMinEffectiveZoom != null ? m.wmsMinEffectiveZoom : m.minEffectiveZoom;
+    var hasFloor = m.type === 'WMS' && wmsFloorRaw != null && wmsFloorRaw !== '';
+    return !!(m.zoomRange || hasFloor);
+  }
+
+  function buildMainCard() {
       UI.container = document.createElement('wz-card');
       UI.container.className = 'result maps-menu-item list-item-card';
       UI.container.dataset.mapId = map.id; // FIX: Tag the container for the sort engine!
@@ -5657,11 +12539,7 @@ var handle = document.createElement('div');
       handle.className = 'open-maps-drag-handle';
       handle.style.cssText = 'width:32px; margin-right:8px; display:flex; justify-content:center;';
 
-      // 1. PRE-CALCULATE DYNAMIC BACKGROUND COLOR
-      var hash = 0;
-      for (var i = 0; i < map.title.length; i++) { hash = map.title.charCodeAt(i) + ((hash << 5) - hash); }
-      var wazeColors = ['#0099ff', '#8663df', '#20c063', '#ff9600', '#ff6699', '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000', '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'];
-      self.bgColor = wazeColors[Math.abs(hash) % wazeColors.length];
+      self.bgColor = openMapsMapAvatarColorFromTitle(map.title);
       var bgColor = self.bgColor;
 
       // 2. SMART TEXT EXTRACTION
@@ -5697,7 +12575,7 @@ var handle = document.createElement('div');
       badgeWrapper.appendChild(UI.badge);
 
       // --- OVERLAY FLAG ---
-      if (map.area) {
+      if (map.area && map.area !== 'user') {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
         var flagTip = I18n.t('openmaps.areas.' + map.area) || map.area;
@@ -5720,6 +12598,13 @@ var handle = document.createElement('div');
       UI.title.addEventListener('click', () => { UI.visibility.dispatchEvent(new MouseEvent('click')); });
 
       textContainer.appendChild(UI.title);
+      if (map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
+        var gmmOffHint = document.createElement('div');
+        gmmOffHint.className = 'openmaps-gmm-disabled-hint';
+        gmmOffHint.style.cssText = 'font-size:11px;color:#d93025;margin-top:4px;line-height:1.35;max-width:100%;';
+        gmmOffHint.textContent = I18n.t(openMapsGoogleMyMapsOptInBlockedMessageKey());
+        textContainer.appendChild(gmmOffHint);
+      }
       UI.topRow.appendChild(textContainer);
 
       
@@ -5755,6 +12640,10 @@ var handle = document.createElement('div');
       buttons.appendChild(UI.error);
 
       UI.info = createIconButton('fa-info-circle', I18n.t('openmaps.layer_out_of_range'), true);
+      if (openMapsMapHasZoomMeta(map)) {
+        Tooltips.remove(UI.info);
+        Tooltips.add(UI.info, I18n.t('openmaps.zoom_meta_tooltip'), true);
+      }
       buttons.appendChild(UI.info);
 
     // --- ZOOM TO BBOX BUTTON ---
@@ -5763,8 +12652,7 @@ var handle = document.createElement('div');
 UI.zoomToBboxBtn.addEventListener('click', function(e) {
         e.stopPropagation();
 
-        // Force-hide the floating tooltip bubble before the button disappears
-        $(this).tooltip('hide');
+        Tooltips.hide(this);
 
         if (self.area) {
           var bboxExtent = self.area;
@@ -5876,7 +12764,48 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       metaBox.style.cssText = 'margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e8eaed; font-size: 11px; color: #5f6368; line-height: 1.4;';
 
       var metaTop = document.createElement('div');
-      metaTop.innerHTML = '<strong>' + I18n.t('openmaps.meta_type') + ':</strong> <span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span> &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
+      // If this is a WMS URL, indicate which viewport-feature backend Map Inspector will use.
+      // (ArcGIS REST-backed WMS → /MapServer/<id>/query; GeoServer WMS → WFS GetFeature.)
+      // Keep it compact: just append a small tag after the Type chip (no extra label).
+      var inspectorBackendChip = '';
+      if (map.type === 'WMS' && map.url) {
+        try {
+          var u = String(map.url);
+          var s = u.replace(/\/+$/, '').split('?')[0];
+          var inspectorLabel = null;
+          var compactLabel = null;
+
+          if (openMapsArcgisRestBaseFromWmsUrl(u)) {
+            inspectorLabel = I18n.t('openmaps.inspector_wms_arcgis_viewport'); // "WMS (ArcGIS REST)"
+            compactLabel = 'ArcGIS REST';
+          } else {
+            var path = s.replace(/\/+$/, '');
+            var isGeoServer = path.toLowerCase().indexOf('geoserver') !== -1;
+            var endsWithWms = /\/wms$/i.test(path);
+            if (isGeoServer && endsWithWms) {
+              inspectorLabel = I18n.t('openmaps.inspector_wms_wfs_viewport'); // "WMS (GeoServer WFS)"
+              compactLabel = 'GeoServer';
+            }
+          }
+
+          if (inspectorLabel && compactLabel) {
+            var titleEsc = openMapsEscapeForHtmlTooltip(inspectorLabel)
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;');
+            inspectorBackendChip =
+              ' ' +
+              '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;" title="' + titleEsc + '">' +
+              compactLabel +
+              '</span>';
+          }
+        } catch (e) {}
+      }
+
+      metaTop.innerHTML =
+        '<strong>' + I18n.t('openmaps.meta_type') + ':</strong> ' +
+        '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span>' +
+        inspectorBackendChip +
+        ' &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
       metaBox.appendChild(metaTop);
 
  // PERMANENT BBOX DISPLAY (Monospace for easy visual comparison)
@@ -5893,6 +12822,12 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         metaBbox.innerHTML = '<strong>' + I18n.t('openmaps.meta_bbox') + ':</strong> [' + bLeft + ', ' + bBottom + ', ' + bRight + ', ' + bTop + ']';
         metaBox.appendChild(metaBbox);
       }
+      if (openMapsMapHasZoomMeta(map)) {
+        UI.zoomMetaLine = document.createElement('div');
+        UI.zoomMetaLine.style.cssText = 'margin-top: 4px; font-size: 10px; color: #70757a; line-height: 1.35; font-family: monospace, monospace;';
+        metaBox.appendChild(UI.zoomMetaLine);
+        Tooltips.add(UI.zoomMetaLine, I18n.t('openmaps.zoom_meta_tooltip'), true);
+      }
       if (map.abstract) {
           var metaDesc = document.createElement('div');
           metaDesc.style.cssText = 'margin-top: 6px; font-style: italic; color: #70757a;';
@@ -5900,6 +12835,23 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           metaBox.appendChild(metaDesc);
       }
       UI.editContainer.appendChild(metaBox);
+
+      if (map.type === 'WMS' && map.url && openMapsArcgisRestBaseFromWmsUrl(map.url)) {
+        var probeWrap = document.createElement('div');
+        probeWrap.style.cssText = 'margin: 8px 0 4px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 8px; background: #f8f9fa;';
+        var probeCb = document.createElement('wz-checkbox');
+        probeCb.checked = self.wmsArcgisRestViewportProbe !== false;
+        probeCb.textContent = I18n.t('openmaps.wms_arcgis_rest_viewport_probe');
+        probeCb.addEventListener('change', function() {
+          self.wmsArcgisRestViewportProbe = !!probeCb.checked;
+          saveMapState();
+          if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
+        });
+        Tooltips.add(probeCb, I18n.t('openmaps.wms_arcgis_rest_viewport_probe_tooltip'), true);
+        probeWrap.appendChild(probeCb);
+        UI.editContainer.appendChild(probeWrap);
+      }
+
       // -----------------------------
 
       // --- VISUAL ADJUSTMENTS (opacity, bbox, improve + filters) ---
@@ -5913,142 +12865,322 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       var slidersContainer = document.createElement('div');
       slidersContainer.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:10px;';
 
-      if (map.format != 'image/jpeg') {
+      var visualCommonBox = document.createElement('div');
+      visualCommonBox.style.cssText = 'display:flex; flex-direction:column; gap:10px;';
+
+      var isEsriFeatureVector = map.type === 'ESRI_FEATURE' || openMapsMapTypeIsKmlVectorOverlay(map.type);
+      var hideBboxOption = map.area === 'UN' || openMapsMapTypeIsKmlVectorOverlay(map.type);
+
+      if (map.format != 'image/jpeg' && !isEsriFeatureVector) {
         var transCheck = document.createElement('wz-checkbox');
         transCheck.checked = self.transparent; transCheck.textContent = I18n.t('openmaps.transparent_label');
-        transCheck.addEventListener('change', () => { self.transparent = !self.transparent; self.layer.mergeNewParams({ transparent: self.transparent }); saveMapState(); });
+        transCheck.addEventListener('change', function() {
+          self.transparent = !self.transparent;
+          if (self.layer && typeof self.layer.mergeNewParams === 'function') {
+            try { self.layer.mergeNewParams({ transparent: self.transparent }); } catch (eT) {}
+          }
+          saveMapState();
+        });
         Tooltips.add(transCheck, I18n.t('openmaps.transparent_label_tooltip'));
-        slidersContainer.appendChild(transCheck);
+        visualCommonBox.appendChild(transCheck);
       }
 
-      if (map.hasOwnProperty('pixelManipulations')) {
-        var impCheck = document.createElement('wz-checkbox');
-        impCheck.checked = self.improveMap; impCheck.textContent = I18n.t('openmaps.map_improvement_label');
-        impCheck.addEventListener('change', () => { self.improveMap = !self.improveMap; self.layer.redraw(); saveMapState(); });
-        Tooltips.add(impCheck, I18n.t('openmaps.map_improvement_label_tooltip'));
-        slidersContainer.appendChild(impCheck);
-      }
+      // Pixel manipulations UI is appended below the common visual controls (sliders, blend mode, invert, reset).
 
-      var bboxCheck = document.createElement('wz-checkbox');
-      bboxCheck.checked = self.displayBbox;
-      bboxCheck.textContent = I18n.t('openmaps.draw_bbox_on_map');
-      bboxCheck.addEventListener('change', (e) => {
-        self.displayBbox = e.target.checked;
-        self.updateBboxLayer();
-        saveMapState();
-      });
-      slidersContainer.appendChild(bboxCheck);
-
-      var opacityBox = document.createElement('div');
-      opacityBox.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:11px; color:#5f6368;';
-      Tooltips.add(opacityBox, I18n.t('openmaps.opacity_label_tooltip'));
-
-      var opLabel = document.createElement('span');
-      opLabel.textContent = I18n.t('openmaps.opacity_label') + ':';
-      opacityBox.appendChild(opLabel);
-
-      var opSlider = document.createElement('input');
-      opSlider.type = 'range'; opSlider.max = 100; opSlider.min = 5; opSlider.step = 5; opSlider.value = self.opacity;
-      opSlider.style.cssText = 'width:100px; margin:0; accent-color:#0099ff; cursor:pointer;';
-
-      var opVal = document.createElement('span');
-      opVal.textContent = self.opacity + '%';
-      opVal.style.cssText = 'font-weight:bold; min-width:35px; color:#3c4043;';
-
-      opSlider.addEventListener('input', function() {
-        self.layer.setOpacity(Math.max(5, Math.min(100, this.value)) / 100);
-        self.opacity = this.value;
-        opVal.textContent = this.value + '%';
-      });
-      opSlider.addEventListener('change', function() { saveMapState(); });
-
-      opacityBox.appendChild(opSlider);
-      opacityBox.appendChild(opVal);
-      slidersContainer.appendChild(opacityBox);
-
-      function createSlider(label, prop, min, max, unit) {
-        var row = document.createElement('div');
-        row.style.cssText = 'display:flex; flex-direction:column;';
-        var labelEl = document.createElement('div');
-        labelEl.style.cssText = 'display:flex; justify-content:space-between; font-size:11px; color:#5f6368;';
-        labelEl.innerHTML = `<span>${label}</span><span id="val-${prop}-${map.id}">${self[prop]}${unit}</span>`;
-
-        var slider = document.createElement('input');
-        slider.type = 'range'; slider.min = min; slider.max = max; slider.value = self[prop];
-        slider.style.cssText = 'width:100%; cursor:pointer; accent-color:#0099ff;';
-        slider.addEventListener('input', (e) => {
-          self[prop] = e.target.value;
-          document.getElementById(`val-${prop}-${map.id}`).textContent = e.target.value + unit;
-          self.applyFilters();
+      if (!hideBboxOption) {
+        var bboxCheck = document.createElement('wz-checkbox');
+        bboxCheck.checked = self.displayBbox;
+        bboxCheck.textContent = I18n.t('openmaps.draw_bbox_on_map');
+        bboxCheck.addEventListener('change', (e) => {
+          self.displayBbox = e.target.checked;
+          self.updateBboxLayer();
+          saveMapState();
         });
-        slider.addEventListener('change', () => saveMapState());
-
-        row.appendChild(labelEl);
-        row.appendChild(slider);
-        return {row, slider};
+        visualCommonBox.appendChild(bboxCheck);
       }
 
-      var sBright = createSlider(I18n.t('openmaps.slider_brightness'), 'brightness', 0, 200, '%');
-      var sContrast = createSlider(I18n.t('openmaps.slider_contrast'), 'contrast', 0, 200, '%');
-      var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
-      var sHue = createSlider(I18n.t('openmaps.slider_hue_rotate'), 'hue', 0, 360, '°');
-      var sGamma = createSlider(I18n.t('openmaps.slider_gamma'), 'gamma', 10, 200, '%');;
+      if (self.mapLayers && self.mapLayers.length > 0) {
+        var layerSpecificStyleCheck = document.createElement('wz-checkbox');
+        layerSpecificStyleCheck.checked = self.layerSpecificStyle;
+        layerSpecificStyleCheck.textContent = "Use layer-specific styles";
+        layerSpecificStyleCheck.addEventListener('change', (e) => {
+          self.layerSpecificStyle = e.target.checked;
+          layerRedrawNeeded = true;
+          try { rebuildMapLayersUI(); } catch (e) {}
+          if (self.updateLayers) self.updateLayers();
+          saveMapState();
+        });
+        visualCommonBox.appendChild(layerSpecificStyleCheck);
+      }
+
+      if (!isEsriFeatureVector) {
+        var opacityBox = document.createElement('div');
+        opacityBox.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:11px; color:#5f6368;';
+        Tooltips.add(opacityBox, I18n.t('openmaps.opacity_label_tooltip'));
+
+        var opLabel = document.createElement('span');
+        opLabel.textContent = I18n.t('openmaps.opacity_label') + ':';
+        opacityBox.appendChild(opLabel);
+
+        var opSlider = document.createElement('input');
+        opSlider.type = 'range'; opSlider.max = 100; opSlider.min = 5; opSlider.step = 5; opSlider.value = self.opacity;
+        opSlider.style.cssText = 'flex:1; min-width:80px; margin:0; accent-color:#0099ff; cursor:pointer;';
+
+        var opVal = document.createElement('span');
+        opVal.textContent = self.opacity + '%';
+        opVal.style.cssText = 'font-weight:bold; min-width:35px; color:#3c4043;';
+
+        opSlider.addEventListener('input', function() {
+          if (self.layer && typeof self.layer.setOpacity === 'function') {
+            self.layer.setOpacity(Math.max(5, Math.min(100, this.value)) / 100);
+          }
+          self.opacity = this.value;
+          opVal.textContent = this.value + '%';
+        });
+        opSlider.addEventListener('change', function() { saveMapState(); });
+
+        opacityBox.appendChild(opSlider);
+        opacityBox.appendChild(opVal);
+        visualCommonBox.appendChild(opacityBox);
+      }
+
+      if (!isEsriFeatureVector) {
+        function createSlider(label, prop, min, max, unit) {
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex; flex-direction:column;';
+          var labelEl = document.createElement('div');
+          labelEl.style.cssText = 'display:flex; justify-content:space-between; font-size:11px; color:#5f6368;';
+          labelEl.innerHTML = `<span>${label}</span><span id="val-${prop}-${map.id}">${self[prop]}${unit}</span>`;
+
+          var slider = document.createElement('input');
+          slider.type = 'range'; slider.min = min; slider.max = max; slider.value = self[prop];
+          slider.style.cssText = 'width:100%; cursor:pointer; accent-color:#0099ff;';
+          slider.addEventListener('input', (e) => {
+            self[prop] = e.target.value;
+            document.getElementById(`val-${prop}-${map.id}`).textContent = e.target.value + unit;
+            self.applyFilters();
+          });
+          slider.addEventListener('change', () => saveMapState());
+
+          row.appendChild(labelEl);
+          row.appendChild(slider);
+          return {row, slider};
+        }
+
+        var sBright = createSlider(I18n.t('openmaps.slider_brightness'), 'brightness', 0, 200, '%');
+        var sContrast = createSlider(I18n.t('openmaps.slider_contrast'), 'contrast', 0, 200, '%');
+        var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
+        var sHue = createSlider(I18n.t('openmaps.slider_hue_rotate'), 'hue', 0, 360, '°');
+        var sGamma = createSlider(I18n.t('openmaps.slider_gamma'), 'gamma', 10, 200, '%');
 // --- BLEND MODE DROPDOWN ---
-      var blendRow = document.createElement('div');
-      blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
+        var blendRow = document.createElement('div');
+        blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
 
-      var blendLabel = document.createElement('span');
-      blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
+        var blendLabel = document.createElement('span');
+        blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
 
-      var blendSelect = document.createElement('select');
-      blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
+        var blendSelect = document.createElement('select');
+        blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
 
-      var modes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
-      modes.forEach(mode => {
-        var opt = document.createElement('option');
-        opt.value = mode;
-        opt.textContent = mode.split('-').map(function(part) { return part.charAt(0).toUpperCase() + part.slice(1); }).join(' ');
-        if (mode === self.blendMode) opt.selected = true;
-        blendSelect.appendChild(opt);
-      });
+        var modes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
+        modes.forEach(mode => {
+          var opt = document.createElement('option');
+          opt.value = mode;
+          opt.textContent = mode.split('-').map(function(part) { return part.charAt(0).toUpperCase() + part.slice(1); }).join(' ');
+          if (mode === self.blendMode) opt.selected = true;
+          blendSelect.appendChild(opt);
+        });
 
-      blendSelect.addEventListener('change', (e) => {
-        self.blendMode = e.target.value;
-        self.applyFilters();
+        blendSelect.addEventListener('change', (e) => {
+          self.blendMode = e.target.value;
+          self.applyFilters();
+          saveMapState();
+        });
+
+        blendRow.appendChild(blendLabel);
+        blendRow.appendChild(blendSelect);
+        visualCommonBox.appendChild(blendRow);
+        // -----------------------------
+        var invRow = document.createElement('div');
+        invRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;';
+        var invCheck = document.createElement('wz-checkbox');
+        invCheck.textContent = I18n.t('openmaps.invert_colors');
+        invCheck.checked = self.invert;
+        invCheck.addEventListener('change', (e) => { self.invert = e.target.checked; self.applyFilters(); saveMapState(); });
+        invRow.appendChild(invCheck);
+
+        var resetBtn = createIconButton('fa-undo', I18n.t('openmaps.reset_visual_default'), true);
+        resetBtn.addEventListener('click', function(e) {
+          if (e && e.preventDefault) e.preventDefault();
+          if (e && e.stopPropagation) e.stopPropagation();
+          self.brightness = 100; self.contrast = 100; self.saturate = 100; self.hue = 0; self.gamma = 100; self.invert = false;
+          [sBright, sContrast, sSaturate, sHue, sGamma].forEach(s => {
+              var p = s.slider.previousSibling.lastChild.id.split('-')[1];
+              s.slider.value = self[p];
+              document.getElementById(s.slider.previousSibling.lastChild.id).textContent = self[p] + (p==='hue'?'°':(p==='blur'?'px':'%'));
+          });
+          invCheck.checked = false;
+          self.blendMode = 'normal'; blendSelect.value = 'normal';
+          self.applyFilters(); saveMapState();
+        });
+        invRow.appendChild(resetBtn);
+
+        [sBright.row, sContrast.row, sSaturate.row, sHue.row, sGamma.row, invRow].forEach(el => visualCommonBox.appendChild(el));
+      }
+
+      if (visualCommonBox.childNodes.length > 0) {
+        slidersContainer.appendChild(visualCommonBox);
+        advColors.appendChild(slidersContainer);
+        UI.editContainer.appendChild(advColors);
+      }
+
+      // --- PIXEL MANIPULATIONS (top-level sibling section; raster/tile only) ---
+      if (!isEsriFeatureVector) {
+      function ensureLayerHasCrossOriginIfNeeded() {
+        // Mirror updateLayers() CORS gating so enabling this feature after the layer exists still works.
+        var wantsPixelManipulation = !!map.pixelManipulations || !!self.improveMap || (self.pixelManipulationsOverride !== null);
+        if (!wantsPixelManipulation) return;
+        if (self.__openmapsTileCrossOrigin) return;
+        if (self.layer) {
+          try { W.map.removeLayer(self.layer); } catch (e) {}
+          self.layer = null;
+        }
+        self.updateLayers();
+      }
+
+      var pmDetails = document.createElement('details');
+      pmDetails.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+
+      var pmSummary = document.createElement('summary');
+      pmSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
+      pmSummary.innerHTML = '<i class="fa fa-magic" style="margin-right:5px; color:#5f6368;" aria-hidden="true"></i>' + I18n.t('openmaps.pixel_manipulations_title');
+      pmDetails.appendChild(pmSummary);
+
+      var pixelManipulationsSection = document.createElement('div');
+      pixelManipulationsSection.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:8px;';
+
+      var impCheck = document.createElement('wz-checkbox');
+      impCheck.checked = !!self.improveMap;
+      impCheck.textContent = I18n.t('openmaps.map_improvement_label');
+      impCheck.addEventListener('change', () => {
+        self.improveMap = !self.improveMap;
+        ensureLayerHasCrossOriginIfNeeded();
+        if (self.layer) self.layer.redraw();
         saveMapState();
       });
+      Tooltips.add(impCheck, I18n.t('openmaps.map_improvement_label_tooltip'));
+      pixelManipulationsSection.appendChild(impCheck);
 
-      blendRow.appendChild(blendLabel);
-      blendRow.appendChild(blendSelect);
-      slidersContainer.appendChild(blendRow);
-      // -----------------------------
-      var invRow = document.createElement('div');
-      var invCheck = document.createElement('wz-checkbox');
-      invCheck.textContent = I18n.t('openmaps.invert_colors');
-      invCheck.checked = self.invert;
-      invCheck.addEventListener('change', (e) => { self.invert = e.target.checked; self.applyFilters(); saveMapState(); });
-      invRow.appendChild(invCheck);
+      var pmInfo = document.createElement('div');
+      pmInfo.style.cssText = 'font-size:11px; color:#70757a; line-height:1.35;';
+      pmInfo.textContent = I18n.t('openmaps.map_improvement_label_tooltip');
+      pixelManipulationsSection.appendChild(pmInfo);
 
-      var resetBtn = document.createElement('wz-button');
-      resetBtn.className = 'openmaps-wz-btn-compact';
-      resetBtn.setAttribute('size', 'sm'); resetBtn.setAttribute('color', 'secondary');
-      resetBtn.textContent = I18n.t('openmaps.reset_visual_default');
-      resetBtn.style.marginTop = '5px';
-      resetBtn.addEventListener('click', () => {
-        self.brightness = 100; self.contrast = 100; self.saturate = 100; self.hue = 0; self.gamma = 100; self.invert = false;
-        [sBright, sContrast, sSaturate, sHue, sGamma].forEach(s => {
-            var p = s.slider.previousSibling.lastChild.id.split('-')[1];
-            s.slider.value = self[p];
-            document.getElementById(s.slider.previousSibling.lastChild.id).textContent = self[p] + (p==='hue'?'°':(p==='blur'?'px':'%'));
+      var pmInfo2 = document.createElement('div');
+      pmInfo2.style.cssText = 'font-size:11px; color:#70757a; line-height:1.35;';
+      pmInfo2.textContent = I18n.t('openmaps.pixel_manipulations_tooltip');
+      pixelManipulationsSection.appendChild(pmInfo2);
+
+      var pmBox = document.createElement('div');
+      pmBox.style.cssText = 'margin-top:0; padding:0; border:none; border-radius:0; background:transparent;';
+
+      var pmHeader = document.createElement('div');
+      pmHeader.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;';
+
+      var pmTitle = document.createElement('div');
+      pmTitle.style.cssText = 'font-weight:600; font-size:12px; color:#3c4043;';
+      pmTitle.textContent = I18n.t('openmaps.pixel_manipulations_title');
+      Tooltips.add(pmTitle, I18n.t('openmaps.pixel_manipulations_tooltip'), true);
+
+      var pmActions = document.createElement('div');
+      pmActions.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;';
+
+      var pmUseDefaultBtn = createIconButton('fa-undo', I18n.t('openmaps.pixel_manipulations_use_default_tooltip'), true);
+      var pmSelectNoneBtn = createIconButton('fa-ban', I18n.t('openmaps.pixel_manipulations_select_none_tooltip'), true);
+      pmActions.appendChild(pmUseDefaultBtn);
+      pmActions.appendChild(pmSelectNoneBtn);
+
+      pmHeader.appendChild(pmTitle);
+      pmHeader.appendChild(pmActions);
+      pmBox.appendChild(pmHeader);
+
+      var defaultOps = openMapsNormalizePixelManipulations(map.pixelManipulations) || [];
+      var defaultLine = document.createElement('div');
+      defaultLine.style.cssText = 'font-size:11px; color:#70757a; margin-bottom:8px; line-height:1.35;';
+      defaultLine.innerHTML = '<strong>' + I18n.t('openmaps.pixel_manipulations_default') + ':</strong> ' + (defaultOps.length ? defaultOps.join(', ') : '—');
+      pmBox.appendChild(defaultLine);
+
+      var overrideLine = document.createElement('div');
+      overrideLine.style.cssText = 'font-size:11px; color:#70757a; margin-bottom:6px; line-height:1.35;';
+      overrideLine.innerHTML = '<strong>' + I18n.t('openmaps.pixel_manipulations_override') + ':</strong>';
+      pmBox.appendChild(overrideLine);
+
+      var pmList = document.createElement('div');
+      pmList.style.cssText = 'display:flex; flex-direction:column; gap:4px; max-height:160px; overflow:auto; padding-right:4px;';
+      pmBox.appendChild(pmList);
+
+      var ops = openMapsAvailablePixelManipulationOps();
+      var pmChecksByOp = {};
+
+      function currentSelectedOps() {
+        var arr = [];
+        ops.forEach(function(op) {
+          var c = pmChecksByOp[op];
+          if (c && c.checked) arr.push(op);
         });
-        invCheck.checked = false;
-        self.blendMode = 'normal'; blendSelect.value = 'normal';
-        self.applyFilters(); saveMapState();
+        return arr;
+      }
+
+      function setChecksFromList(list) {
+        var set = {};
+        (list || []).forEach(function(x) { set[x] = true; });
+        ops.forEach(function(op) {
+          if (pmChecksByOp[op]) pmChecksByOp[op].checked = !!set[op];
+        });
+      }
+
+      function applyOverrideAndRedraw(newOverride) {
+        var wasNull = (self.pixelManipulationsOverride === null);
+        self.pixelManipulationsOverride = (newOverride === null) ? null : openMapsNormalizePixelManipulations(newOverride);
+        if (wasNull && self.pixelManipulationsOverride !== null) ensureLayerHasCrossOriginIfNeeded();
+        if (self.layer) self.layer.redraw();
+        saveMapState();
+      }
+
+      ops.forEach(function(op) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+        var cb = document.createElement('wz-checkbox');
+        cb.textContent = op;
+        cb.checked = false;
+        cb.addEventListener('change', function() {
+          applyOverrideAndRedraw(currentSelectedOps());
+        });
+        pmChecksByOp[op] = cb;
+        row.appendChild(cb);
+        pmList.appendChild(row);
       });
 
-      [sBright.row, sContrast.row, sSaturate.row, sHue.row, sGamma.row, invRow, resetBtn].forEach(el => slidersContainer.appendChild(el));
-      advColors.appendChild(slidersContainer);
-      UI.editContainer.appendChild(advColors);
+      // Initialize checkbox state from effective list (override if present, else default).
+      setChecksFromList(Array.isArray(self.pixelManipulationsOverride) ? self.pixelManipulationsOverride : defaultOps);
+
+      pmUseDefaultBtn.addEventListener('click', function(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        applyOverrideAndRedraw(null);
+        setChecksFromList(defaultOps);
+      });
+      pmSelectNoneBtn.addEventListener('click', function(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        applyOverrideAndRedraw([]);
+        setChecksFromList([]);
+      });
+
+      pixelManipulationsSection.appendChild(pmBox);
+      pmDetails.appendChild(pixelManipulationsSection);
+      UI.editContainer.appendChild(pmDetails);
+      }
 
 
 
@@ -6059,21 +13191,166 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       // Sub-Layers (WMS/ESRI: merged catalog from GetCapabilities / MapServer JSON)
       var mapLayersDetailsRoot = null;
       var subLayerContainer = null;
+      
+      function updateMapLayersSummaryCount() {
+        if (!UI.mapLayersCountSpan) return;
+        var total = self.mapLayers.length;
+        var visibleCount = self.mapLayers.filter(function(l) { return l.visible; }).length;
+        UI.mapLayersCountSpan.textContent = ' (' + visibleCount + '/' + total + ')';
+        if (UI.mapLayersNoActiveMark) {
+          UI.mapLayersNoActiveMark.style.display = (visibleCount === 0 && total > 0) ? 'inline-block' : 'none';
+        }
+      }
+
       function appendMapLayersSummaryInner(summaryEl) {
+        summaryEl.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none; display:flex; align-items:center;';
         summaryEl.textContent = '';
+        
+        var leftDiv = document.createElement('div');
+        leftDiv.style.cssText = 'flex:1; display:flex; align-items:center; min-width:0;';
+        
         var listIco = document.createElement('i');
         listIco.className = 'fa fa-list';
-        listIco.style.cssText = 'margin-right:5px; color:#5f6368;';
+        listIco.style.cssText = 'margin-right:5px; color:#5f6368; flex-shrink:0;';
         listIco.setAttribute('aria-hidden', 'true');
-        summaryEl.appendChild(listIco);
-        summaryEl.appendChild(document.createTextNode(I18n.t('openmaps.map_layers_title')));
+        leftDiv.appendChild(listIco);
+        
+        var textNode = document.createTextNode(I18n.t('openmaps.map_layers_title'));
+        leftDiv.appendChild(textNode);
+        
+        var countSpan = document.createElement('span');
+        countSpan.className = 'open-maps-maplayers-summary-count';
+        countSpan.style.cssText = 'margin-left: 5px; color: #5f6368; font-weight: normal; flex-shrink:0;';
+        leftDiv.appendChild(countSpan);
+        UI.mapLayersCountSpan = countSpan;
+
         var layerWarn = document.createElement('i');
         layerWarn.className = 'fa fa-exclamation-circle open-maps-maplayers-summary-warning';
         layerWarn.setAttribute('aria-hidden', 'true');
         layerWarn.style.display = 'none';
-        summaryEl.appendChild(layerWarn);
+        layerWarn.style.marginLeft = '5px';
+        layerWarn.style.flexShrink = '0';
+        leftDiv.appendChild(layerWarn);
         UI.mapLayersNoActiveMark = layerWarn;
         Tooltips.add(layerWarn, I18n.t('openmaps.no_layers_enabled_hint'), true);
+        
+        summaryEl.appendChild(leftDiv);
+
+        var actionsBtn = document.createElement('button');
+        actionsBtn.type = 'button';
+        actionsBtn.className = 'openmaps-wz-btn-compact openmaps-wz-btn-icon-only';
+        actionsBtn.style.cssText = 'color: #3c4043; background: transparent; border: none; cursor: pointer; padding: 2px 8px; border-radius: 4px; display: flex; align-items: center; justify-content: center; margin-left: 5px; flex-shrink: 0;';
+        actionsBtn.innerHTML = '<i class="fa fa-ellipsis-v" aria-hidden="true"></i>';
+        actionsBtn.addEventListener('mouseenter', function() { actionsBtn.style.background = '#e8eaed'; });
+        actionsBtn.addEventListener('mouseleave', function() { actionsBtn.style.background = 'transparent'; });
+
+        var menuRoot = document.createElement('div');
+        menuRoot.style.cssText = 'position:relative; display:inline-block;';
+        menuRoot.appendChild(actionsBtn);
+        
+        var menuPanel = document.createElement('div');
+        menuPanel.className = 'open-maps-layer-card-menu-panel';
+        menuPanel.setAttribute('role', 'menu');
+        menuPanel.style.cssText = 'position: fixed; z-index: 10050; min-width: 160px; margin: 0; padding: 4px 0; box-sizing: border-box; background: #fff; border: 1px solid #dadce0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.18); display: none;';
+
+        var showAllBtn = document.createElement('button');
+        showAllBtn.type = 'button';
+        showAllBtn.className = 'open-maps-layer-card-menu-item';
+        showAllBtn.setAttribute('role', 'menuitem');
+        showAllBtn.textContent = I18n.t('openmaps.map_layers_show_all');
+        
+        var hideAllBtn = document.createElement('button');
+        hideAllBtn.type = 'button';
+        hideAllBtn.className = 'open-maps-layer-card-menu-item';
+        hideAllBtn.setAttribute('role', 'menuitem');
+        hideAllBtn.textContent = I18n.t('openmaps.map_layers_hide_all');
+        
+        menuPanel.appendChild(showAllBtn);
+        menuPanel.appendChild(hideAllBtn);
+        menuRoot.appendChild(menuPanel);
+        summaryEl.appendChild(menuRoot);
+
+        var menuOpen = false;
+        function positionMenu() {
+          var rect = actionsBtn.getBoundingClientRect();
+          var pw = menuPanel.offsetWidth || 160;
+          var left = rect.right - pw;
+          var sidebar = document.querySelector('#sidebar') || document.querySelector('#sidepanel') || document.body;
+          var srect = sidebar && sidebar.getBoundingClientRect ? sidebar.getBoundingClientRect() : null;
+          var minLeft = 8;
+          if (srect) { minLeft = Math.max(8, srect.left + 8); }
+          if (left < minLeft) left = minLeft;
+          menuPanel.style.left = left + 'px';
+          menuPanel.style.top = (rect.bottom + 2) + 'px';
+        }
+        function closeMenu() {
+          if (!menuOpen) return;
+          menuOpen = false;
+          menuPanel.style.display = 'none';
+          document.removeEventListener('click', onDocClick);
+          document.removeEventListener('keydown', onKey);
+          window.removeEventListener('resize', closeMenu);
+        }
+        function onDocClick(ev) {
+          if (menuRoot.contains(ev.target)) return;
+          closeMenu();
+        }
+        function onKey(ev) {
+          if (ev.key === 'Escape') closeMenu();
+        }
+        actionsBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (menuOpen) {
+            closeMenu();
+          } else {
+            menuOpen = true;
+            menuPanel.style.display = 'block';
+            requestAnimationFrame(function() {
+              positionMenu();
+              requestAnimationFrame(positionMenu);
+            });
+            setTimeout(function() {
+              document.addEventListener('click', onDocClick);
+              document.addEventListener('keydown', onKey);
+              window.addEventListener('resize', closeMenu);
+            }, 0);
+          }
+        });
+        
+        showAllBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeMenu();
+          if (!self.mapLayers) return;
+          var changed = false;
+          self.mapLayers.forEach(function(l) {
+            if (!l.visible) { l.visible = true; changed = true; }
+          });
+          if (changed) {
+            layerRedrawNeeded = true;
+            try { rebuildMapLayersUI(); } catch (eRb) { /* ignore */ }
+            if (typeof self.updateLayers === 'function') self.updateLayers();
+          }
+        });
+        
+        hideAllBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeMenu();
+          if (!self.mapLayers) return;
+          var changed = false;
+          self.mapLayers.forEach(function(l) {
+            if (l.visible) { l.visible = false; changed = true; }
+          });
+          if (changed) {
+            layerRedrawNeeded = true;
+            try { rebuildMapLayersUI(); } catch (eRb) { /* ignore */ }
+            if (typeof self.updateLayers === 'function') self.updateLayers();
+          }
+        });
+        
+        updateMapLayersSummaryCount();
       }
 
       function appendOneLayerRow(layerItem, container) {
@@ -6081,12 +13358,12 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var item = document.createElement('wz-card'); item.className = 'result maps-menu-item list-item-card layer-card';
 
         var lHeader = document.createElement('div'); lHeader.className = 'open-maps-card-header layer-card-header';
-        lHeader.style.cssText = 'position:relative; overflow:visible; display:flex; align-items:center;';
+        lHeader.style.cssText = 'position:relative; overflow:visible; display:flex; align-items:center; width: 100%; box-sizing: border-box;';
 
         var lHandle = document.createElement('div');
         lHandle.className = 'open-maps-drag-handle layer-handle';
         lHandle.style.width = '24px';
-        lHandle.style.marginRight = '6px';
+        lHandle.style.marginRight = '12px';
         lHandle.style.display = 'flex';
         lHandle.style.justifyContent = 'center';
 
@@ -6099,45 +13376,79 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000',
           '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'
         ];
-        var lBgColor = wazeColors[Math.abs(lHash) % wazeColors.length];
+        var lBgColor = self.layerSpecificStyle ? wazeColors[Math.abs(lHash) % wazeColors.length] : (self.bgColor || openMapsMapAvatarColorFromTitle(map.title));
         var lCleanName = mapLayer.title.replace(/[^a-zA-Z0-9 \-]/g, '').trim();
         var lWords = lCleanName.split(/[\s\-]+/);
         var lInitials = (lWords.length >= 2 ? lWords[0][0] + lWords[1][0] : lCleanName.substring(0, 2)).toUpperCase();
 
         var lBadge = document.createElement('div');
+        var lmMeta = map.layers && map.layers[layerItem.name];
+        var kmlColorHex = lmMeta && lmMeta.openMapsKmlColorHex ? String(lmMeta.openMapsKmlColorHex) : '';
+        if (kmlColorHex && /^#[0-9a-fA-F]{6}$/.test(kmlColorHex)) {
+          lBgColor = kmlColorHex.toLowerCase();
+        }
         var activeColor = lBgColor + 'b3';
         var inactiveColor = '#c2c4c8';
 
-        lBadge.style.cssText = 'width:24px; height:24px; border-radius:4px; color:#fff; font-size:11px; line-height:1; font-family:system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif; font-weight:700; display:flex; align-items:center; justify-content:center; box-sizing:border-box; box-shadow:0 1px 3px rgba(0,0,0,0.3); pointer-events:none; transition: background-color 0.2s ease;';
+        lBadge.style.cssText = 'width:24px; height:24px; border-radius:50%; color:#fff; font-size:11px; line-height:1; font-family:system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif; font-weight:700; display:flex; align-items:center; justify-content:center; box-sizing:border-box; box-shadow:0 1px 3px rgba(0,0,0,0.3); pointer-events:none; transition: background-color 0.2s ease; overflow:hidden;';
         lBadge.style.backgroundColor = layerItem.visible ? activeColor : inactiveColor;
-        lBadge.textContent = lInitials;
+        var kmlIconHref = lmMeta && lmMeta.openMapsKmlIconHref ? String(lmMeta.openMapsKmlIconHref) : '';
+        if (kmlIconHref && (kmlIconHref.indexOf('data:') === 0 || /^https?:\/\//i.test(kmlIconHref) || kmlIconHref.indexOf('//') === 0)) {
+          var imK = document.createElement('img');
+          imK.src = kmlIconHref;
+          imK.alt = '';
+          imK.style.cssText = 'width:18px;height:18px;object-fit:contain;display:block;';
+          imK.onerror = function() {
+            try {
+              if (imK.parentNode === lBadge) lBadge.removeChild(imK);
+            } catch (eIk) { /* ignore */ }
+            lBadge.textContent = lInitials;
+          };
+          lBadge.appendChild(imK);
+        } else {
+          lBadge.textContent = lInitials;
+        }
 
         var layerBadgeWrap = document.createElement('div');
-        layerBadgeWrap.style.cssText = 'position:relative; display:inline-block; width:24px; height:24px; flex-shrink:0;';
+        layerBadgeWrap.style.cssText = 'position:relative; display:inline-block; width:24px; height:24px; flex-shrink:0; margin-left: 5px;';
         layerBadgeWrap.appendChild(lBadge);
-        var originKind = getLayerOriginKind(layerItem.name);
-        var originIco = document.createElement('i');
-        originIco.setAttribute('aria-hidden', 'true');
-        var originFa = originKind === 'curated' ? 'fa-file-code-o' : (originKind === 'cloud' ? 'fa-cloud' : 'fa-question-circle');
-        var originColor = originKind === 'curated' ? '#1a73e8' : (originKind === 'cloud' ? '#0f9d58' : '#f9a825');
-        originIco.className = 'fa ' + originFa + ' open-maps-layer-origin-marker';
-        originIco.style.cssText = 'position:absolute; bottom:-3px; right:-5px; width:16px; height:16px; border-radius:50%; background:#fff; border:1px solid #fff; box-shadow:0 1px 3px rgba(0,0,0,0.45); font-size:10px; line-height:1; display:flex; align-items:center; justify-content:center; z-index:2; pointer-events:auto; color:' + originColor + ';';
-        var originTip = getLayerOriginTooltip(layerItem.name);
-        originIco.setAttribute('aria-label', originTip);
-        Tooltips.add(originIco, originTip, true);
-        layerBadgeWrap.appendChild(originIco);
         lHandle.appendChild(layerBadgeWrap);
 
         lHeader.appendChild(lHandle);
 
         var lText = document.createElement('div'); lText.className = 'open-maps-text-container';
+        lText.style.cssText = 'flex:1;min-width:0; margin-right: 5px;';
         var lTitle = document.createElement('p');
         lTitle.className = 'title layer-title';
 
-        lTitle.style.cssText = 'cursor:pointer; font-weight:normal; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.2;';
+        lTitle.style.cssText = 'cursor:pointer; font-weight:normal; margin:0; white-space:normal; word-break:break-word; overflow-wrap:anywhere; line-height:1.25; display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;';
         lTitle.style.color = (layerItem.visible ? '' : '#999');
         lTitle.textContent = mapLayer.title;
+        lTitle.title = getLayerOriginTooltip(layerItem.name);
         lText.appendChild(lTitle);
+
+        var tagRow = document.createElement('div');
+        tagRow.className = 'openmaps-layer-tag-row';
+        function appendLayerTag(i18nKey) {
+          var sp = document.createElement('span');
+          sp.className = 'openmaps-layer-tag';
+          sp.textContent = I18n.t(i18nKey);
+          tagRow.appendChild(sp);
+        }
+        if (map.type === 'LOCAL_KML') {
+          appendLayerTag('openmaps.layer_tag_user_upload');
+        } else if (map.type === 'GOOGLE_MY_MAPS') {
+          appendLayerTag('openmaps.layer_tag_google_mymaps');
+        } else {
+          var okind = getLayerOriginKind(layerItem.name);
+          if (okind === 'curated') appendLayerTag('openmaps.layer_tag_curated');
+          else if (okind === 'cloud') appendLayerTag('openmaps.layer_tag_cloud');
+          else appendLayerTag('openmaps.layer_tag_unknown');
+        }
+        if (map.default_layers.indexOf(layerItem.name) !== -1) {
+          appendLayerTag('openmaps.layer_tag_default');
+        }
+        lText.appendChild(tagRow);
 
         var lDesc = document.createElement('div');
         if (mapLayer.abstract) {
@@ -6147,85 +13458,9 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         }
         lHeader.appendChild(lText);
 
-        var lBtns = document.createElement('div'); lBtns.className = 'buttons';
-
-        var layerMenuRoot = document.createElement('div');
-        layerMenuRoot.className = 'open-maps-layer-card-menu-root';
-        layerMenuRoot.style.cssText = 'position:relative; display:inline-block;';
-
-        var layerMenuBtn = createIconButton('fa-ellipsis-v', I18n.t('openmaps.layer_card_menu'), true);
-        var layerMenuPanel = document.createElement('div');
-        layerMenuPanel.className = 'open-maps-layer-card-menu-panel';
-        layerMenuPanel.setAttribute('role', 'menu');
-        layerMenuPanel.style.display = 'none';
-
-        var copyMenuItem = document.createElement('button');
-        copyMenuItem.type = 'button';
-        copyMenuItem.className = 'open-maps-layer-card-menu-item';
-        copyMenuItem.setAttribute('role', 'menuitem');
-        copyMenuItem.textContent = I18n.t('openmaps.copy_definition_menu');
-        Tooltips.add(copyMenuItem, I18n.t('openmaps.copy_layer_definition'), true);
-
-        var layerMenuOpen = false;
-        function positionLayerMenu() {
-          var rect = layerMenuBtn.getBoundingClientRect();
-          var pw = layerMenuPanel.offsetWidth || 200;
-          layerMenuPanel.style.left = Math.max(8, rect.right - pw) + 'px';
-          layerMenuPanel.style.top = (rect.bottom + 2) + 'px';
-        }
-        function closeLayerMenu() {
-          if (!layerMenuOpen) return;
-          layerMenuOpen = false;
-          layerMenuPanel.style.display = 'none';
-          document.removeEventListener('click', onDocCloseLayerMenu);
-          document.removeEventListener('keydown', onKeyLayerMenu);
-          window.removeEventListener('resize', closeLayerMenu);
-          if (UI.mapLayersSubContainer) UI.mapLayersSubContainer.removeEventListener('scroll', closeLayerMenu);
-        }
-        function onDocCloseLayerMenu(ev) {
-          if (layerMenuRoot.contains(ev.target)) return;
-          closeLayerMenu();
-        }
-        function onKeyLayerMenu(ev) {
-          if (ev.key === 'Escape') closeLayerMenu();
-        }
-        function openLayerMenu() {
-          layerMenuOpen = true;
-          layerMenuPanel.style.display = 'block';
-          requestAnimationFrame(function() {
-            positionLayerMenu();
-            requestAnimationFrame(positionLayerMenu);
-          });
-          setTimeout(function() {
-            document.addEventListener('click', onDocCloseLayerMenu);
-            document.addEventListener('keydown', onKeyLayerMenu);
-            window.addEventListener('resize', closeLayerMenu);
-            if (UI.mapLayersSubContainer) UI.mapLayersSubContainer.addEventListener('scroll', closeLayerMenu, { passive: true });
-          }, 0);
-        }
-
-        layerMenuBtn.addEventListener('click', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          if (layerMenuOpen) closeLayerMenu();
-          else openLayerMenu();
-        });
-
-        copyMenuItem.addEventListener('click', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var snippet = buildLayerDefinitionSnippet(layerItem.name);
-          navigator.clipboard.writeText(snippet).then(function() {
-            closeLayerMenu();
-            copyMenuItem.textContent = I18n.t('openmaps.copy_layer_definition_done');
-            setTimeout(function() { copyMenuItem.textContent = I18n.t('openmaps.copy_definition_menu'); }, 1600);
-          });
-        });
-
-        layerMenuPanel.appendChild(copyMenuItem);
-        layerMenuRoot.appendChild(layerMenuBtn);
-        layerMenuRoot.appendChild(layerMenuPanel);
-        lBtns.appendChild(layerMenuRoot);
+        var lBtns = document.createElement('div'); 
+        lBtns.className = 'buttons';
+        lBtns.style.cssText = 'flex-shrink:0; display:flex; align-items:center; margin-left: 5px; margin-right: 8px;';
 
         var lQuery = null;
         if (mapLayer.queryable) {
@@ -6241,7 +13476,13 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         lVis.addEventListener('click', () => {
           layerItem.visible = !layerItem.visible;
           layerRedrawNeeded = true;
+          if (openMapsInspectorApi && typeof openMapsInspectorApi.applySidebarSubLayerToInspectorScan === 'function') {
+            try {
+              openMapsInspectorApi.applySidebarSubLayerToInspectorScan(map.id, layerItem.name, layerItem.visible);
+            } catch (eInspSl) { /* ignore */ }
+          }
           self.updateLayers();
+          updateMapLayersSummaryCount();
         });
 
         self.layerUI.push({
@@ -6261,7 +13502,19 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       }
 
       function rebuildMapLayersUI() {
-        if (!UI.mapLayersSubContainer) return;
+        if (!UI.mapLayersSubContainer) {
+          if (openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+            var retryN = self.__openmapsRebuildMapLayersRetry | 0;
+            if (retryN < 5) {
+              self.__openmapsRebuildMapLayersRetry = retryN + 1;
+              setTimeout(function() {
+                try { rebuildMapLayersUI(); } catch (eRbRetry) { /* ignore */ }
+              }, 0);
+            }
+          }
+          return;
+        }
+        self.__openmapsRebuildMapLayersRetry = 0;
         self.layerUI = [];
         while (UI.mapLayersSubContainer.firstChild) {
           UI.mapLayersSubContainer.removeChild(UI.mapLayersSubContainer.firstChild);
@@ -6278,6 +13531,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         }
         layerRedrawNeeded = true;
         self.updateLayers();
+        updateMapLayersSummaryCount();
       }
 
       function applyCatalogFromEntry(entry) {
@@ -6386,7 +13640,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         }, forceRefresh);
       }
 
-      var showLayerList = (map.type === 'WMS' || map.type === 'ESRI') ? (self.mapLayers.length >= 1) : (self.mapLayers.length > 1);
+      var showLayerList = (map.type === 'WMS' || map.type === 'ESRI' || openMapsMapTypeIsKmlVectorOverlay(map.type)) ? (self.mapLayers.length >= 1) : (self.mapLayers.length > 1);
 
       if (showLayerList) {
         mapLayersDetailsRoot = document.createElement('details');
@@ -6449,6 +13703,34 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         if (self.pendingSavedLayers.length > 0) {
           setTimeout(function() { ensureLayerCatalogLoaded(false, null); }, 0);
         }
+      } else if (self.pendingSavedLayers.length > 0 && openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+        var lkUm = Object.keys(map.layers || {});
+        var onlyMainTemplate = lkUm.length === 1 && lkUm[0] === 'main';
+        if (onlyMainTemplate && self.pendingSavedLayers.length > 0) {
+          var newLObj = {};
+          var newML = [];
+          self.pendingSavedLayers.forEach(function(p) {
+            if (!p || !p.name) return;
+            var titPm = p.name === '__root__' ? I18n.t('openmaps.kml_layer_root') : String(p.name);
+            newLObj[p.name] = { title: titPm, abstract: '', queryable: false };
+            newML.push({ name: p.name, visible: !!p.visible });
+          });
+          if (newML.length) {
+            map.layers = newLObj;
+            map.default_layers = newML.map(function(x) { return x.name; });
+            self.mapLayers = newML;
+          }
+        }
+        self.pendingSavedLayers = [];
+        self._orphanSavedLayersDropped = 0;
+        self._orphanHintKind = undefined;
+        if (UI.orphanHintEl) UI.orphanHintEl.style.display = 'none';
+        try {
+          rebuildMapLayersUI();
+        } catch (eRbK) { /* ignore */ }
+        try {
+          saveMapState();
+        } catch (eSvK) { /* ignore */ }
       } else if (self.pendingSavedLayers.length > 0) {
         var droppedLocal = self.pendingSavedLayers.length;
         self._orphanSavedLayersDropped = droppedLocal;
@@ -6818,16 +14100,6 @@ acceptBtn.addEventListener('click', () => {
       rmLeft.className = 'open-maps-remove-container-left';
 
       if (map.type === 'WMS' || map.type === 'ESRI') {
-        UI.syncLayersBtn = createIconButton('fa-refresh', I18n.t('openmaps.sync_layers_tooltip'), true);
-        UI.syncLayersBtn.addEventListener('click', function(e) {
-          e.preventDefault(); e.stopPropagation();
-          UI.syncLayersBtn.classList.add('fa-spin');
-          ensureLayerCatalogLoaded(true, function() {
-            UI.syncLayersBtn.classList.remove('fa-spin');
-          });
-        });
-        rmLeft.appendChild(UI.syncLayersBtn);
-
         var capBtn = createIconButton('fa-server', I18n.t('openmaps.server_capabilities_tooltip'), true);
         capBtn.addEventListener('click', function(e) {
           e.preventDefault(); e.stopPropagation();
@@ -6835,6 +14107,98 @@ acceptBtn.addEventListener('click', () => {
         });
         rmLeft.appendChild(capBtn);
       }
+
+      // --- Copy map definition (pasteable map entry) ---
+      var mapCopyMenuRoot = document.createElement('div');
+      mapCopyMenuRoot.className = 'open-maps-map-copy-menu-root';
+      mapCopyMenuRoot.style.cssText = 'position:relative; display:inline-block;';
+
+      var mapCopyBtn = createIconButton('fa-copy', I18n.t('openmaps.copy_map_definition_tooltip'), true);
+      var mapCopyPanel = document.createElement('div');
+      mapCopyPanel.className = 'open-maps-map-copy-menu-panel';
+      mapCopyPanel.setAttribute('role', 'menu');
+      mapCopyPanel.style.display = 'none';
+
+      function createMapCopyMenuItem(textKey, mode) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'open-maps-map-copy-menu-item';
+        btn.setAttribute('role', 'menuitem');
+        btn.textContent = I18n.t(textKey);
+        btn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var snippet = buildMapDefinitionSnippet(mode);
+          omCopyTextToClipboard(snippet).then(function() {
+            closeMapCopyMenu();
+            var prev = btn.textContent;
+            btn.textContent = I18n.t('openmaps.copy_done');
+            setTimeout(function() { btn.textContent = prev; }, 1600);
+          });
+        });
+        return btn;
+      }
+
+      var mapCopyMenuOpen = false;
+      function positionMapCopyMenu() {
+        var rect = mapCopyBtn.getBoundingClientRect();
+        var pw = mapCopyPanel.offsetWidth || 260;
+        var sidebar = document.querySelector('#sidebar') || document.querySelector('#sidepanel') || document.body;
+        var srect = sidebar && sidebar.getBoundingClientRect ? sidebar.getBoundingClientRect() : null;
+        var minLeft = 8, maxLeft = (window.innerWidth - pw - 8);
+        if (srect) {
+          minLeft = Math.max(8, srect.left + 8);
+          maxLeft = Math.min(window.innerWidth - pw - 8, srect.right - pw - 8);
+        }
+        var left = rect.right - pw;
+        if (left < minLeft) left = minLeft;
+        if (left > maxLeft) left = maxLeft;
+        mapCopyPanel.style.left = left + 'px';
+        mapCopyPanel.style.top = (rect.bottom + 2) + 'px';
+      }
+      function closeMapCopyMenu() {
+        if (!mapCopyMenuOpen) return;
+        mapCopyMenuOpen = false;
+        mapCopyPanel.style.display = 'none';
+        document.removeEventListener('click', onDocCloseMapCopyMenu);
+        document.removeEventListener('keydown', onKeyMapCopyMenu);
+        window.removeEventListener('resize', closeMapCopyMenu);
+      }
+      function onDocCloseMapCopyMenu(ev) {
+        if (mapCopyMenuRoot.contains(ev.target)) return;
+        closeMapCopyMenu();
+      }
+      function onKeyMapCopyMenu(ev) {
+        if (ev.key === 'Escape') closeMapCopyMenu();
+      }
+      function openMapCopyMenu() {
+        mapCopyMenuOpen = true;
+        mapCopyPanel.style.display = 'block';
+        requestAnimationFrame(function() {
+          positionMapCopyMenu();
+          requestAnimationFrame(positionMapCopyMenu);
+        });
+        setTimeout(function() {
+          document.addEventListener('click', onDocCloseMapCopyMenu);
+          document.addEventListener('keydown', onKeyMapCopyMenu);
+          window.addEventListener('resize', closeMapCopyMenu);
+        }, 0);
+      }
+
+      mapCopyBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (mapCopyMenuOpen) closeMapCopyMenu();
+        else openMapCopyMenu();
+      });
+
+      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_all_keep_defaults', 'allKeepDefaults'));
+      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_all_make_enabled_default', 'allMakeEnabledDefault'));
+      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_enabled_only_make_default', 'enabledOnlyMakeDefault'));
+      mapCopyMenuRoot.appendChild(mapCopyBtn);
+      mapCopyMenuRoot.appendChild(mapCopyPanel);
+      rmLeft.appendChild(mapCopyMenuRoot);
+      // -----------------------------------------------
 
       var rmBtn = document.createElement('wz-button');
       rmBtn.setAttribute('size', 'sm');
@@ -6846,16 +14210,21 @@ acceptBtn.addEventListener('click', () => {
       rmBtn.addEventListener('click', () => {
         var hi = handles.indexOf(self);
         if (hi !== -1) handles.splice(hi, 1);
+        if (map.source === 'user') openMapsRemoveUserMapDefinition(map.id);
         if (layerToggler.parentNode) layerToggler.parentNode.removeChild(layerToggler);
         var card = UI.container;
         if (card.parentNode) card.parentNode.removeChild(card);
         Tooltips.teardownSubtree(card);
-        if (self.layer) W.map.removeLayer(self.layer);
+        if (self.layer) {
+          if (map.type === 'GOOGLE_MY_MAPS') openMapsGoogleMyMapsLayerRemoveFromMap(self.layer);
+          else W.map.removeLayer(self.layer);
+        }
         if (self.bboxLayer) W.map.removeLayer(self.bboxLayer);
         requestAnimationFrame(function() {
           saveMapState();
           updateMapSelector();
           refreshMapDrag();
+          if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
         });
       });
       rmBox.appendChild(rmLeft);
@@ -6893,11 +14262,16 @@ acceptBtn.addEventListener('click', () => {
       saveMapState();
       if (self.updateVisibility) self.updateVisibility();
       applyActiveMapsFilter();
+      // Eye toggle used to skip updateLayers(), so KML teardown/reattach and notifyHandlesChanged()
+      // (Map Inspector list + viewport bucket) never ran until some other action triggered updateLayers.
+      if (typeof self.updateLayers === 'function') self.updateLayers();
     };
     // -------------------------------------
 
 this.applyFilters = function() {
       if (!self.layer || !self.layer.div) return;
+      // Tile-oriented filters (brightness, mix-blend) break OpenLayers vector renderers (Canvas/SVG) in WME.
+      if (map.type === 'ESRI_FEATURE' || openMapsMapTypeIsKmlVectorOverlay(map.type)) return;
 
       // Calculate Gamma simulation:
       // We use the gamma value to adjust brightness and contrast in tandem
@@ -6917,6 +14291,12 @@ this.applyFilters = function() {
     };
 
 this.updateBboxLayer = function() {
+      if (map.area === 'UN' || openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+        if (self.bboxLayer) {
+          try { self.bboxLayer.setVisibility(false); } catch (eB0) {}
+        }
+        return;
+      }
       if (self.displayBbox) {
         if (!self.bboxLayer) {
           self.bboxLayer = new OpenLayers.Layer.Vector("BBOX_" + map.id, {
@@ -6925,6 +14305,7 @@ this.updateBboxLayer = function() {
             }),
             displayInLayerSwitcher: false
           });
+          self.bboxLayer.openMapsBboxMapId = map.id;
           var feature = new OpenLayers.Feature.Vector(self.area.toGeometry());
           self.bboxLayer.addFeatures([feature]);
           W.map.addLayer(self.bboxLayer);
@@ -6968,6 +14349,25 @@ this.updateVisibility = function() {
       // 2. Info icon logic (Zoom bounds)
       var zoom = W.map.getZoom();
       UI.info.style.display = (isActuallyVisible && map.zoomRange && (zoom < map.zoomRange[0] || zoom > map.zoomRange[1]) ? 'inline' : 'none');
+
+      if (UI.zoomMetaLine) {
+        var wmsFloorRawZm = map.wmsMinEffectiveZoom != null ? map.wmsMinEffectiveZoom : map.minEffectiveZoom;
+        var hasFloorZm = map.type === 'WMS' && wmsFloorRawZm != null && wmsFloorRawZm !== '';
+        var floorValZm = null;
+        if (hasFloorZm) {
+          var fz = Math.floor(Number(wmsFloorRawZm));
+          if (!isNaN(fz) && fz > 0) floorValZm = fz;
+        }
+        var zmParts = [];
+        if (map.zoomRange && map.zoomRange.length >= 2) {
+          zmParts.push(I18n.t('openmaps.zoom_meta_band') + ': ' + map.zoomRange[0] + '–' + map.zoomRange[1]);
+        }
+        if (floorValZm != null) {
+          zmParts.push(I18n.t('openmaps.zoom_meta_floor') + ': ' + floorValZm);
+        }
+        zmParts.push(I18n.t('openmaps.zoom_meta_view') + ': ' + zoom);
+        UI.zoomMetaLine.textContent = zmParts.join(' · ');
+      }
 
 // 3. Eye Icon (Manual State & ToU Lock)
       UI.visibility.classList.remove('fa-eye', 'fa-eye-slash', 'fa-lock');
@@ -7030,10 +14430,37 @@ this.updateVisibility = function() {
 
     this.updateLayers = function() {
       var visibleLayers = self.mapLayers.filter(l => l.visible).map(l => l.name);
-
-      if (visibleLayers.length == 0 && self.layer && ['WMS', 'XYZ', 'ESRI'].includes(map.type)) {
+      // Google My Maps / local KML: do not instantiate OpenLayers.Layer.Vector until the row can actually show on the map.
+      // A My Map row in Active Maps (hidden, ToU pending, or eye off) used to still create the vector + run sync,
+      // which correlated with WME satellite tiles stopping even though KML never loaded.
+      var kmlVectorEligibleForOlLayer = !openMapsMapTypeIsKmlVectorOverlay(map.type) ||
+        (map.type === 'LOCAL_KML'
+          ? (visibleLayers.length > 0 && !self.hidden && !self.outOfArea && (map.touId === 'none' || isTouAccepted(map.touId)))
+          : (openMapsGoogleMyMapsIntegrationEnabled() && visibleLayers.length > 0 && !self.hidden && !self.outOfArea && isTouAccepted(map.touId)));
+      if (openMapsMapTypeIsKmlVectorOverlay(map.type) && self.layer && !kmlVectorEligibleForOlLayer) {
+        try {
+          if (self.layer.removeAllFeatures) self.layer.removeAllFeatures();
+        } catch (eGmmFeat) { /* ignore */ }
+        try {
+          openMapsGoogleMyMapsLayerRemoveFromMap(self.layer);
+        } catch (eGmmRm) { /* ignore */ }
+        try {
+          if (typeof self.layer.destroy === 'function') self.layer.destroy();
+        } catch (eGmmDest) { /* ignore */ }
+        self.layer = null;
+        self.__openmapsGmmRemovedFromOlStack = true;
+        self.__openmapsGmmKmlFetchTriggered = false;
+        self.__openmapsGmmVisBound = false;
+        self.__openmapsGmmMoveBound = false;
+        self.__openmapsGmmScheduleRefresh = null;
+        self.__openmapsGmmTriggerFetch = null;
+        try {
+          syncOpenMapsLayerIndices();
+        } catch (eGmmSync) { /* ignore */ }
+      }
+      if (visibleLayers.length == 0 && self.layer && ['WMS', 'XYZ', 'ESRI', 'ESRI_FEATURE', 'GOOGLE_MY_MAPS', 'LOCAL_KML'].includes(map.type)) {
         self.layer.setVisibility(false);
-      } else if (visibleLayers.length > 0 && !self.layer) {
+      } else if (visibleLayers.length > 0 && !self.layer && kmlVectorEligibleForOlLayer) {
 
         var options = {
           transitionEffect: 'resize',
@@ -7045,7 +14472,13 @@ this.updateVisibility = function() {
           tileSize: (map.tile_size ? new OpenLayers.Size(map.tile_size, map.tile_size) : new OpenLayers.Size(512, 512))
         };
 
-        if (map.pixelManipulations) options.tileOptions = { crossOriginKeyword: 'anonymous' };
+        // Canvas pixel reads require CORS-enabled tiles. Enable when pixel manipulations may be applied:
+        // - catalog has defaults, OR
+        // - user enabled Apply pixel manipulations, OR
+        // - user set an override (even if empty)
+        var wantsPixelManipulation = !!map.pixelManipulations || !!self.improveMap || (self.pixelManipulationsOverride !== null);
+        if (wantsPixelManipulation) options.tileOptions = { crossOriginKeyword: 'anonymous' };
+        self.__openmapsTileCrossOrigin = !!(options.tileOptions && options.tileOptions.crossOriginKeyword);
 
         var openmapsWmsFloorRes = null;
 
@@ -7103,6 +14536,684 @@ this.updateVisibility = function() {
                            '&format=' + exportFormat + '&transparent=' + exportTransparent + '&f=image' + layersParam;
                 };
                 self.layer = new OpenLayers.Layer.XYZ(map.title, map.url, options);
+                break;
+
+            case 'ESRI_FEATURE':
+                // ArcGIS FeatureServer layer rendered as vector overlay.
+                // Uses bounded bbox queries with caching to avoid request spam when panning.
+                (function initEsriFeatureVector() {
+                  var proj3857 = new OpenLayers.Projection('EPSG:3857');
+                  var minZoom = (map.minVectorZoom != null && map.minVectorZoom !== '') ? Number(map.minVectorZoom) : null;
+                  if (isNaN(minZoom)) minZoom = null;
+                  var maxFeatures = (map.maxFeatures != null && map.maxFeatures !== '') ? Number(map.maxFeatures) : 400;
+                  if (isNaN(maxFeatures) || maxFeatures <= 0) maxFeatures = 400;
+
+                  var esriPack = openMapsEsriFeatureAvatarMarkerPack(self.bgColor || openMapsMapAvatarColorFromTitle(map.title));
+                  var stylePoly = new OpenLayers.Style({
+                    fillColor: esriPack.fillHex,
+                    fillOpacity: 0.88,
+                    strokeColor: '#ffffff',
+                    strokeOpacity: 1,
+                    strokeWidth: esriPack.polyStrokeW,
+                    pointRadius: Math.round(esriPack.symbolR)
+                  });
+                  var styleSel = new OpenLayers.Style({
+                    fillColor: esriPack.fillHex,
+                    fillOpacity: 0.42,
+                    strokeColor: '#ffffff',
+                    strokeOpacity: 0.8,
+                    strokeWidth: Math.max(3, Math.round(esriPack.polyStrokeW * 2)),
+                    pointRadius: esriPack.highlightR
+                  });
+                  // Layer projection = ArcGIS outSR (3857). OpenLayers projects into the map CRS on draw (same pattern as WFS).
+                  // Match minimal Vector options used by the bbox overlay — custom renderers / flags caused invisible layers in some WME builds.
+                  self.layer = new OpenLayers.Layer.Vector(openMapsEsriFeatureVectorOlName(map.id), {
+                    projection: proj3857,
+                    displayInLayerSwitcher: false,
+                    styleMap: new OpenLayers.StyleMap({ 'default': stylePoly, 'select': styleSel }),
+                    attribution: map.attribution,
+                    isBaseLayer: false
+                  });
+                  self.layer.openMapsMapId = map.id;
+                  
+                  // Avoid starving WME's main thread during drag
+                  var originalEsriMoveTo = self.layer.moveTo;
+                  self.layer.moveTo = function(bounds, zoomChanged, dragging) {
+                    if (dragging) return;
+                    return originalEsriMoveTo.apply(this, arguments);
+                  };
+                  self.layer.openMapsEsriAvatarFill = esriPack.fillHex;
+
+                  // Simple in-memory cache: key → { t, featuresJson }
+                  var cache = self.__openmapsEsriFeatureCache || new Map();
+                  self.__openmapsEsriFeatureCache = cache;
+                  var cacheTtlMs = 30 * 1000;
+                  var debounceTimer = null;
+
+                  function extentKey(extent, zoom) {
+                    // 1km quantization for stable keys
+                    function q(v) { return Math.round(Number(v) / 1000); }
+                    return String(zoom) + ':' + [q(extent.left), q(extent.bottom), q(extent.right), q(extent.top)].join(',');
+                  }
+
+                  function parseFeaturesToOl(json) {
+                    var feats = [];
+                    if (!json || json.error) return feats;
+                    if (!Array.isArray(json.features)) return feats;
+                    
+                    var wazeColors = ['#0099ff', '#8663df', '#20c063', '#ff9600', '#ff6699', '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000', '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'];
+                    var esriPackWithStyle = Object.assign({}, esriPack);
+                    
+                    for (var i = 0; i < json.features.length; i++) {
+                      var f = json.features[i];
+                      if (!f) continue;
+                      var geom = null;
+                      try { geom = openMapsEsriGeometryToOpenLayers(f.geometry); } catch (e0) { geom = null; }
+                      if (!geom) continue;
+                      var attrs = (f.attributes && typeof f.attributes === 'object') ? f.attributes : {};
+                      var olf = new OpenLayers.Feature.Vector(geom, attrs);
+                      if (attrs.ObjectId != null) olf.fid = String(attrs.ObjectId);
+                      else if (attrs.OBJECTID != null) olf.fid = String(attrs.OBJECTID);
+                      
+                      var currentEsriPack = esriPack;
+                      if (self.layerSpecificStyle) {
+                        var fLayerId = attrs.layerId != null ? attrs.layerId : (attrs.LAYER_ID != null ? attrs.LAYER_ID : 'main');
+                        var fLayerName = 'main';
+                        if (map.layers && map.layers[fLayerId]) {
+                            fLayerName = map.layers[fLayerId].title;
+                        } else if (fLayerId !== 'main') {
+                            fLayerName = String(fLayerId);
+                        }
+                        var lHash = 0;
+                        for (var ti = 0; ti < fLayerName.length; ti++) {
+                          lHash = fLayerName.charCodeAt(ti) + ((lHash << 5) - lHash);
+                        }
+                        var innerHex = wazeColors[Math.abs(lHash) % wazeColors.length];
+                        currentEsriPack = Object.assign({}, esriPack, { innerHex: innerHex });
+                      }
+                      
+                      var gcn = geom.CLASS_NAME;
+                      if (gcn === 'OpenLayers.Geometry.Point' || gcn === 'OpenLayers.Geometry.MultiPoint') {
+                        olf.style = openMapsEsriPointVectorStyle(currentEsriPack);
+                      } else if (gcn === 'OpenLayers.Geometry.LineString' || gcn === 'OpenLayers.Geometry.MultiLineString' || gcn === 'OpenLayers.Geometry.LinearRing') {
+                        olf.style = {
+                          strokeColor: currentEsriPack.innerHex || currentEsriPack.fillHex,
+                          strokeWidth: Math.max(2, Math.round(currentEsriPack.polyStrokeW * 1.6)),
+                          strokeOpacity: 1,
+                          fillOpacity: 0
+                        };
+                      }
+                      feats.push(olf);
+                    }
+                    return feats;
+                  }
+
+                  function bindMapPanZoomOnce() {
+                    if (self.__openmapsEsriFeatureMapHandlers) return;
+                    var om = (W && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+                    if (!om || !om.events) return;
+                    self.__openmapsEsriFeatureMapHandlers = true;
+                    om.events.register('moveend', self, scheduleRefresh);
+                    om.events.register('zoomend', self, scheduleRefresh);
+                  }
+
+                  function refreshNow() {
+                    bindMapPanZoomOnce();
+                    var olMapLive = (W && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+                    if (!olMapLive || typeof getMapExtent !== 'function') return;
+                    if (!self.layer) return;
+                    // Do not rely only on layer.getVisibility(): it is often false until after W.map.addLayer + setVisibility in the same updateLayers pass.
+                    if (self.hidden || self.outOfArea || !isTouAccepted(map.touId)) return;
+                    if (!self.layer.getVisibility()) return;
+                    var z = (typeof olMapLive.getZoom === 'function') ? olMapLive.getZoom() : null;
+                    if (minZoom != null && z != null && z < minZoom) {
+                      self.layer.removeAllFeatures();
+                      return;
+                    }
+                    var extent = getMapExtent();
+                    if (!extent) return;
+                    var key = extentKey(extent, z);
+                    var now = Date.now();
+                    var cached = cache.get(key);
+                    if (cached && (now - cached.t) < cacheTtlMs) {
+                      self.layer.removeAllFeatures();
+                      self.layer.addFeatures(parseFeaturesToOl(cached.json));
+                      if (typeof self.layer.redraw === 'function') self.layer.redraw(true);
+                      try {
+                        if (openMapsInspectorApi && typeof openMapsInspectorApi.notifyEsriFeatureLayerRefreshed === 'function') {
+                          openMapsInspectorApi.notifyEsriFeatureLayerRefreshed();
+                        }
+                      } catch (eInv) { /* ignore */ }
+                      try {
+                        requestAnimationFrame(function() {
+                          requestAnimationFrame(function() {
+                            try { pinOpenMapsOverlayStackTop(olMapLive); } catch (ePin) { /* ignore */ }
+                          });
+                        });
+                      } catch (ePin2) { /* ignore */ }
+                      return;
+                    }
+
+                    var mapProj = olMapLive.getProjectionObject();
+                    var qExtent = extent.clone();
+                    if (mapProj) {
+                      try {
+                        qExtent.transform(mapProj, proj3857);
+                      } catch (eB) {
+                        // WME sometimes reports a projection object that does not transform cleanly; extent is usually already Web Mercator.
+                        qExtent = extent.clone();
+                      }
+                    }
+                    var bboxStr = qExtent.left + ',' + qExtent.bottom + ',' + qExtent.right + ',' + qExtent.top;
+                    var base = String(map.url || '').replace(/\/+$/, '');
+                    var qUrl = base + '/query?f=json&where=' + encodeURIComponent('1=1') +
+                      '&returnGeometry=true&outFields=*' +
+                      '&geometry=' + encodeURIComponent(bboxStr) +
+                      '&geometryType=esriGeometryEnvelope&inSR=3857&outSR=3857&spatialRel=esriSpatialRelIntersects' +
+                      '&resultRecordCount=' + encodeURIComponent(String(maxFeatures));
+
+                    function applyFeatureQueryResponse(json, responseGen) {
+                      if (responseGen !== self.__openmapsEsriFeatureFetchGen) return;
+                      if (!json) return;
+                      cache.set(key, { t: Date.now(), json: json });
+                      if (!self.layer || !self.layer.getVisibility()) return;
+                      self.layer.removeAllFeatures();
+                      self.layer.addFeatures(parseFeaturesToOl(json));
+                      if (typeof self.layer.redraw === 'function') self.layer.redraw(true);
+                      try {
+                        if (openMapsInspectorApi && typeof openMapsInspectorApi.notifyEsriFeatureLayerRefreshed === 'function') {
+                          openMapsInspectorApi.notifyEsriFeatureLayerRefreshed();
+                        }
+                      } catch (eInv2) { /* ignore */ }
+                    }
+
+                    // WME CSP blocks page fetch() to many tile/Feature hosts; use GM_xmlhttpRequest (@grant). Tampermonkey
+                    // sandbox: fall back to unsafeWindow when the injected bridge exposes GM_* only on the page realm.
+                    var gmx = typeof GM_xmlhttpRequest === 'function'
+                      ? GM_xmlhttpRequest
+                      : (typeof unsafeWindow !== 'undefined' && typeof unsafeWindow.GM_xmlhttpRequest === 'function' ? unsafeWindow.GM_xmlhttpRequest : null);
+                    if (!gmx) {
+                      if (!self.__openmapsEsriGmMissingWarned) {
+                        self.__openmapsEsriGmMissingWarned = true;
+                        try {
+                          console.warn('[OpenMaps] ESRI_FEATURE: GM_xmlhttpRequest is missing. Use Tampermonkey with @grant GM_xmlhttpRequest; bundled “bridge” scripts must not strip that grant.');
+                        } catch (eW) {}
+                        if (typeof UI !== 'undefined' && UI.error) {
+                          UI.error.style.display = 'inline';
+                          Tooltips.add(UI.error, 'UNESCO points layer needs GM_xmlhttpRequest (check Tampermonkey @grant; bridge builds must include it).', true);
+                        }
+                      }
+                      return;
+                    }
+
+                    self.__openmapsEsriFeatureFetchGen = (self.__openmapsEsriFeatureFetchGen || 0) + 1;
+                    var responseGen = self.__openmapsEsriFeatureFetchGen;
+
+                    if (!self.__openmapsEsriFirstQueryLogged) {
+                      self.__openmapsEsriFirstQueryLogged = true;
+                      try { console.info('[OpenMaps] ESRI_FEATURE query (first):', qUrl); } catch (eL) {}
+                    }
+
+                    gmx({
+                      method: 'GET',
+                      headers: { Accept: 'application/json' },
+                      url: qUrl,
+                      timeout: 15000,
+                      onload: function(res) {
+                        if (responseGen !== self.__openmapsEsriFeatureFetchGen) return;
+                        if (!res || res.status !== 200) {
+                          try { console.warn('[OpenMaps] ESRI_FEATURE HTTP', res && res.status); } catch (eH) {}
+                          return;
+                        }
+                        var json = null;
+                        try { json = JSON.parse(res.responseText || '{}'); } catch (e1) { json = null; }
+                        if (!self.__openmapsEsriFirstResponseLogged) {
+                          self.__openmapsEsriFirstResponseLogged = true;
+                          try {
+                            var nf = json && Array.isArray(json.features) ? json.features.length : 0;
+                            console.info('[OpenMaps] ESRI_FEATURE first response feature count:', nf, json && json.error ? json.error : '');
+                          } catch (eR) {}
+                        }
+                        applyFeatureQueryResponse(json, responseGen);
+                      },
+                      onerror: function() {
+                        if (responseGen === self.__openmapsEsriFeatureFetchGen) {
+                          try { console.warn('[OpenMaps] ESRI_FEATURE GM_xmlhttpRequest onerror'); } catch (eE) {}
+                        }
+                      },
+                      ontimeout: function() {
+                        if (responseGen === self.__openmapsEsriFeatureFetchGen) {
+                          try { console.warn('[OpenMaps] ESRI_FEATURE GM_xmlhttpRequest timeout'); } catch (eT) {}
+                        }
+                      }
+                    });
+                  }
+
+                  function scheduleRefresh() {
+                    bindMapPanZoomOnce();
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(refreshNow, 250);
+                  }
+
+                  if (!self.__openmapsEsriFeatureBound) {
+                    self.__openmapsEsriFeatureBound = true;
+                    self.layer.events.register('visibilitychanged', self, function() {
+                      if (self.layer && self.layer.getVisibility()) scheduleRefresh();
+                      else if (self.layer) self.layer.removeAllFeatures();
+                    });
+                  }
+                  // Defer first fetch: scheduleRefresh() must run after W.map.addLayer + setVisibility (same updateLayers), or refreshNow exits early and never hits the network.
+                  self.__openmapsEsriFeatureScheduleRefresh = scheduleRefresh;
+                })();
+                break;
+
+            case 'GOOGLE_MY_MAPS':
+            case 'LOCAL_KML':
+                (function initGoogleMyMapsOrLocalKml() {
+                  openMapsInstallKmlRendererDrawFeatureHooksOnce();
+                  var sourceIsLocalKml = map.type === 'LOCAL_KML';
+                  var proj4326 = new OpenLayers.Projection('EPSG:4326');
+                  var proj3857 = (typeof W !== 'undefined' && W.map && typeof W.map.getProjectionObject === 'function') ? W.map.getProjectionObject() : new OpenLayers.Projection('EPSG:3857');
+                  var kmlFormat = (OpenLayers.Format && OpenLayers.Format.KML) ? new OpenLayers.Format.KML({
+                    internalProjection: proj3857,
+                    externalProjection: proj4326,
+                    extractStyles: false
+                  }) : null;
+                  var vecOlName = sourceIsLocalKml ? openMapsLocalKmlLayerOlName(map.id) : openMapsGoogleMyMapsLayerOlName(map.id);
+                  self.layer = new OpenLayers.Layer.Vector(vecOlName, {
+                    projection: proj3857,
+                    displayInLayerSwitcher: false,
+                    styleMap: new OpenLayers.StyleMap({
+                      'default': new OpenLayers.Style({
+                        fillOpacity: 0,
+                        strokeOpacity: 0,
+                        pointRadius: 0,
+                        strokeWidth: 0,
+                        graphicOpacity: 0
+                      })
+                    }),
+                    attribution: map.attribution,
+                    isBaseLayer: false,
+                    renderers: ['Canvas', 'SVG']
+                  });
+                  
+                  // FIX: OpenLayers 2 normally redraws all vectors on every single mouse movement during map drag.
+                  // For a heavy KML layer (1500 features), this blocks the main thread, starving Waze's native
+                  // satellite tile loader and eventually crashing the WebGL context. 
+                  // We override `moveTo` to skip redraws while dragging.
+                  var originalMoveTo = self.layer.moveTo;
+                  self.layer.moveTo = function(bounds, zoomChanged, dragging) {
+                    if (dragging) {
+                       // Keep the layer visible and stationary during drag (or let it drift, it's temporary),
+                       // but DO NOT block the thread redrawing 1500 features.
+                       return;
+                    }
+                    return originalMoveTo.apply(this, arguments);
+                  };
+                  // OL2 (especially Canvas): when `drawFeature(feature)` is called with no second argument,
+                  // the renderer uses only the layer StyleMap — not `feature.style`. Our StyleMap defaults are
+                  // deliberately invisible; per-feature styles from `openMapsPaintKmlFeaturesOnLayer` must win.
+                  openMapsPatchKmlVectorDrawFeature(self.layer);
+                  self.layer.openMapsMapId = map.id;
+                  self.__openmapsGmmRemovedFromOlStack = true;
+
+                  var debounceGmm = null;
+                  var gmmGen = 0;
+                  var maxFeatsGmm = 600;
+
+                  function showGmmErr(msg) {
+                    try {
+                      if (window.getComputedStyle(UI.error).display !== 'none') return;
+                      UI.error.style.display = 'inline';
+                      Tooltips.add(UI.error, openMapsEscapeForHtmlTooltip(msg), true);
+                    } catch (eGe) { /* ignore */ }
+                  }
+
+                  function applyKmlTextToLayer(textG) {
+                    openMapsKmlDiagPrintHelpOnce();
+                    openMapsKmlDiagLog('applyKmlTextToLayer: enter', {
+                      mapId: map.id,
+                      mapType: map.type,
+                      textLen: textG ? String(textG).length : 0,
+                      hasLayer: !!self.layer,
+                      layerName: self.layer && self.layer.name != null ? String(self.layer.name) : null
+                    });
+                    if (textG.indexOf('<kml') === -1 && textG.indexOf('<Kml') === -1) {
+                      openMapsKmlDiagLog('applyKmlTextToLayer: not KML XML');
+                      showGmmErr(I18n.t('openmaps.user_maps_add_error_parse'));
+                      return;
+                    }
+                    var parsedK = { features: [], layerIds: [], folderTitles: {}, folderIconHrefs: {} };
+                    try {
+                      parsedK = openMapsKmlTextParseFull(textG, proj4326, proj3857);
+                    } catch (eDom) {
+                      parsedK = { features: [], layerIds: [], folderTitles: {}, folderIconHrefs: {} };
+                    }
+                    var folderIconsK = parsedK.folderIconHrefs && typeof parsedK.folderIconHrefs === 'object' ? parsedK.folderIconHrefs : {};
+                    var folderColorsK = parsedK.folderColorHexes && typeof parsedK.folderColorHexes === 'object' ? parsedK.folderColorHexes : {};
+                    var featsG = Array.isArray(parsedK.features) ? parsedK.features : [];
+                    var layerIdsK = Array.isArray(parsedK.layerIds) ? parsedK.layerIds : [];
+                    var titlesK = parsedK.folderTitles && typeof parsedK.folderTitles === 'object' ? parsedK.folderTitles : {};
+                    var folderTreeK = null;
+                    if (!featsG.length && kmlFormat) {
+                      try {
+                        folderTreeK = openMapsKmlTextExtractFolderTree(textG);
+                      } catch (eFt) { folderTreeK = null; }
+                      try {
+                        featsG = kmlFormat.read(textG) || [];
+                      } catch (eKg) {
+                        showGmmErr(I18n.t('openmaps.user_maps_add_error_parse'));
+                        return;
+                      }
+                      if (!Array.isArray(featsG)) featsG = [];
+                      for (var fa = 0; fa < featsG.length; fa++) {
+                        var fx = featsG[fa];
+                        if (!fx || !fx.attributes) continue;
+                        if (fx.attributes.openMapsKmlFolderId == null) fx.attributes.openMapsKmlFolderId = '__root__';
+                      }
+                      if (folderTreeK && Array.isArray(folderTreeK.layerIds) && folderTreeK.layerIds.length) {
+                        layerIdsK = folderTreeK.layerIds.slice();
+                        titlesK = folderTreeK.folderTitles && typeof folderTreeK.folderTitles === 'object' ? folderTreeK.folderTitles : {};
+                      } else {
+                        layerIdsK = ['__root__'];
+                        titlesK = { __root__: I18n.t('openmaps.kml_layer_root') };
+                      }
+                    }
+                    if (!layerIdsK.length && textG) {
+                      try {
+                        var ftMerge = openMapsKmlTextExtractFolderTree(textG);
+                        if (ftMerge && Array.isArray(ftMerge.layerIds) && ftMerge.layerIds.length) {
+                          layerIdsK = ftMerge.layerIds.slice();
+                          if (ftMerge.folderTitles && typeof ftMerge.folderTitles === 'object') {
+                            var tSrc = ftMerge.folderTitles;
+                            for (var tmk in tSrc) {
+                              if (Object.prototype.hasOwnProperty.call(tSrc, tmk)) titlesK[tmk] = tSrc[tmk];
+                            }
+                          }
+                        }
+                      } catch (eFtM) { /* ignore */ }
+                    }
+                    if (!layerIdsK.length && featsG.length) layerIdsK = ['__root__'];
+                    if (layerIdsK.length) {
+                      var newLayersObj = {};
+                      for (var li = 0; li < layerIdsK.length; li++) {
+                        var lid = layerIdsK[li];
+                        var titK = lid === '__root__' ? I18n.t('openmaps.kml_layer_root') : (titlesK[lid] || ('Folder ' + lid));
+                        var iconHrefL = folderIconsK[lid] || null;
+                        var colorHexL = folderColorsK[lid] || null;
+                        newLayersObj[lid] = { title: titK, abstract: '', queryable: false, openMapsKmlIconHref: iconHrefL, openMapsKmlColorHex: colorHexL };
+                      }
+                      map.layers = newLayersObj;
+                      map.default_layers = layerIdsK.slice();
+                      var prevVis = Object.create(null);
+                      self.mapLayers.forEach(function(m) { if (m && m.name) prevVis[m.name] = !!m.visible; });
+                      var mainVis = prevVis.main !== undefined ? prevVis.main : true;
+                      var prevKeys = Object.keys(prevVis);
+                      var legacyMainOnly = prevKeys.length === 1 && Object.prototype.hasOwnProperty.call(prevVis, 'main');
+                      var newIdsHaveMain = layerIdsK.indexOf('main') >= 0;
+                      // Old uploads used a single synthetic `main` row. When real KML folder ids appear, do not let
+                      // a hidden `main` turn off every folder (visibleLayers.length → 0 → layer teardown + empty OL).
+                      var defaultFolderVis = (legacyMainOnly && !newIdsHaveMain) ? true : mainVis;
+                      self.mapLayers = layerIdsK.map(function(id) {
+                        var v = Object.prototype.hasOwnProperty.call(prevVis, id) ? prevVis[id] : defaultFolderVis;
+                        return { name: id, visible: v };
+                      });
+                      try {
+                        rebuildMapLayersUI();
+                      } catch (eRb) { /* ignore */ }
+                      try {
+                        var sKml = Settings.get();
+                        if (Array.isArray(sKml.state.userMaps)) {
+                          for (var uki = 0; uki < sKml.state.userMaps.length; uki++) {
+                            var ukm = sKml.state.userMaps[uki];
+                            if (ukm && ukm.id === map.id) {
+                              try {
+                                ukm.layers = JSON.parse(JSON.stringify(map.layers));
+                              } catch (eLj) {
+                                ukm.layers = map.layers;
+                              }
+                              ukm.default_layers = map.default_layers.slice();
+                              break;
+                            }
+                          }
+                          Settings.put(sKml);
+                        }
+                      } catch (ePk) { /* ignore */ }
+                      try {
+                        if (openMapsInspectorApi && typeof openMapsInspectorApi.refreshSourcesTree === 'function') {
+                          openMapsInspectorApi.refreshSourcesTree();
+                        }
+                      } catch (eInsp) { /* ignore */ }
+                    }
+                    var featsAll = featsG;
+                    if (featsAll.length > maxFeatsGmm) featsG = featsAll.slice(0, maxFeatsGmm);
+                    try {
+                      var bbK = openMapsKmlComputeBbox4326FromFeatures(featsAll, proj3857);
+                      if (bbK && bbK.length === 4) {
+                        map.bbox = bbK;
+                        try {
+                          self.area = new OpenLayers.Bounds(bbK[0], bbK[1], bbK[2], bbK[3]).transform(new OpenLayers.Projection('EPSG:4326'), W.map.getProjectionObject());
+                        } catch (eArea) { /* ignore */ }
+                        try {
+                          var sB = Settings.get();
+                          if (Array.isArray(sB.state.userMaps)) {
+                            for (var ubi = 0; ubi < sB.state.userMaps.length; ubi++) {
+                              var umb = sB.state.userMaps[ubi];
+                              if (umb && umb.id === map.id) {
+                                umb.bbox = bbK.slice();
+                                break;
+                              }
+                            }
+                            Settings.put(sB);
+                          }
+                        } catch (eSb) { /* ignore */ }
+                      }
+                    } catch (eBbox) { /* ignore */ }
+                    self.__openmapsKmlMasterFeatures = featsG;
+                    openMapsKmlDiagLog('applyKmlTextToLayer: parsed', {
+                      mapId: map.id,
+                      featsParsed: featsG.length,
+                      featsTotalBeforeCap: featsAll.length,
+                      layerIdsCount: layerIdsK.length,
+                      layerIdsSample: layerIdsK.slice(0, 8),
+                      mapLayersRows: (self.mapLayers || []).length,
+                      shouldDraw: openMapsKmlDiagShouldDrawBreakdown(self)
+                    });
+                    var kmlApplyStats = null;
+                    try {
+                      kmlApplyStats = openMapsApplyKmlFolderFeatureStyles(self);
+                    } catch (eSt) { /* ignore */ }
+                    self.clearError();
+                    try {
+                      if (typeof openMapsGmmDiagEnabled === 'function' && openMapsGmmDiagEnabled()) {
+                        var olmK = (typeof W !== 'undefined' && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+                        var olFc = self.layer && self.layer.features ? self.layer.features.length : 0;
+                        openMapsGmmDiagLog('KML vector after applyFolderStyles', {
+                          parsedPlacemarks: featsG.length,
+                          wantLen: kmlApplyStats ? kmlApplyStats.wantLen : null,
+                          masterLen: kmlApplyStats ? kmlApplyStats.masterLen : null,
+                          onLayerFeatureCount: olFc,
+                          addFeaturesThrew: !!(kmlApplyStats && kmlApplyStats.addFeaturesThrew),
+                          layerName: self.layer && self.layer.name != null ? String(self.layer.name) : null
+                        });
+                        openMapsGmmDiagOlStackSnapshot(olmK, 'after KML applyFolderStyles');
+                      }
+                    } catch (eKd) { /* ignore */ }
+                    try {
+                      if (typeof self.updateLayers === 'function') self.updateLayers();
+                    } catch (eUpd) { /* ignore */ }
+                    var olAfterUpd = self.layer && self.layer.features ? self.layer.features.length : 0;
+                    openMapsKmlDiagLog('applyKmlTextToLayer: after updateLayers', {
+                      mapId: map.id,
+                      onLayerFeatures: olAfterUpd,
+                      kmlFetchTriggered: !!self.__openmapsGmmKmlFetchTriggered
+                    });
+                    if (featsG.length > 0 && olAfterUpd === 0) {
+                      try {
+                        console.warn('[OpenMaps] KML: parsed ' + featsG.length + ' placemarks but OpenLayers layer has 0 features after updateLayers. Enable openmaps-kml-diag (localStorage) or openmaps-gmm-diag for wantLen/masterLen/addFeatures details. mapId=' + String(map.id));
+                      } catch (eWk) { /* ignore */ }
+                    }
+                  }
+
+                  /**
+                   * Uploaded KML may be only a `<NetworkLink>` stub (no Placemarks). Fetch linked document(s) via Tampermonkey.
+                   * Follows the first href per document, up to OPEN_MAPS_LOCAL_KML_NETWORKLINK_MAX_DEPTH.
+                   */
+                  function resolveLocalKmlNetworkLinksThenApply(textBlock, depth, myG) {
+                    if (myG !== gmmGen) {
+                      openMapsKmlDiagLog('resolveNetworkLink: stale generation', { myG: myG, gmmGen: gmmGen, depth: depth });
+                      return;
+                    }
+                    var hrefsNl = openMapsExtractKmlNetworkLinkHttpHrefs(textBlock);
+                    openMapsKmlDiagPrintHelpOnce();
+                    openMapsKmlDiagLog('resolveNetworkLink', {
+                      mapId: map.id,
+                      depth: depth,
+                      hrefCount: hrefsNl.length,
+                      textLen: textBlock ? String(textBlock).length : 0,
+                      willApplyInline: !hrefsNl.length || depth >= OPEN_MAPS_LOCAL_KML_NETWORKLINK_MAX_DEPTH
+                    });
+                    if (!hrefsNl.length || depth >= OPEN_MAPS_LOCAL_KML_NETWORKLINK_MAX_DEPTH) {
+                      applyKmlTextToLayer(textBlock);
+                      return;
+                    }
+                    var urlNl = hrefsNl[0];
+                    urlNl = urlNl + (urlNl.indexOf('?') > -1 ? '&' : '?') + '_omnl=' + Date.now();
+                    GM_xmlhttpRequest({
+                      method: 'GET',
+                      url: urlNl,
+                      timeout: 25000,
+                      onload: function(resNl) {
+                        if (myG !== gmmGen) return;
+                        if (!resNl || resNl.status !== 200) {
+                          showGmmErr(I18n.t('openmaps.user_maps_add_error_network'));
+                          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eNlF) { /* ignore */ }
+                          return;
+                        }
+                        resolveLocalKmlNetworkLinksThenApply(resNl.responseText || '', depth + 1, myG);
+                      },
+                      onerror: function() {
+                        if (myG === gmmGen) {
+                          showGmmErr(I18n.t('openmaps.user_maps_add_error_network'));
+                          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eNlE) { /* ignore */ }
+                        }
+                      },
+                      ontimeout: function() {
+                        if (myG === gmmGen) {
+                          showGmmErr(I18n.t('openmaps.user_maps_add_error_network'));
+                          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eNlT) { /* ignore */ }
+                        }
+                      }
+                    });
+                  }
+
+                  function fetchKmlNow() {
+                    openMapsKmlDiagPrintHelpOnce();
+                    if (!kmlFormat) {
+                      openMapsKmlDiagLog('fetchKmlNow: skip', { reason: 'OpenLayers.Format.KML missing', mapId: map.id });
+                      showGmmErr(I18n.t('openmaps.user_maps_kml_unsupported'));
+                      return;
+                    }
+                    if (!self.layer || self.hidden || self.outOfArea) {
+                      openMapsKmlDiagLog('fetchKmlNow: skip', {
+                        reason: !self.layer ? 'no OL layer yet' : (self.hidden ? 'row hidden' : 'outOfArea'),
+                        mapId: map.id,
+                        hasLayer: !!self.layer,
+                        hidden: self.hidden,
+                        outOfArea: self.outOfArea
+                      });
+                      return;
+                    }
+                    if (!isTouAccepted(map.touId)) {
+                      openMapsKmlDiagLog('fetchKmlNow: skip', { reason: 'ToU not accepted', mapId: map.id, touId: map.touId });
+                      return;
+                    }
+                    // OL / WME can report visibility false briefly after re-attach; nudge once before bailing.
+                    if (!self.layer.getVisibility()) {
+                      try { self.layer.setVisibility(true); } catch (eVis0) { /* ignore */ }
+                    }
+                    if (!self.layer.getVisibility()) {
+                      openMapsKmlDiagLog('fetchKmlNow: skip', { reason: 'layer.getVisibility false', mapId: map.id });
+                      return;
+                    }
+                    // Must not set this until past the guards: if we returned early above, the next
+                    // updateLayers must be able to call fetch again (hide/show uploaded KML was stuck until F5).
+                    if (self.__openmapsGmmKmlFetchTriggered) {
+                      openMapsKmlDiagLog('fetchKmlNow: skip', { reason: 'fetch already triggered (latch)', mapId: map.id });
+                      return;
+                    }
+                    self.__openmapsGmmKmlFetchTriggered = true;
+                    gmmGen++;
+                    var myG = gmmGen;
+                    openMapsKmlDiagLog('fetchKmlNow: start', { mapId: map.id, myG: myG, sourceIsLocalKml: sourceIsLocalKml });
+                    if (sourceIsLocalKml) {
+                      var textL = map.kmlText != null ? String(map.kmlText) : '';
+                      resolveLocalKmlNetworkLinksThenApply(textL, 0, myG);
+                      return;
+                    }
+                    var urlG = map.url + (map.url.indexOf('?') > -1 ? '&' : '?') + '_ts=' + Date.now();
+                    GM_xmlhttpRequest({
+                      method: 'GET',
+                      url: urlG,
+                      timeout: 25000,
+                      onload: function(resG) {
+                        if (myG !== gmmGen) return;
+                        if (!resG || resG.status !== 200) {
+                          showGmmErr(I18n.t('openmaps.user_maps_add_error_network'));
+                          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eGF) { /* ignore */ }
+                          return;
+                        }
+                        resolveLocalKmlNetworkLinksThenApply(resG.responseText || '', 0, myG);
+                      },
+                      onerror: function() {
+                        if (myG === gmmGen) {
+                          showGmmErr(I18n.t('openmaps.user_maps_add_error_network'));
+                          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eGE) { /* ignore */ }
+                        }
+                      },
+                      ontimeout: function() {
+                        if (myG === gmmGen) {
+                          showGmmErr(I18n.t('openmaps.user_maps_add_error_network'));
+                          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eGT) { /* ignore */ }
+                        }
+                      }
+                    });
+                  }
+
+                  function scheduleGmm() {
+                    // We only redraw if we actually need a feature reload, not just because we moved.
+                    // Empty redraws on large vector layers might freeze tile loaders.
+                  }
+
+                  self.__openmapsGmmKmlFetchTriggered = false;
+                  self.__openmapsGmmTriggerFetch = function() {
+                    fetchKmlNow();
+                  };
+
+                  function bindGmmMapMoveOnce() {
+                    if (self.__openmapsGmmMoveBound) return;
+                    self.__openmapsGmmMoveBound = true;
+                    // No need to hook moveend for GMM if it causes massive stuttering/dropping
+                  }
+
+                  if (!self.__openmapsGmmVisBound) {
+                    self.__openmapsGmmVisBound = true;
+                    self.layer.events.register('visibilitychanged', self, function() {
+                      if (self.layer && !self.layer.getVisibility()) {
+                        gmmGen++;
+                        // fetchKmlNow() had already set __openmapsGmmKmlFetchTriggered; without clearing it,
+                        // the next show (eye / sub-layer) never reloads KML while gmmGen also drops async applies.
+                        try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eVisLatch) { /* ignore */ }
+                        self.layer.removeAllFeatures();
+                      }
+                    });
+                    self.layer.events.register('visibilitychanged', null, self.updateVisibility);
+                  }
+
+                  self.__openmapsGmmScheduleRefresh = function() {
+                    bindGmmMapMoveOnce();
+                  };
+                })();
                 break;
 
             case 'XYZ':
@@ -7176,54 +15287,151 @@ this.updateVisibility = function() {
                 break;
         }
 
-        self.layer.setOpacity(self.opacity / 100);
+        if (map.type === 'ESRI_FEATURE' || openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+          if (typeof self.layer.setOpacity === 'function') self.layer.setOpacity(1);
+        } else {
+          self.layer.setOpacity(self.opacity / 100);
+        }
         self.layer.setVisibility(!self.hidden && !self.outOfArea);
 
-        if (map.zoomRange) {
-          self.layer.events.register('moveend', null, obj => {
+        if (openMapsMapHasZoomMeta(map) && !openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+          self.layer.events.register('moveend', null, function(obj) {
             if (obj.zoomChanged) {
-              var zoom = W.map.getZoom();
-              UI.info.style.display = (zoom < map.zoomRange[0] || zoom > map.zoomRange[1] ? 'inline' : 'none');
+              self.updateVisibility();
             }
           });
         }
 
-        self.layer.events.register('tileerror', null, obj => {
-          if (window.getComputedStyle(UI.error).display !== 'none') return;
-          UI.error.style.display = 'inline';
-          Tooltips.add(UI.error, 'Checking layer status…', true);
+        // Vector layers (ESRI_FEATURE, KML overlays) are not tile grids; tile events are unreliable and can break error handling.
+        if (map.type !== 'ESRI_FEATURE' && !openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+          self.layer.events.register('tileerror', null, obj => {
+            if (window.getComputedStyle(UI.error).display !== 'none') return;
+            UI.error.style.display = 'inline';
+            Tooltips.add(UI.error, 'Checking layer status…', true);
 
-          loadTileError(obj.tile, msg => {
-            if (msg.ok) {
-              self.clearError();
-            } else {
-              Tooltips.add(UI.error, openMapsEscapeForHtmlTooltip(msg.title) + '\n' + openMapsEscapeForHtmlTooltip(msg.description), true, { html: true });
-            }
+            loadTileError(obj.tile, msg => {
+              if (msg.ok) {
+                self.clearError();
+              } else {
+                Tooltips.add(UI.error, openMapsEscapeForHtmlTooltip(msg.title) + '\n' + openMapsEscapeForHtmlTooltip(msg.description), true, { html: true });
+              }
+            });
           });
-        });
 
-        self.layer.events.register('tileloadstart', null, () => { totalTiles++; updateTileLoader(); });
-        self.layer.events.register('tileloaded', null, evt => {
-          loadedTiles++; updateTileLoader();
-          if (map.pixelManipulations && self.improveMap) manipulateTile(evt, map.pixelManipulations);
-        });
-        self.layer.events.register('visibilitychanged', null, self.updateVisibility);
+          self.layer.events.register('tileloadstart', null, () => { totalTiles++; updateTileLoader(); });
+          self.layer.events.register('tileloaded', null, evt => {
+            loadedTiles++; updateTileLoader();
+            var eff = null;
+            if (self.improveMap) {
+              eff = Array.isArray(self.pixelManipulationsOverride)
+                ? self.pixelManipulationsOverride
+                : (openMapsNormalizePixelManipulations(map.pixelManipulations) || null);
+            }
+            if (eff && eff.length) manipulateTile(evt, eff);
+          });
+        }
+        if (!openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+          self.layer.events.register('visibilitychanged', null, self.updateVisibility);
+        }
 
-        W.map.addLayer(self.layer);
+        if (map.type === 'ESRI_FEATURE') {
+          var olMapAttachV = W.map.getOLMap();
+          if (olMapAttachV && olMapAttachV.layers && olMapAttachV.layers.indexOf(self.layer) === -1) {
+            olMapAttachV.addLayer(self.layer);
+          }
+          if (typeof self.__openmapsEsriFeatureScheduleRefresh === 'function') {
+            var esriSched = self.__openmapsEsriFeatureScheduleRefresh;
+            setTimeout(function() { esriSched(); }, 0);
+            setTimeout(function() { esriSched(); }, 350);
+          }
+        } else if (openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+          // Bypassing WME's `W.map.addLayer` wrapper for heavy Vector layers.
+          // For KML overlays, we DELAY adding it to the map until it is actually visible,
+          // to prevent WME satellite tiles from breaking due to rapid add/remove on init.
+        } else {
+          W.map.addLayer(self.layer);
+        }
+
         syncOpenMapsLayerIndices();
 
       } else if (layerRedrawNeeded) {
         if (self.layer) {
           if (map.type === 'WMS') self.layer.mergeNewParams({ layers: visibleLayers.join() });
           else if (map.type === 'XYZ' || map.type === 'ESRI') self.layer.redraw();
+          else if (map.type === 'ESRI_FEATURE' && typeof self.__openmapsEsriFeatureScheduleRefresh === 'function') {
+            self.__openmapsEsriFeatureScheduleRefresh();
+          } else if (openMapsMapTypeIsKmlVectorOverlay(map.type) && typeof self.__openmapsGmmScheduleRefresh === 'function') {
+            self.__openmapsGmmScheduleRefresh();
+          }
         }
         layerRedrawNeeded = false;
       }
-      if (visibleLayers.length > 0 && self.layer && ['WMS', 'XYZ', 'ESRI'].includes(map.type)) {
+      if (visibleLayers.length > 0 && self.layer && ['WMS', 'XYZ', 'ESRI', 'ESRI_FEATURE', 'GOOGLE_MY_MAPS', 'LOCAL_KML'].includes(map.type)) {
         self.layer.setVisibility(!self.hidden && !self.outOfArea);
+      }
+      if (openMapsMapTypeIsKmlVectorOverlay(map.type) && self.layer) {
+        var gmmShow = visibleLayers.length > 0 && !self.hidden && !self.outOfArea && isTouAccepted(map.touId);
+        if (map.type === 'GOOGLE_MY_MAPS') {
+          gmmShow = gmmShow && openMapsGoogleMyMapsIntegrationEnabled();
+        }
+        openMapsKmlDiagPrintHelpOnce();
+        openMapsKmlDiagLog('updateLayers: KML branch', {
+          mapId: map.id,
+          mapType: map.type,
+          gmmShow: gmmShow,
+          visibleSubLayerCount: visibleLayers.length,
+          hidden: self.hidden,
+          outOfArea: self.outOfArea,
+          removedFromOlStack: self.__openmapsGmmRemovedFromOlStack === true,
+          olFeatureCount: self.layer.features ? self.layer.features.length : 0,
+          masterCount: Array.isArray(self.__openmapsKmlMasterFeatures) ? self.__openmapsKmlMasterFeatures.length : 0,
+          shouldDrawBreakdown: openMapsKmlDiagShouldDrawBreakdown(self)
+        });
+        var gmmStackTouched = false;
+        if (!gmmShow) {
+          if (self.layer.features && self.layer.features.length) {
+            try { self.layer.removeAllFeatures(); } catch (eGf) { /* ignore */ }
+          }
+          try { self.__openmapsGmmKmlFetchTriggered = false; } catch (eGfLatch) { /* ignore */ }
+          if (self.__openmapsGmmRemovedFromOlStack !== true) {
+            try { openMapsGoogleMyMapsLayerRemoveFromMap(self.layer); } catch (eGr) { /* ignore */ }
+            self.__openmapsGmmRemovedFromOlStack = true;
+            gmmStackTouched = true;
+          }
+        } else {
+          if (self.__openmapsGmmRemovedFromOlStack === true) {
+            self.__openmapsGmmRemovedFromOlStack = false;
+            try { openMapsGoogleMyMapsLayerAddToMap(self.layer); } catch (eGa) { /* ignore */ }
+            gmmStackTouched = true;
+          }
+          try { self.layer.setVisibility(true); } catch (eGv) { /* ignore */ }
+          if (typeof self.__openmapsGmmTriggerFetch === 'function') self.__openmapsGmmTriggerFetch();
+          if (typeof self.__openmapsGmmScheduleRefresh === 'function') self.__openmapsGmmScheduleRefresh();
+        }
+        try {
+          if (self.layer.div) self.layer.div.style.pointerEvents = 'none';
+        } catch (eGpe) { /* ignore */ }
+        if (gmmStackTouched) {
+          try {
+            syncOpenMapsLayerIndices();
+          } catch (eGsync) { /* ignore */ }
+        }
+        try {
+          openMapsSyncKmlFolderFeatureStyles(self);
+        } catch (eKst) { /* ignore */ }
+        try {
+          if (gmmShow && self.layer &&
+              Array.isArray(self.__openmapsKmlMasterFeatures) && self.__openmapsKmlMasterFeatures.length &&
+              (!self.layer.features || !self.layer.features.length)) {
+            openMapsApplyKmlFolderFeatureStyles(self);
+          }
+        } catch (eKmlRe) { /* ignore */ }
       }
       saveMapState();
       self.updateVisibility();
+      if (openMapsInspectorApi && typeof openMapsInspectorApi.notifyHandlesChanged === 'function') {
+        openMapsInspectorApi.notifyHandlesChanged();
+      }
     };
 
 // --- 5. INITIAL EXECUTION ---
@@ -7281,6 +15489,514 @@ this.updateVisibility = function() {
 
 /* 1. INCREASE SPACE AMONG MAP CARDS */
 #sidepanel-openMaps > .openmaps-map-list { display: flex; flex-direction: column; gap: 8px; margin-left: 4px; }
+
+.openmaps-inspector-table-overlay { align-items: center; justify-content: center; }
+
+/* Map Inspector — My Maps–inspired: white panel, soft shadow, thin dividers, flat icon hit targets */
+.openmaps-inspector-window {
+  font-family: var(--wz-font-family, "Rubik", "Boing", "Helvetica Neue", Helvetica, Arial, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  color: #202124;
+}
+.openmaps-inspector-window .openmaps-inspector-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 10px 6px;
+  background: #fff;
+  border-bottom: 1px solid #e8eaed;
+  cursor: move;
+  user-select: none;
+}
+.openmaps-inspector-window .openmaps-inspector-window-title {
+  font-weight: 500;
+  font-size: 12px;
+  color: #202124;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+.openmaps-inspector-window .openmaps-inspector-details {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.openmaps-inspector-window .openmaps-inspector-panel {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.openmaps-inspector-window .openmaps-inspector-hd,
+.openmaps-inspector-window .openmaps-inspector-filter-outer,
+.openmaps-inspector-window .openmaps-inspector-status,
+.openmaps-inspector-window .openmaps-inspector-query-row {
+  flex-shrink: 0;
+}
+.openmaps-inspector-window .openmaps-inspector-hd {
+  font-size: 10px;
+  font-weight: 600;
+  color: #70757a;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 4px 0;
+  line-height: 1.15;
+}
+.openmaps-inspector-window .openmaps-inspector-sep {
+  border-top: 1px solid #e8eaed;
+  margin-top: 5px;
+  padding-top: 5px;
+}
+.openmaps-inspector-window .openmaps-inspector-filter-outer {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid #e8eaed;
+}
+.openmaps-inspector-window .openmaps-inspector-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  padding: 1px 6px 1px 8px;
+  min-height: 28px;
+}
+.openmaps-inspector-window .openmaps-inspector-ibtn {
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  margin: 0;
+  cursor: pointer;
+  color: #5f6368;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 50%;
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.openmaps-inspector-window .openmaps-inspector-ibtn:hover {
+  background: #f1f3f4;
+  color: #202124;
+}
+.openmaps-inspector-window .openmaps-inspector-ibtn:active {
+  background: #e8eaed;
+}
+.openmaps-inspector-window .openmaps-inspector-ibtn:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 1px;
+}
+.openmaps-inspector-window .openmaps-inspector-ibtn--win {
+  min-width: 32px;
+  min-height: 32px;
+}
+.openmaps-inspector-window .openmaps-inspector-search-wrap .openmaps-inspector-ibtn {
+  min-width: 24px;
+  min-height: 24px;
+  font-size: 12px;
+  color: #1a73e8;
+}
+.openmaps-inspector-window .openmaps-inspector-search-wrap .openmaps-inspector-ibtn:hover {
+  background: #e8f0fe;
+  color: #174ea6;
+}
+.openmaps-inspector-window .openmaps-inspector-filter-min {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  font-size: 12px;
+  padding: 0 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+  box-sizing: border-box;
+  color: #202124;
+}
+.openmaps-inspector-window .openmaps-inspector-filter-min::placeholder {
+  color: #80868b;
+}
+.openmaps-inspector-window .openmaps-inspector-filter-min:focus {
+  outline: none;
+}
+.openmaps-inspector-window .openmaps-inspector-sources-toolbar {
+  margin-bottom: 4px;
+}
+.openmaps-inspector-window .openmaps-inspector-sources-tree {
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 2px 4px 0;
+  -webkit-overflow-scrolling: touch;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-det {
+  margin: 0 0 6px 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-sum {
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+  color: #202124;
+  padding: 4px 0 4px 2px;
+  list-style-position: outside;
+  outline: none;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-sum::-webkit-details-marker {
+  color: #5f6368;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-body {
+  padding: 2px 0 4px 10px;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-subhd {
+  margin-top: 6px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #70757a;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: #3c4043;
+  line-height: 1.3;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-row--ind {
+  padding-left: 4px;
+}
+.openmaps-inspector-window .openmaps-inspector-tree-empty {
+  color: #70757a;
+  font-style: italic;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.openmaps-inspector-window .openmaps-inspector-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: min(78vh, calc(90vh - 200px));
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.openmaps-inspector-window .openmaps-inspector-map-group {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 4px 0;
+}
+.openmaps-inspector-window .openmaps-inspector-status {
+  font-size: 10px;
+  color: #70757a;
+  margin: 2px 0 0 0;
+  min-height: 12px;
+  line-height: 1.2;
+}
+.openmaps-inspector-window .openmaps-inspector-status--has {
+  margin-bottom: 1px;
+}
+.openmaps-inspector-window .openmaps-inspector-status--busy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 4px;
+}
+.openmaps-inspector-window .openmaps-inspector-status-scan {
+  font-size: 10px;
+  color: #1a73e8;
+  white-space: nowrap;
+}
+.openmaps-inspector-window .openmaps-inspector-status-scan .fa-spinner {
+  margin-right: 2px;
+}
+.openmaps-inspector-window .openmaps-inspector-map-group:last-child {
+  margin-bottom: 0;
+}
+.openmaps-inspector-window .openmaps-inspector-map-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 3px 3px 1px;
+  margin: 0 0 1px 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e8eaed;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #202124;
+}
+.openmaps-inspector-window .openmaps-inspector-map-head-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.openmaps-inspector-window .openmaps-inspector-map-head-count {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: #5f6368;
+  font-size: 10px;
+}
+.openmaps-inspector-window .openmaps-inspector-map-menu-details {
+  flex-shrink: 0;
+  position: relative;
+}
+.openmaps-inspector-window .openmaps-inspector-map-menu-summary {
+  list-style: none;
+}
+.openmaps-inspector-window .openmaps-inspector-map-menu-summary::-webkit-details-marker {
+  display: none;
+}
+.openmaps-inspector-window .openmaps-inspector-map-menu-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  margin-top: 2px;
+  background: var(--background_default, #fff);
+  border: 1px solid #e8eaed;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  min-width: 148px;
+  padding: 4px 0;
+}
+.openmaps-inspector-window .openmaps-inspector-map-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #202124;
+  font-family: inherit;
+}
+.openmaps-inspector-window .openmaps-inspector-map-menu-item:hover {
+  background: #f1f3f4;
+}
+.openmaps-inspector-window .openmaps-inspector-map-head .openmaps-inspector-ibtn {
+  flex-shrink: 0;
+  min-width: 22px;
+  min-height: 22px;
+  font-size: 12px;
+}
+.openmaps-inspector-window .openmaps-inspector-avatar {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: block;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.openmaps-inspector-callout-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, calc(-100% - 10px));
+  min-width: 200px;
+  max-width: min(96vw, 560px);
+  background: var(--background_default, #fff);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  border: 1px solid #e8eaed;
+  padding: 10px 12px 12px;
+  pointer-events: auto;
+  box-sizing: border-box;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.openmaps-inspector-callout-panel::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  margin-left: -8px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 8px solid var(--background_default, #fff);
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.08));
+}
+.openmaps-inspector-callout-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.openmaps-inspector-callout-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #202124;
+  line-height: 1.3;
+  min-width: 0;
+  word-break: break-word;
+}
+.openmaps-inspector-callout-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  margin: 0;
+  cursor: pointer;
+  color: #5f6368;
+  font-size: 22px;
+  line-height: 1;
+  border-radius: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.openmaps-inspector-callout-close:hover {
+  background: #f1f3f4;
+  color: #202124;
+}
+.openmaps-inspector-callout-body {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #3c4043;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+.openmaps-inspector-window .openmaps-inspector-list-row {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.15;
+  transition: background-color 0.12s ease;
+}
+.openmaps-inspector-window .openmaps-inspector-list-row--nested {
+  margin-left: 6px;
+}
+.openmaps-inspector-window .openmaps-inspector-folder-sum {
+  list-style-position: outside;
+}
+.openmaps-inspector-window .openmaps-inspector-row-main {
+  min-width: 0;
+  flex: 1;
+}
+.openmaps-inspector-window .openmaps-inspector-row-title {
+  font-weight: 400;
+  color: #202124;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.15;
+}
+.openmaps-inspector-window .openmaps-inspector-row-sub {
+  font-size: 9px;
+  color: #70757a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 0;
+  line-height: 1.15;
+}
+.openmaps-inspector-window .openmaps-inspector-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #f1f3f4;
+  color: #5f6368;
+  text-transform: lowercase;
+  line-height: 1.2;
+}
+.openmaps-inspector-window .openmaps-inspector-list-row--hov:not(.openmaps-inspector-list-row--sel) {
+  background: #f5f5f5 !important;
+}
+.openmaps-inspector-window .openmaps-inspector-list-row--sel {
+  background: #e8f0fe !important;
+}
+.openmaps-inspector-window .openmaps-inspector-list-row--sel.openmaps-inspector-list-row--hov {
+  background: #d2e3fc !important;
+}
+.openmaps-inspector-window .openmaps-inspector-list-row:hover:not(.openmaps-inspector-list-row--sel):not(.openmaps-inspector-list-row--hov) {
+  background: #fafafa !important;
+}
+.openmaps-inspector-window .openmaps-inspector-empty {
+  padding: 5px 3px;
+  color: #70757a;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.openmaps-inspector-window .openmaps-inspector-ingest-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #5f6368;
+  cursor: pointer;
+  margin: 0;
+  line-height: 1.25;
+}
+#sidepanel-openMaps .openmaps-inspector-launcher-btn {
+  border: none;
+  background: transparent;
+  color: #5f6368;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 17px;
+  line-height: 1;
+  box-shadow: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+#sidepanel-openMaps .openmaps-inspector-launcher-btn:hover {
+  background: #f1f3f4;
+  color: #202124;
+}
 
 /* 3. MAKE MAP CARDS AS BIG AS LAYER CARDS */
 #sidepanel-openMaps .maps-menu-item {
@@ -7379,7 +16095,44 @@ this.updateVisibility = function() {
 }
 
 #sidepanel-openMaps .layer-card { margin-bottom: 0px; }
-#sidepanel-openMaps .layer-card-header { padding: 3px 6px; overflow: visible; }
+#sidepanel-openMaps .layer-card-header {
+  padding: 3px 6px;
+  overflow: visible;
+  align-items: center;
+}
+#sidepanel-openMaps .layer-card-header .open-maps-text-container {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#sidepanel-openMaps .layer-card-header .buttons {
+  flex: 0 0 auto;
+}
+#sidepanel-openMaps .layer-card-header .buttons {
+  align-self: center;
+}
+#sidepanel-openMaps .openmaps-layer-tag-row {
+  display: flex;
+  flex-flow: row wrap;
+  gap: 4px;
+  align-items: center;
+  width: 100%;
+  margin-top: 3px;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+#sidepanel-openMaps .openmaps-layer-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: var(--content_secondary, #5f6368);
+  background: var(--background_variant, #f1f3f4);
+  border: 1px solid var(--divider_default, #dadce0);
+  border-radius: 4px;
+  white-space: nowrap;
+}
 
 #sidepanel-openMaps .open-maps-layer-card-menu-panel {
   position: fixed;
@@ -7406,6 +16159,34 @@ this.updateVisibility = function() {
   color: var(--content_primary, #202124);
 }
 #sidepanel-openMaps .open-maps-layer-card-menu-item:hover {
+  background: var(--background_variant, #f1f3f4);
+}
+
+#sidepanel-openMaps .open-maps-map-copy-menu-panel {
+  position: fixed;
+  z-index: 10050;
+  min-width: 260px;
+  margin: 0;
+  padding: 4px 0;
+  box-sizing: border-box;
+  background: var(--background_default, #fff);
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+#sidepanel-openMaps .open-maps-map-copy-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--content_primary, #202124);
+}
+#sidepanel-openMaps .open-maps-map-copy-menu-item:hover {
   background: var(--background_variant, #f1f3f4);
 }
 
@@ -7479,18 +16260,40 @@ function log(message) {
   }
 }
 
+//#region OpenMapsBoot
+var openMapsReadyLaunchStarted = false;
+var openMapsReadyFallbackTimer = null;
+
+function openMapsLaunchWhenReady(trigger) {
+  if (openMapsReadyLaunchStarted) return;
+  openMapsReadyLaunchStarted = true;
+  if (openMapsReadyFallbackTimer) {
+    clearTimeout(openMapsReadyFallbackTimer);
+    openMapsReadyFallbackTimer = null;
+  }
+  log('Launching OpenMaps (' + trigger + ')...');
+  onWmeReady();
+}
+
 function onWmeInitialized() {
   // Use the official SDK-ready state
   if (W?.userscripts?.state?.isReady) {
-    log('WME is ready. Launching OpenMaps...');
-    onWmeReady();
+    openMapsLaunchWhenReady('state ready');
   } else {
     log('WME structure loaded, waiting for "wme-ready" signal...');
-    document.addEventListener('wme-ready', onWmeReady, { once: true });
+    document.addEventListener('wme-ready', function() {
+      openMapsLaunchWhenReady('wme-ready event');
+    }, { once: true });
+    if (openMapsReadyFallbackTimer) clearTimeout(openMapsReadyFallbackTimer);
+    // Bridge builds occasionally miss `wme-ready`; fire once anyway and let onWmeReady poll OL/W.map.
+    openMapsReadyFallbackTimer = setTimeout(function() {
+      openMapsLaunchWhenReady('wme-ready fallback timeout');
+    }, 2500);
   }
 }
 
 function bootstrap() {
+  openMapsInstallHideGooglePlacesSearchThisAreaChip();
   if (typeof W === 'object' && W.userscripts?.state?.isReady) {
     onWmeInitialized();
   } else {
@@ -7500,3 +16303,4 @@ function bootstrap() {
 }
 
 bootstrap();
+//#endregion OpenMapsBoot
