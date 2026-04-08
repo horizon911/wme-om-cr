@@ -7029,6 +7029,7 @@ async function onWmeReady() {
           for (var fk = 0; fk < featsK.length && total < MAX_ITEMS && addedK < MAX_PER_LAYER; fk++) {
             var featK = featsK[fk];
             if (!featK || !featK.geometry) continue;
+            if (featK._openMapsIsInnerRing) continue;
             if (!geomIntersectsExtent(featK.geometry, kmlExtent)) continue;
             var folderIdK = (featK.attributes && featK.attributes.openMapsKmlFolderId != null) ? featK.attributes.openMapsKmlFolderId : '__root__';
             if (!openMapsKmlSidebarLayerVisible(handle, folderIdK)) continue;
@@ -7071,6 +7072,7 @@ async function onWmeReady() {
               for (var mkv = 0; mkv < mstV.length && total < MAX_ITEMS && addedK < MAX_PER_LAYER; mkv++) {
                 var mfV = mstV[mkv];
                 if (!mfV || !mfV.geometry) continue;
+                if (mfV._openMapsIsInnerRing) continue;
                 if (!geomIntersectsExtent(mfV.geometry, kmlExtent)) continue;
                 var folderIdV = (mfV.attributes && mfV.attributes.openMapsKmlFolderId != null) ? mfV.attributes.openMapsKmlFolderId : '__root__';
                 if (!openMapsKmlSidebarLayerVisible(handle, folderIdV)) continue;
@@ -13702,6 +13704,10 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
             layerRedrawNeeded = true;
             try { rebuildMapLayersUI(); } catch (e) {}
             if (self.updateLayers) self.updateLayers();
+            // Ensure KML/My Maps immediately re-syncs point ring features.
+            if (openMapsMapTypeIsKmlVectorOverlay(map.type)) {
+              try { openMapsApplyKmlFolderFeatureStyles(self); } catch (eKmlLs) { /* ignore */ }
+            }
             saveMapState();
           });
           mapLayersDetailsRoot.appendChild(layerSpecificStyleCheck);
