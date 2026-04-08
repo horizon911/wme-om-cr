@@ -4963,20 +4963,25 @@ async function onWmeReady() {
     f.style = null;
     var fid = f.attributes && f.attributes.openMapsKmlFolderId != null ? String(f.attributes.openMapsKmlFolderId) : '__root__';
     var fillHex = openMapsKmlFolderFillHex(title, fid);
-    var pack = openMapsEsriFeatureAvatarMarkerPack(fillHex);
+    var outerHex = openMapsMapAvatarColorFromTitle(title);
+    var useLayerSpecific = !!mapHandle.layerSpecificStyle;
+    var pack = openMapsEsriFeatureAvatarMarkerPack(outerHex);
+    if (useLayerSpecific && fillHex && /^#[0-9a-fA-F]{6}$/.test(String(fillHex))) {
+      pack.innerHex = String(fillHex).toLowerCase();
+    }
     var gcn = f.geometry.CLASS_NAME;
     if (gcn === 'OpenLayers.Geometry.Point' || gcn === 'OpenLayers.Geometry.MultiPoint') {
       f.style = openMapsEsriPointVectorStyle(pack);
     } else if (gcn === 'OpenLayers.Geometry.LineString' || gcn === 'OpenLayers.Geometry.MultiLineString' || gcn === 'OpenLayers.Geometry.LinearRing') {
       f.style = {
-        strokeColor: pack.fillHex,
+        strokeColor: (useLayerSpecific && pack.innerHex) ? pack.innerHex : pack.fillHex,
         strokeWidth: Math.max(2, Math.round(pack.polyStrokeW * 1.6)),
         strokeOpacity: 1,
         fillOpacity: 0
       };
     } else {
       f.style = {
-        fillColor: pack.fillHex,
+        fillColor: (useLayerSpecific && pack.innerHex) ? pack.innerHex : pack.fillHex,
         fillOpacity: 0.75,
         strokeColor: '#ffffff',
         strokeOpacity: 1,
@@ -5130,6 +5135,27 @@ async function onWmeReady() {
         if (cl) {
           openMapsApplyKmlStyleToFeature(mapHandle, cl);
           wantOl.push(cl);
+          // If enabled, add an inner ring feature for KML points (folder/layer color).
+          if (mapHandle.layerSpecificStyle && cl.geometry && (cl.geometry.CLASS_NAME === 'OpenLayers.Geometry.Point' || cl.geometry.CLASS_NAME === 'OpenLayers.Geometry.MultiPoint')) {
+            var innerFeat = openMapsCloneKmlFeatureForOlLayer(tmpl);
+            if (innerFeat && innerFeat.geometry) {
+              innerFeat._openMapsIsInnerRing = true;
+              var title = mapHandle.map && typeof mapHandle.map.title === 'string' ? mapHandle.map.title : '';
+              var folderId = innerFeat.attributes && innerFeat.attributes.openMapsKmlFolderId != null ? String(innerFeat.attributes.openMapsKmlFolderId) : '__root__';
+              var innerHex = openMapsKmlFolderFillHex(title, folderId);
+              var outerPack = openMapsEsriFeatureAvatarMarkerPack(openMapsMapAvatarColorFromTitle(title));
+              innerFeat.style = {
+                graphicName: 'circle',
+                pointRadius: Math.max(2, Math.round(outerPack.symbolR * 0.75)),
+                fillColor: innerHex,
+                fillOpacity: 0.98,
+                strokeColor: '#ffffff',
+                strokeWidth: Math.max(1, Math.round(outerPack.whiteW * 0.7)),
+                strokeOpacity: 1
+              };
+              wantOl.push(innerFeat);
+            }
+          }
         }
       }
       if (wantOl.length < want.length) {
@@ -5905,26 +5931,49 @@ async function onWmeReady() {
 
   /** Default OpenLayers style for an ESRI_FEATURE point (shared by layer + lift clone). */
   function openMapsEsriPointVectorStyle(pack) {
-    if (pack.innerHex) {
-      return {
-        graphicName: 'circle',
-        pointRadius: Math.max(4, Math.round(pack.symbolR)),
-        fillColor: pack.innerHex,
-        fillOpacity: 0.98,
-        strokeColor: pack.fillHex,
-        strokeWidth: Math.max(2, Math.round(pack.symbolR * 0.35)),
-        strokeOpacity: 1
-      };
-    }
     return {
       graphicName: 'circle',
       pointRadius: Math.max(4, Math.round(pack.symbolR)),
       fillColor: pack.fillHex,
       fillOpacity: 0.92,
       strokeColor: '#ffffff',
-      strokeWidth: pack.whiteW,
+      strokeWidth: Math.max(1, Math.round(pack.whiteW)),
       strokeOpacity: 1
     };
+  }
+
+  /**
+   * Create one or two OpenLayers features for a point symbol:
+   * - outer ring: map color, thin white outline
+   * - inner ring (optional): layer color, bigger than before, thin white outline
+   *
+   * Inner ring features are tagged `_openMapsIsInnerRing = true` so Map Inspector
+   * indexing can skip duplicates and click selection remains stable.
+   */
+  function openMapsCreatePointFeatures(geom, attrs, outerHex, innerHex, useLayerSpecific) {
+    if (!geom) return [];
+    var outerPack = openMapsEsriFeatureAvatarMarkerPack(outerHex);
+    var out = [];
+
+    var outerFeat = new OpenLayers.Feature.Vector(typeof geom.clone === 'function' ? geom.clone() : geom, attrs || {});
+    outerFeat.style = openMapsEsriPointVectorStyle(outerPack);
+    out.push(outerFeat);
+
+    if (useLayerSpecific && innerHex && /^#[0-9a-fA-F]{6}$/.test(String(innerHex))) {
+      var innerFeat = new OpenLayers.Feature.Vector(typeof geom.clone === 'function' ? geom.clone() : geom, attrs || {});
+      innerFeat._openMapsIsInnerRing = true;
+      innerFeat.style = {
+        graphicName: 'circle',
+        pointRadius: Math.max(2, Math.round(outerPack.symbolR * 0.75)),
+        fillColor: String(innerHex).toLowerCase(),
+        fillOpacity: 0.98,
+        strokeColor: '#ffffff',
+        strokeWidth: Math.max(1, Math.round(outerPack.whiteW * 0.7)),
+        strokeOpacity: 1
+      };
+      out.push(innerFeat);
+    }
+    return out;
   }
 
   /**
@@ -6475,6 +6524,11 @@ async function onWmeReady() {
       if (!it) return { colorHex: colorHex, iconHref: iconHref };
       var mid = it.mapId;
       var m = mid != null ? maps.get(mid) : null;
+      var h = mid != null ? inspectorHandleForMapId(mid) : null;
+      if (h && !h.layerSpecificStyle) {
+        // No per-layer styling: return no inner ring so point symbols are map-colored only.
+        return { colorHex: null, iconHref: null };
+      }
       if (m && openMapsMapTypeIsKmlVectorOverlay(m.type)) {
         var layerKey = it.inspectorLayerKey != null ? String(it.inspectorLayerKey) : '';
         if (layerKey) {
@@ -6743,6 +6797,7 @@ async function onWmeReady() {
           for (var fi = 0; fi < feats.length && total < MAX_ITEMS && added < MAX_PER_LAYER; fi++) {
             var feat = feats[fi];
             if (!feat || !feat.geometry) continue;
+            if (feat._openMapsIsInnerRing) continue;
             if (!geomIntersectsExtent(feat.geometry, extent)) continue;
             var id = stableFeatureId(mapId, layerKey, feat, fi);
             if (viewportItemsById.has(id)) continue;
@@ -8066,13 +8121,14 @@ async function onWmeReady() {
           var gClone = typeof gV.clone === 'function' ? gV.clone() : gV;
           var cnV = gClone && gClone.CLASS_NAME;
           if (cnV === 'OpenLayers.Geometry.Point' || cnV === 'OpenLayers.Geometry.MultiPoint') {
-            var packV = openMapsEsriFeatureAvatarMarkerPack(openMapsInspectorOuterHexForItem(itV));
+            var outerHexV = openMapsInspectorOuterHexForItem(itV);
             var innerSpecV = openMapsInspectorInnerSpecForItem(itV);
-            if (innerSpecV && innerSpecV.colorHex) packV.innerHex = innerSpecV.colorHex;
-            var vf = new OpenLayers.Feature.Vector(gClone);
-            vf.openMapsInspectorItemId = vid;
-            vf.style = openMapsEsriPointVectorStyle(packV);
-            inspectorViewportGeomLayer.addFeatures([vf]);
+            var innerHexV = innerSpecV && innerSpecV.colorHex ? innerSpecV.colorHex : null;
+            var ptsV = openMapsCreatePointFeatures(gClone, {}, outerHexV, innerHexV, !!innerHexV);
+            for (var pvi = 0; pvi < ptsV.length; pvi++) {
+              ptsV[pvi].openMapsInspectorItemId = vid;
+              inspectorViewportGeomLayer.addFeatures([ptsV[pvi]]);
+            }
           } else {
             var stV = openMapsInspectorViewportGeomBaseStyle(gClone, fillHexV);
             var vf2 = new OpenLayers.Feature.Vector(gClone);
@@ -12899,20 +12955,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         visualCommonBox.appendChild(bboxCheck);
       }
 
-      if (self.mapLayers && self.mapLayers.length > 0) {
-        var layerSpecificStyleCheck = document.createElement('wz-checkbox');
-        layerSpecificStyleCheck.checked = self.layerSpecificStyle;
-        layerSpecificStyleCheck.textContent = "Use layer-specific styles";
-        layerSpecificStyleCheck.addEventListener('change', (e) => {
-          self.layerSpecificStyle = e.target.checked;
-          layerRedrawNeeded = true;
-          try { rebuildMapLayersUI(); } catch (e) {}
-          if (self.updateLayers) self.updateLayers();
-          saveMapState();
-        });
-        visualCommonBox.appendChild(layerSpecificStyleCheck);
-      }
-
       if (!isEsriFeatureVector) {
         var opacityBox = document.createElement('div');
         opacityBox.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:11px; color:#5f6368;';
@@ -13649,6 +13691,22 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         layersSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
         appendMapLayersSummaryInner(layersSummary);
         mapLayersDetailsRoot.appendChild(layersSummary);
+        
+        if (isEsriFeatureVector) {
+          var layerSpecificStyleCheck = document.createElement('wz-checkbox');
+          layerSpecificStyleCheck.checked = self.layerSpecificStyle;
+          layerSpecificStyleCheck.textContent = "Use layer-specific styles";
+          layerSpecificStyleCheck.style.cssText = 'display:block; margin:6px 0;';
+          layerSpecificStyleCheck.addEventListener('change', (e) => {
+            self.layerSpecificStyle = e.target.checked;
+            layerRedrawNeeded = true;
+            try { rebuildMapLayersUI(); } catch (e) {}
+            if (self.updateLayers) self.updateLayers();
+            saveMapState();
+          });
+          mapLayersDetailsRoot.appendChild(layerSpecificStyleCheck);
+        }
+        
         subLayerContainer = document.createElement('div');
         subLayerContainer.className = 'openmaps-map-list';
         UI.mapLayersSubContainer = subLayerContainer;
@@ -14600,10 +14658,10 @@ this.updateVisibility = function() {
                     var feats = [];
                     if (!json || json.error) return feats;
                     if (!Array.isArray(json.features)) return feats;
-                    
+
                     var wazeColors = ['#0099ff', '#8663df', '#20c063', '#ff9600', '#ff6699', '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000', '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'];
-                    var esriPackWithStyle = Object.assign({}, esriPack);
-                    
+                    var outerHex = esriPack.fillHex;
+
                     for (var i = 0; i < json.features.length; i++) {
                       var f = json.features[i];
                       if (!f) continue;
@@ -14611,39 +14669,55 @@ this.updateVisibility = function() {
                       try { geom = openMapsEsriGeometryToOpenLayers(f.geometry); } catch (e0) { geom = null; }
                       if (!geom) continue;
                       var attrs = (f.attributes && typeof f.attributes === 'object') ? f.attributes : {};
-                      var olf = new OpenLayers.Feature.Vector(geom, attrs);
-                      if (attrs.ObjectId != null) olf.fid = String(attrs.ObjectId);
-                      else if (attrs.OBJECTID != null) olf.fid = String(attrs.OBJECTID);
-                      
-                      var currentEsriPack = esriPack;
+                      var fidVal = (attrs.ObjectId != null) ? String(attrs.ObjectId) : (attrs.OBJECTID != null ? String(attrs.OBJECTID) : null);
+
+                      var innerHex = null;
                       if (self.layerSpecificStyle) {
                         var fLayerId = attrs.layerId != null ? attrs.layerId : (attrs.LAYER_ID != null ? attrs.LAYER_ID : 'main');
                         var fLayerName = 'main';
                         if (map.layers && map.layers[fLayerId]) {
-                            fLayerName = map.layers[fLayerId].title;
+                          fLayerName = map.layers[fLayerId].title;
                         } else if (fLayerId !== 'main') {
-                            fLayerName = String(fLayerId);
+                          fLayerName = String(fLayerId);
                         }
                         var lHash = 0;
                         for (var ti = 0; ti < fLayerName.length; ti++) {
                           lHash = fLayerName.charCodeAt(ti) + ((lHash << 5) - lHash);
                         }
-                        var innerHex = wazeColors[Math.abs(lHash) % wazeColors.length];
-                        currentEsriPack = Object.assign({}, esriPack, { innerHex: innerHex });
+                        innerHex = wazeColors[Math.abs(lHash) % wazeColors.length];
                       }
-                      
+
                       var gcn = geom.CLASS_NAME;
                       if (gcn === 'OpenLayers.Geometry.Point' || gcn === 'OpenLayers.Geometry.MultiPoint') {
-                        olf.style = openMapsEsriPointVectorStyle(currentEsriPack);
+                        var pts = openMapsCreatePointFeatures(geom, attrs, outerHex, innerHex, !!self.layerSpecificStyle);
+                        for (var pi = 0; pi < pts.length; pi++) {
+                          if (fidVal != null) pts[pi].fid = fidVal;
+                          feats.push(pts[pi]);
+                        }
                       } else if (gcn === 'OpenLayers.Geometry.LineString' || gcn === 'OpenLayers.Geometry.MultiLineString' || gcn === 'OpenLayers.Geometry.LinearRing') {
-                        olf.style = {
-                          strokeColor: currentEsriPack.innerHex || currentEsriPack.fillHex,
-                          strokeWidth: Math.max(2, Math.round(currentEsriPack.polyStrokeW * 1.6)),
+                        var olfLine = new OpenLayers.Feature.Vector(geom, attrs);
+                        if (fidVal != null) olfLine.fid = fidVal;
+                        olfLine.style = {
+                          strokeColor: (self.layerSpecificStyle && innerHex) ? innerHex : outerHex,
+                          strokeWidth: Math.max(2, Math.round(esriPack.polyStrokeW * 1.6)),
                           strokeOpacity: 1,
                           fillOpacity: 0
                         };
+                        feats.push(olfLine);
+                      } else {
+                        var olfPoly = new OpenLayers.Feature.Vector(geom, attrs);
+                        if (fidVal != null) olfPoly.fid = fidVal;
+                        olfPoly.style = {
+                          fillColor: (self.layerSpecificStyle && innerHex) ? innerHex : outerHex,
+                          fillOpacity: 0.75,
+                          strokeColor: '#ffffff',
+                          strokeOpacity: 1,
+                          strokeWidth: esriPack.polyStrokeW,
+                          pointRadius: Math.max(4, Math.round(esriPack.symbolR)),
+                          graphicName: 'circle'
+                        };
+                        feats.push(olfPoly);
                       }
-                      feats.push(olf);
                     }
                     return feats;
                   }
