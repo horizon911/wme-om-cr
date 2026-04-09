@@ -23,7 +23,10 @@ The **Candy Remix** focuses on aligning the script with modern WME SDK standards
 
 ### 2026.04.08
 
-- **Map Feature Styles:** "Use layer-specific styles" checkbox added under "Visual adjustments" for vector layers to toggle layer avatar hash colors and round-in-round map symbols. Fix ESRI_FEATURE clickability bug by syncing layerKey logic with runViewportIndex.
+- **Map Feature Styles:** "Use layer-specific styles" under **Map layers** toggles per-sublayer colors and ring-in-round symbols for **ESRI_FEATURE**, **KML / My Maps**, **WMS**, and **ArcGIS MapServer (ESRI)** rows; state persists in `saveMapState`. ESRI_FEATURE click uses the same layer key as Map Inspector.
+- **KML map clicks:** KML vector layers are included in the document-capture hit-test (they only had `openMapsEsriAvatarFill` on FeatureServer layers before). Stable ids use the `kml_<folder>` segment so list selection matches map clicks; inner-ring OL features resolve to the outer placemark for hit-testing.
+- **Symbol parity:** Shared inner-ring ratio (`OPENMAPS_POINT_INNER_RADIUS_FRAC` = 0.75) for Map Inspector list dots, map points, and hover/select lift symbols; ESRI_FEATURE highlights show map-colored outer + layer-hash inner when the option is on; KML highlights respect the checkbox for points and line strokes.
+- **KML inner color (2026.04.08.3):** Map point inner rings and line/polygon strokes use the same resolved folder color as the inspector list — prefer **`openMapsKmlColorHex`** from parsed KML **Style** when present, otherwise the title+folder hash (`openMapsKmlResolvedFolderFillHex`).
 
 ### 2026.04.07
 

@@ -72,7 +72,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.08.1
+// @version     2026.04.08.3
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -85,7 +85,7 @@
 
 var styleElement;
 
-var OPEN_MAPS_VERSION = '2026.04.08.1';
+var OPEN_MAPS_VERSION = '2026.04.08.3';
 
 /**
  * Google My Maps (KML) — **piece-by-piece rollout** (satellite broke when this ran unchecked).
@@ -903,7 +903,9 @@ async function onWmeReady() {
         v2026_04_07_08: '- **I18n:** French and Portuguese strings for **Map Inspector** KML folder counts (**in view / loaded**).',
         v2026_04_07_09: '- **KML / Map Inspector:** OpenLayers now gets **cloned** placemarks from **`__openmapsKmlMasterFeatures`** so WME/OL teardown of the vector layer cannot leave the master list unusable for re-`addFeatures`. **Legacy `main` sub-layer:** when folder rows replace the old single **main** row, new folders default **visible** (a hidden legacy `main` flag no longer blanks every folder). **Inspector** falls back to **master** geometry for viewport hits when the OL layer is still empty but the row should draw.',
         v2026_04_07_10: '- **KML fix:** `MapHandle` now exposes **`this.map`** (the map definition). KML folder styles and master sync had been no-ops because helpers read **`mapHandle.map`**, which was never set.',
-        v2026_04_08_01: '- **Map Feature Styles:** Fix ESRI_FEATURE clickability bug by syncing layerKey logic in trySelectEsriFeatureFromClick with runViewportIndex. Add layerSpecificStyle to MapHandle, saveMapState, and buildEditPanel UI. Update appendOneLayerRow to toggle layer avatar hash colors based on layerSpecificStyle. Update openMapsEsriPointVectorStyle and parseFeaturesToOl to render round-in-round map symbols. Update Map Inspector styling helpers to reflect round-in-round logic when checked.'
+        v2026_04_08_01: '- **Map Feature Styles:** Fix ESRI_FEATURE clickability bug by syncing layerKey logic in trySelectEsriFeatureFromClick with runViewportIndex. Add layerSpecificStyle to MapHandle, saveMapState, and buildEditPanel UI. Update appendOneLayerRow to toggle layer avatar hash colors based on layerSpecificStyle. Update openMapsEsriPointVectorStyle and parseFeaturesToOl to render round-in-round map symbols. Update Map Inspector styling helpers to reflect round-in-round logic when checked.',
+        v2026_04_08_02: '- **KML + layer styles:** KML vector layers are included in map hit-testing (`pointer-events: none` capture path). Click/hover use the same `stableFeatureId` segment as Map Inspector (`kml_<folder>`), not `main`. "Use layer-specific styles" appears for **WMS**, **ESRI** (MapServer), **ESRI_FEATURE**, and KML; changing it calls **`notifyHandlesChanged`**. Single inner-ring ratio (**OPENMAPS_POINT_INNER_RADIUS_FRAC**) for list avatars, map points, and inspector lift symbols; ESRI_FEATURE hover/selection uses outer map color + inner layer hash when enabled; KML point/line highlights respect the checkbox (map-only stroke when off).',
+        v2026_04_08_03: '- **KML inner color parity:** Map symbols and inner rings use **`openMapsKmlResolvedFolderFillHex`** — same rule as Map Inspector (prefer folder **`openMapsKmlColorHex`** from KML Style when set, else title+folder hash). Fixes teal list vs green map when My Maps / KML defines an explicit folder color.'
       }
     },
     nl: {
@@ -1382,7 +1384,9 @@ async function onWmeReady() {
         v2026_04_07_08: '- **I18n:** Franse en Portugese teksten voor **Kaartinspector** KML-map tellingen (**in beeld / geladen**).',
         v2026_04_07_09: '- **KML / Kaartinspector:** OpenLayers krijgt **geklonde** placemarks uit **`__openmapsKmlMasterFeatures`**, zodat WME/OL-afbraak van de vectorlaag de masterlijst niet onbruikbaar maakt voor opnieuw **`addFeatures`**. **Legacy `main`:** bij echte maprijen in plaats van één **main**-rij krijgen nieuwe mappen standaard **zichtbaar** (een verborgen legacy-`main`-vlag leegt niet meer alle mappen). **Inspector** gebruikt **master**-geometrie voor viewport-treffers als de OL-laag leeg blijft terwijl de rij wel moet tekenen.',
         v2026_04_07_10: '- **KML-fix:** `MapHandle` exposeert nu **`this.map`** (de mapdefinitie). Mapstijlen/sync waren no-ops omdat helpers **`mapHandle.map`** lazen, wat nooit gezet was.',
-        v2026_04_08_01: '- **Kaartstijlen:** "Laagspecifieke stijlen gebruiken" vinkje toegevoegd (visuele aanpassingen) voor ESRI_FEATURE. Klikbaarheid opgelost.'
+        v2026_04_08_01: '- **Kaartstijlen:** "Laagspecifieke stijlen gebruiken" vinkje toegevoegd (visuele aanpassingen) voor ESRI_FEATURE. Klikbaarheid opgelost.',
+        v2026_04_08_02: '- **KML + stijlen:** KML-vectorlagen tellen mee bij kaart-hit-testing; klik/hover gebruiken dezelfde laagsleutel als Map Inspector (`kml_<folder>`). Vinkje ook voor **WMS**, **ESRI** en KML; wijziging roept **`notifyHandlesChanged`** aan. Eén binnenring-verhouding voor lijst-, kaart- en highlight-symbolen; ESRI_FEATURE-hover volgt laaghashes als aan; KML-lijn/highlight respecteert uitgeschakelde laagstijlen.',
+        v2026_04_08_03: '- **KML binnenkleur:** Kaart en binnenring gebruiken dezelfde kleurkeuze als Map Inspector (KML-**Style**-hex indien aanwezig, anders hash).'
       }
     },
     fr: {
@@ -1456,7 +1460,10 @@ async function onWmeReady() {
         v2026_04_07_07: '- **KML + inspecteur de carte :** le diag GMM journalise le **nombre de features sur la couche OL** (pas seulement le parse). Les **en-têtes de dossier** affichent **dans la vue / chargé** depuis la liste maître KML ; l’index viewport utilise une **emprise de repli** si `getMapExtent()` est nul ; **`openmaps-kml-diag`** peut journaliser **aucune intersection** avec un exemple de bornes ; **`updateLayers`** réapplique les styles dossier si la couche OL est vide alors que la liste maître contient encore des placemarks.',
         v2026_04_07_08: '- **I18n :** libellés FR et PT-BR pour les totaux KML **dans la vue / chargées** dans l’inspecteur de carte.',
         v2026_04_07_09: '- **KML / inspecteur :** OpenLayers reçoit des placemarks **clonés** depuis **`__openmapsKmlMasterFeatures`** pour éviter qu’une destruction OL/WME rende la liste maître inutilisable pour un nouvel **`addFeatures`**. **Ancienne sous-couche `main` :** quand des dossiers remplacent l’unique ligne **main**, les nouveaux dossiers sont **visibles** par défaut (un ancien `main` masqué ne vide plus tous les dossiers). **Inspecteur :** repli sur la géométrie **maître** pour le viewport si la couche OL est vide alors que la ligne doit s’afficher.',
-        v2026_04_07_10: '- **Correctif KML :** `MapHandle` expose désormais **`this.map`** (définition de carte). Les styles/sync KML ne faisaient rien car les helpers lisaient **`mapHandle.map`**, jamais défini.'
+        v2026_04_07_10: '- **Correctif KML :** `MapHandle` expose désormais **`this.map`** (définition de carte). Les styles/sync KML ne faisaient rien car les helpers lisaient **`mapHandle.map`**, jamais défini.',
+        v2026_04_08_01: '- **Styles par couche :** case « Utiliser des styles spécifiques à la couche » pour ESRI_FEATURE ; sélection au clic corrigée (clé de couche alignée avec l’inspecteur).',
+        v2026_04_08_02: '- **KML + styles :** les couches KML participent au test de collision sur la carte ; clic/survol utilisent la même clé **`kml_<dossier>`** que l’inspecteur. La case est aussi proposée pour **WMS**, **ESRI** (tuiles) et KML ; changement → **`notifyHandlesChanged`**. Rayon intérieur unifié pour pastilles liste / points carte / surbrillance ; surbrillance ESRI_FEATURE avec anneau intérieur par sous-couche si l’option est cochée ; lignes KML en couleur carte si l’option est décochée.',
+        v2026_04_08_03: '- **KML couleur intérieure :** carte et anneau intérieur utilisent la même règle que l’inspecteur (hex **Style** KML du dossier si présent, sinon hachage).'
       }
     },
     'pt-BR': {
@@ -1624,7 +1631,10 @@ async function onWmeReady() {
         v2026_04_07_07: '- **KML + Map Inspector:** o diag GMM regista contagens **na camada OL** (não só as parseadas). **Cabeçalhos de pasta** mostram **na vista / carregadas** a partir da lista mestra KML; a indexação da viewport usa uma **extensão de recurso** quando `getMapExtent()` é null; **`openmaps-kml-diag`** pode registar **sem interseção na viewport** com exemplo de bounds; **`updateLayers`** volta a aplicar estilos de pasta se a camada OL estiver vazia mas a lista mestra ainda tiver placemarks.',
         v2026_04_07_08: '- **I18n:** textos em francês e português para as contagens KML **na vista / carregadas** no Map Inspector.',
         v2026_04_07_09: '- **KML / Map Inspector:** o OpenLayers passa a receber placemarks **clonados** de **`__openmapsKmlMasterFeatures`**, para que o desmonte OL/WME da camada vetorial não deixe a lista mestra inutilizável para novo **`addFeatures`**. **Subcamada legada `main`:** quando pastas substituem a única linha **main**, as novas pastas ficam **visíveis** por omissão (um `main` antigo oculto já não esvazia todas as pastas). **Inspector:** recurso à geometria **mestra** para o viewport se a camada OL estiver vazia mas a linha deva desenhar.',
-        v2026_04_07_10: '- **Correção KML:** `MapHandle` expõe agora **`this.map`** (definição do mapa). Estilos/sync KML não corriam porque os helpers liam **`mapHandle.map`**, que nunca era definido.'
+        v2026_04_07_10: '- **Correção KML:** `MapHandle` expõe agora **`this.map`** (definição do mapa). Estilos/sync KML não corriam porque os helpers liam **`mapHandle.map`**, que nunca era definido.',
+        v2026_04_08_01: '- **Estilos por camada:** caixa « Usar estilos específicos da camada » para ESRI_FEATURE; clique no mapa corrigido (chave de camada alinhada ao inspector).',
+        v2026_04_08_02: '- **KML + estilos:** vetores KML entram no teste de clique no mapa; clique/hover usam a mesma chave **`kml_<pasta>`** que o Map Inspector. A caixa também aparece para **WMS**, **ESRI** (mosaico) e KML; ao mudar chama-se **`notifyHandlesChanged`**. Proporção única do anel interno para avatares da lista, pontos no mapa e realces; realce ESRI_FEATURE com cor interna por subcamada quando ativo; linhas KML com cor do mapa quando desligado.',
+        v2026_04_08_03: '- **KML cor interna:** mapa e anel interno usam a mesma regra que o inspector (hex **Style** da pasta KML se existir, senão hash).'
       }
     }
   };
@@ -4763,6 +4773,26 @@ async function onWmeReady() {
   }
 
   /**
+   * Folder stroke/fill for KML on the map and in the inspector: use parsed **`Style` / PolyStyle** hex from
+   * `map.layers[folderId].openMapsKmlColorHex` when present, else {@link openMapsKmlFolderFillHex} (title+folder hash).
+   * Keeps inner rings and line/polygon colors aligned with Map Inspector list avatars.
+   * @param {Object|null|undefined} mapDef catalog / persisted map (`title`, `layers`)
+   * @param {string} folderId feature `openMapsKmlFolderId` or `__root__`
+   * @returns {string} `#rrggbb`
+   */
+  function openMapsKmlResolvedFolderFillHex(mapDef, folderId) {
+    var fid = folderId != null && folderId !== '' ? String(folderId) : '__root__';
+    var title = mapDef && mapDef.title && typeof mapDef.title === 'string' ? mapDef.title : '';
+    try {
+      var lm = mapDef && mapDef.layers && mapDef.layers[fid] ? mapDef.layers[fid] : null;
+      if (lm && lm.openMapsKmlColorHex && /^#[0-9a-fA-F]{6}$/.test(String(lm.openMapsKmlColorHex))) {
+        return String(lm.openMapsKmlColorHex).toLowerCase();
+      }
+    } catch (eR) { /* ignore */ }
+    return openMapsKmlFolderFillHex(title, fid);
+  }
+
+  /**
    * Map layers sidebar eye for a KML folder id (`__root__` or path like `0/1`).
    * @param {{ mapLayers?: Array<{ name: *, visible: boolean }> }} mapHandle
    * @param {*} folderKey feature `openMapsKmlFolderId` or omitted for root
@@ -4959,10 +4989,12 @@ async function onWmeReady() {
    */
   function openMapsApplyKmlStyleToFeature(mapHandle, f) {
     if (!mapHandle || !mapHandle.map || !f || !f.geometry || !openMapsMapTypeIsKmlVectorOverlay(mapHandle.map.type)) return;
+    // Inner ring is a second OL feature at the same geometry; keep its explicit style (do not repaint as outer).
+    if (f._openMapsIsInnerRing) return;
     var title = mapHandle.map.title && typeof mapHandle.map.title === 'string' ? mapHandle.map.title : '';
     f.style = null;
     var fid = f.attributes && f.attributes.openMapsKmlFolderId != null ? String(f.attributes.openMapsKmlFolderId) : '__root__';
-    var fillHex = openMapsKmlFolderFillHex(title, fid);
+    var fillHex = openMapsKmlResolvedFolderFillHex(mapHandle.map, fid);
     var outerHex = openMapsMapAvatarColorFromTitle(title);
     var useLayerSpecific = !!mapHandle.layerSpecificStyle;
     var pack = openMapsEsriFeatureAvatarMarkerPack(outerHex);
@@ -5142,11 +5174,11 @@ async function onWmeReady() {
               innerFeat._openMapsIsInnerRing = true;
               var title = mapHandle.map && typeof mapHandle.map.title === 'string' ? mapHandle.map.title : '';
               var folderId = innerFeat.attributes && innerFeat.attributes.openMapsKmlFolderId != null ? String(innerFeat.attributes.openMapsKmlFolderId) : '__root__';
-              var innerHex = openMapsKmlFolderFillHex(title, folderId);
+              var innerHex = openMapsKmlResolvedFolderFillHex(mapHandle.map, folderId);
               var outerPack = openMapsEsriFeatureAvatarMarkerPack(openMapsMapAvatarColorFromTitle(title));
               innerFeat.style = {
                 graphicName: 'circle',
-                pointRadius: Math.max(2, Math.round(outerPack.symbolR * 0.75)),
+                pointRadius: Math.max(2, Math.round(outerPack.symbolR * OPENMAPS_POINT_INNER_RADIUS_FRAC)),
                 fillColor: innerHex,
                 fillOpacity: 0.98,
                 strokeColor: '#ffffff',
@@ -5212,6 +5244,31 @@ async function onWmeReady() {
 
   /** Map Inspector list row color dot (`.openmaps-inspector-avatar` in CSS). */
   var OPENMAPS_INSPECTOR_LIST_AVATAR_PX = 16;
+  /** Inner ring radius as a fraction of outer ring radius — shared by map symbols, KML inner ring, inspector highlights, and list avatars (inner diameter = outer × this). */
+  var OPENMAPS_POINT_INNER_RADIUS_FRAC = 0.75;
+
+  /**
+   * Per-sublayer fill for ESRI_FEATURE when layer-specific styles are on (matches {@link parseFeaturesToOl}).
+   * @param {Object} mapDef catalog map entry (`layers`, `title`, …)
+   * @param {Object} attrs feature attributes (`layerId` / `LAYER_ID`)
+   * @returns {string|null} hex color
+   */
+  function openMapsEsriFeatureLayerInnerHex(mapDef, attrs) {
+    if (!mapDef || !attrs || typeof attrs !== 'object') return null;
+    var wazeColors = ['#0099ff', '#8663df', '#20c063', '#ff9600', '#ff6699', '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000', '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'];
+    var fLayerId = attrs.layerId != null ? attrs.layerId : (attrs.LAYER_ID != null ? attrs.LAYER_ID : 'main');
+    var fLayerName = 'main';
+    if (mapDef.layers && mapDef.layers[fLayerId]) {
+      fLayerName = mapDef.layers[fLayerId].title;
+    } else if (fLayerId !== 'main') {
+      fLayerName = String(fLayerId);
+    }
+    var lHash = 0;
+    for (var ti = 0; ti < fLayerName.length; ti++) {
+      lHash = fLayerName.charCodeAt(ti) + ((lHash << 5) - lHash);
+    }
+    return wazeColors[Math.abs(lHash) % wazeColors.length];
+  }
 
   /**
    * Sizing for ESRI_FEATURE markers: same hue as map avatars; symbol radius = 130% of the **list** avatar radius
@@ -5964,7 +6021,7 @@ async function onWmeReady() {
       innerFeat._openMapsIsInnerRing = true;
       innerFeat.style = {
         graphicName: 'circle',
-        pointRadius: Math.max(2, Math.round(outerPack.symbolR * 0.75)),
+        pointRadius: Math.max(2, Math.round(outerPack.symbolR * OPENMAPS_POINT_INNER_RADIUS_FRAC)),
         fillColor: String(innerHex).toLowerCase(),
         fillOpacity: 0.98,
         strokeColor: '#ffffff',
@@ -6503,7 +6560,7 @@ async function onWmeReady() {
             if (!isKml && m.layers && m.layers[layerName]) {
               layerName = m.layers[layerName].title;
             }
-            return openMapsKmlFolderFillHex(m.title || title, String(layerName));
+            return openMapsKmlResolvedFolderFillHex(m, String(layerName));
           }
         }
       }
@@ -6533,12 +6590,8 @@ async function onWmeReady() {
         var layerKey = it.inspectorLayerKey != null ? String(it.inspectorLayerKey) : '';
         if (layerKey) {
           try {
+            colorHex = openMapsKmlResolvedFolderFillHex(m, layerKey);
             var lm = m.layers && m.layers[layerKey] ? m.layers[layerKey] : null;
-            if (lm && lm.openMapsKmlColorHex && /^#[0-9a-fA-F]{6}$/.test(String(lm.openMapsKmlColorHex))) {
-              colorHex = String(lm.openMapsKmlColorHex).toLowerCase();
-            } else {
-              colorHex = openMapsKmlFolderFillHex(m.title || mapTitleForInspector(mid), layerKey);
-            }
             if (lm && lm.openMapsKmlIconHref && openMapsKmlTextIsUsableIconHref(lm.openMapsKmlIconHref)) {
               iconHref = String(lm.openMapsKmlIconHref).trim();
             }
@@ -6839,6 +6892,7 @@ async function onWmeReady() {
           for (var fkr = 0; fkr < featsKr.length && total < MAX_ITEMS && addedKr < MAX_PER_LAYER; fkr++) {
             var featK = featsKr[fkr];
             if (!featK || !featK.geometry) continue;
+            if (featK._openMapsIsInnerRing) continue;
             if (!geomIntersectsExtent(featK.geometry, kmlExtentR)) continue;
             var folderIdK = (featK.attributes && featK.attributes.openMapsKmlFolderId != null) ? featK.attributes.openMapsKmlFolderId : '__root__';
             if (!openMapsKmlSidebarLayerVisible(handle, folderIdK)) continue;
@@ -7674,17 +7728,24 @@ async function onWmeReady() {
                   av.style.overflow = 'visible';
                   av.setAttribute('aria-hidden', 'true');
                   var inner = document.createElement('div');
-                  inner.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;box-shadow:0 1px 1px rgba(0,0,0,0.18);display:flex;align-items:center;justify-content:center;overflow:hidden;';
-                  inner.style.backgroundColor = innerSpec && innerSpec.colorHex ? innerSpec.colorHex : outerHex;
-                  if (innerSpec && innerSpec.iconHref) {
-                    var im = document.createElement('img');
-                    im.src = innerSpec.iconHref;
-                    im.alt = '';
-                    im.style.cssText = 'width:9px;height:9px;object-fit:contain;display:block;';
-                    im.onerror = function() {
-                      try { if (im.parentNode) im.parentNode.removeChild(im); } catch (eI0) {}
-                    };
-                    inner.appendChild(im);
+                  var innerPx = Math.round(OPENMAPS_INSPECTOR_LIST_AVATAR_PX * OPENMAPS_POINT_INNER_RADIUS_FRAC);
+                  inner.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:' + innerPx + 'px;height:' + innerPx + 'px;border-radius:50%;box-shadow:0 1px 1px rgba(0,0,0,0.18);align-items:center;justify-content:center;overflow:hidden;';
+                  if (innerSpec && innerSpec.colorHex) {
+                    inner.style.display = 'flex';
+                    inner.style.backgroundColor = innerSpec.colorHex;
+                    if (innerSpec.iconHref) {
+                      var im = document.createElement('img');
+                      im.src = innerSpec.iconHref;
+                      im.alt = '';
+                      var iconSz = Math.max(6, Math.round(innerPx * 0.75));
+                      im.style.cssText = 'width:' + iconSz + 'px;height:' + iconSz + 'px;object-fit:contain;display:block;';
+                      im.onerror = function() {
+                        try { if (im.parentNode) im.parentNode.removeChild(im); } catch (eI0) {}
+                      };
+                      inner.appendChild(im);
+                    }
+                  } else {
+                    inner.style.display = 'none';
                   }
                   av.appendChild(inner);
                   var left = document.createElement('div');
@@ -8176,15 +8237,26 @@ async function onWmeReady() {
       W.map.addLayer(highlightHoverLayer);
     }
 
-    /** Draw highlighted point above siblings in the same vector layer (OpenLayers paints in feature array order). */
+    /**
+     * Move this point above other features in the same vector layer (OpenLayers paints in feature array order).
+     * Ring-in-ring KML / ESRI_FEATURE points are two features: outer (map avatar) then inner (`_openMapsIsInnerRing`).
+     * Moving only the outer would stack it after the inner and hide the folder-colored disk — it looks like a
+     * single-color map-avatar marker, especially while Map Inspector hover/selection runs this bump.
+     */
     function bumpEsriPointFeatureToDrawLast(feat, lyr) {
       if (!feat || !lyr || !lyr.features) return;
       try {
         var arr = lyr.features;
         if (arr.length < 2) return;
-        if (arr.indexOf(feat) < 0) return;
-        lyr.removeFeatures([feat]);
-        lyr.addFeatures([feat]);
+        var ix = arr.indexOf(feat);
+        if (ix < 0) return;
+        var group = [feat];
+        if (!feat._openMapsIsInnerRing && ix + 1 < arr.length) {
+          var next = arr[ix + 1];
+          if (next && next._openMapsIsInnerRing) group.push(next);
+        }
+        lyr.removeFeatures(group);
+        lyr.addFeatures(group);
       } catch (eBump) { /* ignore */ }
     }
 
@@ -8208,8 +8280,9 @@ async function onWmeReady() {
 
         function paintInspectorAvatarPointHighlight(mode, g0, outerHex, innerSpec) {
           if (!g0 || typeof g0.clone !== 'function') return;
-          var innerColor = innerSpec && innerSpec.colorHex ? String(innerSpec.colorHex) : String(outerHex || '#0099ff');
-          var innerIcon = innerSpec && innerSpec.iconHref ? String(innerSpec.iconHref) : null;
+          var hasInner = innerSpec && innerSpec.colorHex && /^#[0-9a-fA-F]{6}$/.test(String(innerSpec.colorHex));
+          var innerColor = hasInner ? String(innerSpec.colorHex).toLowerCase() : null;
+          var innerIcon = hasInner && innerSpec.iconHref ? String(innerSpec.iconHref) : null;
           var pack = openMapsEsriFeatureAvatarMarkerPack(outerHex);
           var ringL = mode === 'select' ? highlightSelectLayer : highlightHoverLayer;
           var liftL = mode === 'select' ? highlightSelectLiftLayer : highlightHoverLiftLayer;
@@ -8225,32 +8298,32 @@ async function onWmeReady() {
           var liftFeat = new OpenLayers.Feature.Vector(g0.clone());
           liftFeat.style = openMapsEsriPointVectorStyle(pack);
           liftL.addFeatures([liftFeat]);
-          // Embedded layer circle inside the map-colored circle.
-          var innerR = Math.max(2, Math.round(pack.symbolR * 0.62));
-          var innerFeat = new OpenLayers.Feature.Vector(g0.clone());
-          innerFeat.style = {
-            graphicName: 'circle',
-            pointRadius: innerR,
-            fillColor: innerColor,
-            fillOpacity: 0.98,
-            strokeColor: '#ffffff',
-            strokeWidth: Math.max(1, Math.round(pack.whiteW * 0.7)),
-            strokeOpacity: 1
-          };
-          liftL.addFeatures([innerFeat]);
-          // Optional icon inside the embedded circle (best-effort; Canvas may skip externalGraphic).
-          if (innerIcon) {
-            var icoFeat = new OpenLayers.Feature.Vector(g0.clone());
-            var wh = Math.max(6, Math.round(innerR * 2 * 0.86));
-            icoFeat.style = {
-              externalGraphic: innerIcon,
-              graphicWidth: wh,
-              graphicHeight: wh,
-              graphicOpacity: 1,
-              fillOpacity: 0,
-              strokeWidth: 0
+          if (hasInner) {
+            var innerR = Math.max(2, Math.round(pack.symbolR * OPENMAPS_POINT_INNER_RADIUS_FRAC));
+            var innerFeat = new OpenLayers.Feature.Vector(g0.clone());
+            innerFeat.style = {
+              graphicName: 'circle',
+              pointRadius: innerR,
+              fillColor: innerColor,
+              fillOpacity: 0.98,
+              strokeColor: '#ffffff',
+              strokeWidth: Math.max(1, Math.round(pack.whiteW * 0.7)),
+              strokeOpacity: 1
             };
-            liftL.addFeatures([icoFeat]);
+            liftL.addFeatures([innerFeat]);
+            if (innerIcon) {
+              var icoFeat = new OpenLayers.Feature.Vector(g0.clone());
+              var wh = Math.max(6, Math.round(innerR * 2 * 0.86));
+              icoFeat.style = {
+                externalGraphic: innerIcon,
+                graphicWidth: wh,
+                graphicHeight: wh,
+                graphicOpacity: 1,
+                fillOpacity: 0,
+                strokeWidth: 0
+              };
+              liftL.addFeatures([icoFeat]);
+            }
           }
           var haloL = mode === 'select' ? highlightSelectHaloLayer : highlightHoverHaloLayer;
           if (!haloL) {
@@ -8297,8 +8370,11 @@ async function onWmeReady() {
           if (isEsriPoint) {
             var midE = sourceLayer.openMapsMapId;
             var mE = maps.get(midE);
+            var hE = inspectorHandleForMapId(midE);
             var outerE = openMapsMapAvatarColorFromTitle(mE && mE.title ? String(mE.title) : '');
-            paintInspectorAvatarPointHighlight(mode, g0, outerE, { colorHex: sourceLayer.openMapsEsriAvatarFill, iconHref: null });
+            var attrsE = feature.attributes || {};
+            var innerHexE = (hE && hE.layerSpecificStyle && mE) ? openMapsEsriFeatureLayerInnerHex(mE, attrsE) : null;
+            paintInspectorAvatarPointHighlight(mode, g0, outerE, { colorHex: innerHexE, iconHref: null });
             return { feat: feature, lyr: sourceLayer };
           }
           var kmlFill = null;
@@ -8307,7 +8383,7 @@ async function onWmeReady() {
             var mK = maps.get(midK);
             var titleK = mK && mK.title ? mK.title : '';
             var fidK = feature.attributes && feature.attributes.openMapsKmlFolderId != null ? String(feature.attributes.openMapsKmlFolderId) : '__root__';
-            kmlFill = openMapsKmlFolderFillHex(titleK, fidK);
+            kmlFill = openMapsKmlResolvedFolderFillHex(mK, fidK);
           }
           if (kmlFill && (cn0 === 'OpenLayers.Geometry.Point' || cn0 === 'OpenLayers.Geometry.MultiPoint')) {
             var outerK = openMapsMapAvatarColorFromTitle((maps.get(sourceLayer.openMapsMapId) || {}).title || '');
@@ -8317,12 +8393,18 @@ async function onWmeReady() {
               var lmK = mKm && mKm.layers && mKm.layers[fidK] ? mKm.layers[fidK] : null;
               if (lmK && lmK.openMapsKmlIconHref && openMapsKmlTextIsUsableIconHref(lmK.openMapsKmlIconHref)) iconK = String(lmK.openMapsKmlIconHref).trim();
             } catch (eKi) { /* ignore */ }
-            paintInspectorAvatarPointHighlight(mode, g0, outerK, { colorHex: kmlFill, iconHref: iconK });
+            var hKpt = inspectorHandleForMapId(sourceLayer.openMapsMapId);
+            var useKmlInner = hKpt && hKpt.layerSpecificStyle;
+            paintInspectorAvatarPointHighlight(mode, g0, outerK, { colorHex: useKmlInner ? kmlFill : null, iconHref: useKmlInner ? iconK : null });
             return { feat: feature, lyr: sourceLayer };
           }
           var clone = feature.clone();
           if (kmlFill) {
-            var stKm = openMapsEsriInspectorHighlightStyle(clone.geometry, kmlFill);
+            var midKmSt = sourceLayer.openMapsMapId;
+            var hKmSt = inspectorHandleForMapId(midKmSt);
+            var mapTitleKmSt = (maps.get(midKmSt) || {}).title || '';
+            var strokeKm = (hKmSt && hKmSt.layerSpecificStyle) ? kmlFill : openMapsMapAvatarColorFromTitle(mapTitleKmSt);
+            var stKm = openMapsEsriInspectorHighlightStyle(clone.geometry, strokeKm);
             if (mode === 'hover' && stKm) {
               if (typeof stKm.strokeWidth === 'number') stKm.strokeWidth = Math.max(1, stKm.strokeWidth - 0.5);
               if (typeof stKm.strokeOpacity === 'number') stKm.strokeOpacity = Math.min(1, stKm.strokeOpacity * 0.88);
@@ -8417,7 +8499,40 @@ async function onWmeReady() {
     function inspectorMapVectorLayerIsHitTarget(Lay) {
       if (!Lay) return false;
       if (Lay.openMapsEsriAvatarFill) return true;
+      if (Lay.name != null && openMapsLayerNameIsKmlVectorOverlay(Lay.name)) return true;
       return inspectorViewportGeomLayer != null && Lay === inspectorViewportGeomLayer;
+    }
+
+    /** Map / KML ring-in-ring: clicks often land on the inner OL feature — resolve to the outer for stable ids. */
+    function resolveOpenMapsOverlayHitFeature(feat, layer) {
+      if (!feat || !feat._openMapsIsInnerRing || !layer || !layer.features) return feat;
+      var arr = layer.features;
+      var ix = arr.indexOf(feat);
+      if (ix > 0) {
+        var prev = arr[ix - 1];
+        if (prev && !prev._openMapsIsInnerRing) return prev;
+      }
+      return feat;
+    }
+
+    /** `stableFeatureId` layer segment: KML uses `kml_<folder>` like {@link runViewportIndex}; ESRI_FEATURE uses visible catalog sublayer key. */
+    function inspectorStableLayerKeyForVectorHit(mapId, feature) {
+      var meta = maps.get(mapId);
+      if (meta && openMapsMapTypeIsKmlVectorOverlay(meta.type)) {
+        var folderId = (feature && feature.attributes && feature.attributes.openMapsKmlFolderId != null)
+          ? feature.attributes.openMapsKmlFolderId : '__root__';
+        return 'kml_' + String(folderId).replace(/\W/g, '_');
+      }
+      var layerKey = 'main';
+      var handle = inspectorHandleForMapId(mapId);
+      if (handle) {
+        (handle.mapLayers || []).forEach(function(ml) {
+          if (ml && ml.visible && isInspectorSourceIncluded(mapId, ml.name)) {
+            layerKey = ml.name;
+          }
+        });
+      }
+      return layerKey;
     }
 
     function findTopEsriFeatureFromEvent(evt) {
@@ -8433,7 +8548,10 @@ async function onWmeReady() {
         if (typeof Lay.getFeatureFromEvent !== 'function') continue;
         try {
           var fe = Lay.getFeatureFromEvent(evt);
-          if (fe) return { feature: fe, layer: Lay };
+          if (fe) {
+            fe = resolveOpenMapsOverlayHitFeature(fe, Lay);
+            return { feature: fe, layer: Lay };
+          }
         } catch (eG) { /* next layer */ }
       }
       var ll = null;
@@ -8457,6 +8575,7 @@ async function onWmeReady() {
         var bestD = Infinity;
         for (var fi = 0; fi < fts.length; fi++) {
           var f = fts[fi];
+          if (f && f._openMapsIsInnerRing) continue;
           var g = f.geometry;
           if (!g) continue;
           var comps = [];
@@ -8505,6 +8624,9 @@ async function onWmeReady() {
       mapEsriHoverPendingEvt = null;
       if (!evt) return;
       var hit = findTopEsriFeatureFromEvent(evt);
+      if (hit && hit.feature) {
+        hit = { feature: resolveOpenMapsOverlayHitFeature(hit.feature, hit.layer), layer: hit.layer };
+      }
       var k = esriMapHitCacheKey(hit);
       if (k === mapEsriHoverLastKey) return;
       mapEsriHoverLastKey = k;
@@ -8515,8 +8637,9 @@ async function onWmeReady() {
         } else {
           var mapIdH = openMapsMapIdFromEsriFeatureHitLayer(hit.layer);
           if (mapIdH != null) {
-            var fi = (hit.layer.features || []).indexOf(hit.feature);
-            mapHoverHighlightId = stableFeatureId(mapIdH, 'main', hit.feature, fi >= 0 ? fi : 0);
+            var fiH = (hit.layer.features || []).indexOf(hit.feature);
+            var layerKeyH = inspectorStableLayerKeyForVectorHit(mapIdH, hit.feature);
+            mapHoverHighlightId = stableFeatureId(mapIdH, layerKeyH, hit.feature, fiH >= 0 ? fiH : 0);
           } else {
             mapHoverHighlightId = null;
           }
@@ -8553,7 +8676,8 @@ async function onWmeReady() {
     function trySelectEsriFeatureFromClick(evt) {
       var hit = findTopEsriFeatureFromEvent(evt);
       if (!hit) return false;
-      var vgId = hit.feature && hit.feature.openMapsInspectorItemId;
+      var featClick = resolveOpenMapsOverlayHitFeature(hit.feature, hit.layer);
+      var vgId = featClick && featClick.openMapsInspectorItemId;
       if (vgId != null && vgId !== '') {
         function attemptSelectVg() {
           if (viewportItemsById.has(vgId) || queryItemsById.has(vgId)) {
@@ -8570,17 +8694,9 @@ async function onWmeReady() {
       }
       var mapIdC = openMapsMapIdFromEsriFeatureHitLayer(hit.layer);
       if (mapIdC == null) return false;
-      var fi = (hit.layer.features || []).indexOf(hit.feature);
-      var layerKeyC = 'main';
-      var handleC = inspectorHandleForMapId(mapIdC);
-      if (handleC) {
-        (handleC.mapLayers || []).forEach(function(ml) {
-          if (ml && ml.visible && isInspectorSourceIncluded(mapIdC, ml.name)) {
-            layerKeyC = ml.name;
-          }
-        });
-      }
-      var sid = stableFeatureId(mapIdC, layerKeyC, hit.feature, fi >= 0 ? fi : 0);
+      var fi = (hit.layer.features || []).indexOf(featClick);
+      var layerKeyC = inspectorStableLayerKeyForVectorHit(mapIdC, featClick);
+      var sid = stableFeatureId(mapIdC, layerKeyC, featClick, fi >= 0 ? fi : 0);
       function attemptSelect() {
         if (viewportItemsById.has(sid) || queryItemsById.has(sid)) {
           selectItem(sid);
@@ -12927,6 +13043,8 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       visualCommonBox.style.cssText = 'display:flex; flex-direction:column; gap:10px;';
 
       var isEsriFeatureVector = map.type === 'ESRI_FEATURE' || openMapsMapTypeIsKmlVectorOverlay(map.type);
+      /** Layer-specific colors + ring-in-ring: any map with a Map layers sublayer list (tiles + vectors). */
+      var supportsLayerSpecificStyleUI = map.type === 'ESRI_FEATURE' || map.type === 'ESRI' || map.type === 'WMS' || openMapsMapTypeIsKmlVectorOverlay(map.type);
       var hideBboxOption = map.area === 'UN' || openMapsMapTypeIsKmlVectorOverlay(map.type);
 
       if (map.format != 'image/jpeg' && !isEsriFeatureVector) {
@@ -13694,7 +13812,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         appendMapLayersSummaryInner(layersSummary);
         mapLayersDetailsRoot.appendChild(layersSummary);
         
-        if (isEsriFeatureVector) {
+        if (supportsLayerSpecificStyleUI) {
           var layerSpecificStyleCheck = document.createElement('wz-checkbox');
           layerSpecificStyleCheck.checked = self.layerSpecificStyle;
           layerSpecificStyleCheck.textContent = "Use layer-specific styles";
@@ -13707,6 +13825,9 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
             // Ensure KML/My Maps immediately re-syncs point ring features.
             if (openMapsMapTypeIsKmlVectorOverlay(map.type)) {
               try { openMapsApplyKmlFolderFeatureStyles(self); } catch (eKmlLs) { /* ignore */ }
+            }
+            if (openMapsInspectorApi && typeof openMapsInspectorApi.notifyHandlesChanged === 'function') {
+              try { openMapsInspectorApi.notifyHandlesChanged(); } catch (eNh) { /* ignore */ }
             }
             saveMapState();
           });
@@ -14665,7 +14786,6 @@ this.updateVisibility = function() {
                     if (!json || json.error) return feats;
                     if (!Array.isArray(json.features)) return feats;
 
-                    var wazeColors = ['#0099ff', '#8663df', '#20c063', '#ff9600', '#ff6699', '#0071c5', '#15ccb2', '#33ccff', '#e040fb', '#ffc000', '#f44336', '#3f51b5', '#009688', '#8bc34a', '#e91e63'];
                     var outerHex = esriPack.fillHex;
 
                     for (var i = 0; i < json.features.length; i++) {
@@ -14677,21 +14797,7 @@ this.updateVisibility = function() {
                       var attrs = (f.attributes && typeof f.attributes === 'object') ? f.attributes : {};
                       var fidVal = (attrs.ObjectId != null) ? String(attrs.ObjectId) : (attrs.OBJECTID != null ? String(attrs.OBJECTID) : null);
 
-                      var innerHex = null;
-                      if (self.layerSpecificStyle) {
-                        var fLayerId = attrs.layerId != null ? attrs.layerId : (attrs.LAYER_ID != null ? attrs.LAYER_ID : 'main');
-                        var fLayerName = 'main';
-                        if (map.layers && map.layers[fLayerId]) {
-                          fLayerName = map.layers[fLayerId].title;
-                        } else if (fLayerId !== 'main') {
-                          fLayerName = String(fLayerId);
-                        }
-                        var lHash = 0;
-                        for (var ti = 0; ti < fLayerName.length; ti++) {
-                          lHash = fLayerName.charCodeAt(ti) + ((lHash << 5) - lHash);
-                        }
-                        innerHex = wazeColors[Math.abs(lHash) % wazeColors.length];
-                      }
+                      var innerHex = self.layerSpecificStyle ? openMapsEsriFeatureLayerInnerHex(map, attrs) : null;
 
                       var gcn = geom.CLASS_NAME;
                       if (gcn === 'OpenLayers.Geometry.Point' || gcn === 'OpenLayers.Geometry.MultiPoint') {
