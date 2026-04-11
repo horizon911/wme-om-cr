@@ -423,15 +423,6 @@ async function onWmeReady() {
       }
       return;
     }
-  if (typeof OpenLayers === 'undefined' || !W.map || typeof W.map.getOLMap !== 'function' || !W.map.getOLMap()) {
-    openMapsOlWaitAttempts += 1;
-    if (openMapsOlWaitAttempts >= OPEN_MAPS_OL_MAX_ATTEMPTS) {
-      if (!openMapsOlGiveUpLogged) {
-        openMapsOlGiveUpLogged = true;
-        log('OpenLayers / W.map not ready after ' + OPEN_MAPS_OL_MAX_ATTEMPTS + 's; stopping retries.');
-      }
-      return;
-    }
     setTimeout(onWmeReady, 1000);
     return;
   }
@@ -729,9 +720,7 @@ async function onWmeReady() {
         CZ: 'Czech Republic',
         UN: 'Universal',
         EU: 'European Union',
-        user: 'Your maps'
-        EU: 'European Union',
-        user: 'Your maps'
+        user: 'Your maps',
       },
       update: {
         message: 'WME Open Maps has been updated! Changelog:',
@@ -1228,9 +1217,7 @@ async function onWmeReady() {
         CZ: 'Tsjechië',
         UN: 'Universal',
         EU: 'European Union',
-        user: 'Jouw kaarten'
-        EU: 'European Union',
-        user: 'Jouw kaarten'
+        user: 'Jouw kaarten',
       },
       update: {
         message: 'Nieuwe versie van WME Open Maps geïnstalleerd! Veranderingen:',
@@ -4618,6 +4605,61 @@ async function onWmeReady() {
     'cz-cuzk': { name: 'ČÚZK Conditions for Network Services', links: { 'en': 'https://cuzk.gov.cz/English/Practical-Information/Conditions-of-Provision-for-Spatial-Data-and-Netwo/Conditions-for-Provision-of-CUZK-Network-Services.aspx', 'cs': 'https://www.cuzk.cz/Predpisy/Podminky-poskytovani-prostor-dat-a-sitovych-sluzeb/Podminky-poskytovani-prostorovych-dat-CUZK.aspx' }, selector: 'main' }
   };
 
+  var Settings = {
+    'get': function() {
+      var settings;
+      if (localStorage.OpenMaps) {
+        settings = JSON.parse(localStorage.OpenMaps);
+      }
+      if (!settings) {
+        settings = {};
+      }
+      if (typeof settings.tooltips == 'undefined') {
+        settings.tooltips = true;
+      }
+      if (!settings.state) {
+        settings.state = {};
+      }
+      if (!settings.state.active) {
+        settings.state.active = [];
+    }
+      // NEW: Ensure accepted ToUs object exists
+      if (!settings.state.acceptedToUs) {
+        settings.state.acceptedToUs = {};
+      }
+      if (!settings.state.touUnreachableBypass) {
+        settings.state.touUnreachableBypass = {};
+      }
+      if (!settings.state.favoriteMapIds) {
+        settings.state.favoriteMapIds = [];
+      }
+      if (!settings.state.userMaps) {
+        settings.state.userMaps = [];
+      }
+      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
+        settings.inspectorAutoWmsGetFeatureInfo = true;
+      }
+      if (!settings.state.userMaps) {
+        settings.state.userMaps = [];
+      }
+      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
+        settings.inspectorAutoWmsGetFeatureInfo = true;
+      }
+      return settings;
+    },
+    'put': function(obj) {
+      localStorage.OpenMaps = JSON.stringify(obj);
+    },
+    'set': function(setting, value) {
+      var settings = this.get();
+      settings[setting] = value;
+      this.put(settings);
+    },
+    'exists': function() {
+      return typeof localStorage.OpenMaps != 'undefined';
+    }
+  };
+
 // --- TERMS OF USE HELPER ---
   var touUnreachableSessionDismissed = Object.create(null);
 
@@ -4768,62 +4810,6 @@ async function onWmeReady() {
     });
   }
 
-
-  var Settings = {
-    'get': function() {
-      var settings;
-      if (localStorage.OpenMaps) {
-        settings = JSON.parse(localStorage.OpenMaps);
-      }
-      if (!settings) {
-        settings = {};
-      }
-      if (typeof settings.tooltips == 'undefined') {
-        settings.tooltips = true;
-      }
-      if (!settings.state) {
-        settings.state = {};
-      }
-      if (!settings.state.active) {
-        settings.state.active = [];
-    }
-      // NEW: Ensure accepted ToUs object exists
-      if (!settings.state.acceptedToUs) {
-        settings.state.acceptedToUs = {};
-      }
-      if (!settings.state.touUnreachableBypass) {
-        settings.state.touUnreachableBypass = {};
-      }
-      if (!settings.state.favoriteMapIds) {
-        settings.state.favoriteMapIds = [];
-      }
-      if (!settings.state.userMaps) {
-        settings.state.userMaps = [];
-      }
-      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
-        settings.inspectorAutoWmsGetFeatureInfo = true;
-      }
-      if (!settings.state.userMaps) {
-        settings.state.userMaps = [];
-      }
-      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
-        settings.inspectorAutoWmsGetFeatureInfo = true;
-      }
-      return settings;
-    },
-    'put': function(obj) {
-      localStorage.OpenMaps = JSON.stringify(obj);
-    },
-    'set': function(setting, value) {
-      var settings = this.get();
-      settings[setting] = value;
-      this.put(settings);
-    },
-    'exists': function() {
-      return typeof localStorage.OpenMaps != 'undefined';
-    }
-  };
-
   var Tooltips = (function() {
     var elements = [];
     var defaultOpts = { trigger: 'hover', container: 'body', placement: 'top' };
@@ -4882,26 +4868,6 @@ async function onWmeReady() {
           elements.push(element);
         }
         var titleStr = useHtml ? String(text).replace(/\n/g, '<br>') : text;
-        var T = bsTooltipCtor();
-        if (!T) {
-          if (useHtml) element.removeAttribute('title');
-          else element.title = titleStr;
-          return;
-        }
-        try {
-          if (useHtml) element.removeAttribute('title');
-          else element.title = titleStr;
-          new T(element, {
-            title: titleStr,
-            html: useHtml,
-            trigger: opts.trigger,
-            container: opts.container,
-            placement: opts.placement,
-            sanitize: false
-          });
-        } catch (errInit) {
-          if (useHtml) element.removeAttribute('title');
-          else element.title = titleStr;
         var T = bsTooltipCtor();
         if (!T) {
           if (useHtml) element.removeAttribute('title');
@@ -9614,21 +9580,7 @@ async function onWmeReady() {
 // --- CACHED SATELLITE IMAGERY TOGGLE ---
   var OPEN_MAPS_SAT_LAYER_NAME = 'satellite_imagery';
   var wazeSatLayer = W.map.getLayerByName(OPEN_MAPS_SAT_LAYER_NAME);
-  var OPEN_MAPS_SAT_LAYER_NAME = 'satellite_imagery';
-  var wazeSatLayer = W.map.getLayerByName(OPEN_MAPS_SAT_LAYER_NAME);
   const satImagery = document.createElement('wz-checkbox');
-  var satUseSdk = false;
-  if (openMapsWmeSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.isLayerVisible === 'function') {
-    try {
-      satImagery.checked = openMapsWmeSdk.Map.isLayerVisible({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
-      satUseSdk = true;
-    } catch (eSatSdk) {
-      satUseSdk = false;
-    }
-  }
-  if (!satUseSdk) {
-    satImagery.checked = wazeSatLayer.getVisibility();
-  }
   var satUseSdk = false;
   if (openMapsWmeSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.isLayerVisible === 'function') {
     try {
@@ -9643,38 +9595,6 @@ async function onWmeReady() {
   }
 
   satImagery.addEventListener('change', function(e) {
-    var on = e.target.checked;
-    if (satUseSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.setLayerVisibility === 'function') {
-      try {
-        openMapsWmeSdk.Map.setLayerVisibility({ layerName: OPEN_MAPS_SAT_LAYER_NAME, visibility: on });
-        return;
-      } catch (eSet) { /* fall through */ }
-    }
-    wazeSatLayer.setVisibility(on);
-  });
-
-  if (satUseSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.trackLayerEvents === 'function') {
-    try {
-      openMapsWmeSdk.Events.trackLayerEvents({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
-    } catch (eTr) { /* ignore */ }
-    try {
-      openMapsWmeSdk.Events.on({
-        eventName: 'wme-layer-visibility-changed',
-        eventHandler: function(payload) {
-          if (!payload || payload.layerName !== OPEN_MAPS_SAT_LAYER_NAME) return;
-          try {
-            satImagery.checked = openMapsWmeSdk.Map.isLayerVisible({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
-          } catch (eIs) { /* ignore */ }
-        }
-      });
-    } catch (eOn) { /* ignore */ }
-  } else {
-    wazeSatLayer.events.register('visibilitychanged', null, function() {
-      if (satImagery.checked !== wazeSatLayer.getVisibility()) {
-        satImagery.checked = wazeSatLayer.getVisibility();
-      }
-    });
-  }
     var on = e.target.checked;
     if (satUseSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.setLayerVisibility === 'function') {
       try {
@@ -10408,19 +10328,6 @@ var handleList = document.createElement('div');
         const rB = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer) : h.bboxLayer;
         ourOlRefs.add(rB);
       }
-    const aerialImageryIndex = openMapsAerialStackFloorForSync(olMap, wazeLayers);
-
-    // Use live OL refs: W.map.getLayers() entries may not be `===` handles[].layer (My Maps is added as raw OpenLayers.Vector).
-    const ourOlRefs = new Set();
-    handles.forEach((h) => {
-      if (h.layer) {
-        const rL = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer) : h.layer;
-        ourOlRefs.add(rL);
-      }
-      if (h.bboxLayer) {
-        const rB = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer) : h.bboxLayer;
-        ourOlRefs.add(rB);
-      }
     });
 
     let minForeignAbove = Infinity;
@@ -10470,14 +10377,7 @@ var handleList = document.createElement('div');
     }
 
     handles.forEach((h) => {
-    handles.forEach((h) => {
       if (!h.layer) return;
-      if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
-      const rank = participating.indexOf(h);
-      if (rank < 0) return;
-      const z = Math.max(floorZ, topIndex - rank);
-      const lyrOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
-      if (olMap.layers.indexOf(lyrOl) >= 0) olMap.setLayerIndex(lyrOl, z);
       if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
       const rank = participating.indexOf(h);
       if (rank < 0) return;
@@ -10489,11 +10389,6 @@ var handleList = document.createElement('div');
     const maxOurZ = minForeignAbove === Infinity ? Infinity : minForeignAbove - 1;
     handles.forEach(h => {
       if (!h.layer || !h.bboxLayer) return;
-      if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
-      const mainOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
-      const bboxOl = openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer;
-      if (olMap.layers.indexOf(mainOl) < 0 || olMap.layers.indexOf(bboxOl) < 0) return;
-      const ti = olMap.getLayerIndex(mainOl);
       if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
       const mainOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
       const bboxOl = openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer;
@@ -10523,7 +10418,6 @@ function onMapSort() {
     const newHandles = [];
 
     nodes.forEach(node => {
-      const h = handles.find(handle => String(handle.mapId) === String(node.dataset.mapId));
       const h = handles.find(handle => String(handle.mapId) === String(node.dataset.mapId));
       if (h) newHandles.push(h);
     });
@@ -11722,63 +11616,10 @@ function onMapSort() {
       } else {
         // WMS GetFeatureInfo
         queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatureInfo&STYLES=&BBOX=' + getMapExtent().toBBOX() +
-      lastQueryInspectorPayload = null;
-      var mapId = getFeatureInfoControl.params?.id;
-      var queriedMap = mapId ? maps.get(mapId) : null;
-      var isEsri = queriedMap && queriedMap.type === 'ESRI';
-      var isEsriFeature = queriedMap && queriedMap.type === 'ESRI_FEATURE';
-      var queryUrl = '';
-      if (isEsri || isEsriFeature) {
-        // ArcGIS REST Identify (MapServer)
-        var olMap = (W && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
-        var ll = null;
-        try {
-          if (olMap && typeof olMap.getLonLatFromPixel === 'function') ll = olMap.getLonLatFromPixel(e.xy);
-          else if (olMap && typeof olMap.getLonLatFromViewPortPx === 'function') ll = olMap.getLonLatFromViewPortPx(e.xy);
-        } catch (err) {
-          ll = null;
-        }
-        var x = ll ? ll.lon : null;
-        var y = ll ? ll.lat : null;
-        if (isEsriFeature) {
-          // ArcGIS FeatureServer point/line/polygon query around click
-          // Distance is in meters for WebMercator when units=esriSRUnit_Meter.
-          var base = String(getFeatureInfoControl.params.url || '').replace(/\/+$/, '');
-          queryUrl =
-            base +
-            '/query?f=json&where=' + encodeURIComponent('1=1') +
-            '&geometry=' + encodeURIComponent(String(x) + ',' + String(y)) +
-            '&geometryType=esriGeometryPoint&inSR=3857&outSR=3857' +
-            '&spatialRel=esriSpatialRelIntersects&distance=25&units=esriSRUnit_Meter' +
-            '&returnGeometry=false&outFields=*' +
-            '&resultRecordCount=25';
-        } else {
-          var extent = getMapExtent();
-          var sz = W.map.getSize();
-          var identifyLayers = getFeatureInfoControl.params.layers || '';
-          // Identify expects `layers=all:<ids>` (or omit for all). Filter to numeric layer ids only.
-          var esriIds = String(identifyLayers || '')
-            .split(',')
-            .map(s => String(s).trim())
-            .filter(s => s && /^-?\d+$/.test(s));
-          var layersParam = esriIds.length ? ('layers=all:' + esriIds.join(',')) : 'layers=all';
-          queryUrl =
-            getFeatureInfoControl.params.url.replace(/\/+$/, '') +
-            '/identify?f=json&geometry=' + encodeURIComponent(String(x) + ',' + String(y)) +
-            '&geometryType=esriGeometryPoint&sr=3857' +
-            '&tolerance=6&returnGeometry=false' +
-            '&mapExtent=' + encodeURIComponent(extent.toBBOX()) +
-            '&imageDisplay=' + encodeURIComponent(String(sz.w) + ',' + String(sz.h) + ',96') +
-            '&' + layersParam;
-        }
-      } else {
-        // WMS GetFeatureInfo
-        queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatureInfo&STYLES=&BBOX=' + getMapExtent().toBBOX() +
           '&LAYERS=' + getFeatureInfoControl.params.layers + '&QUERY_LAYERS=' + getFeatureInfoControl.params.layers +
           '&HEIGHT=' + W.map.getSize().h + '&WIDTH=' + W.map.getSize().w +
           // FIX: Added FEATURE_COUNT=50 to force the server to return multiple overlapping layers/objects!
           '&VERSION=1.3.0&CRS=EPSG:3857&I=' + e.xy.x + '&J=' + e.xy.y + '&FEATURE_COUNT=50&INFO_FORMAT=text/html';
-      }
       }
       // --- MODERNIZED DYNAMIC TITLE ---
           // Uses Optional Chaining to prevent null crashes and Template Literals for the string
@@ -11795,7 +11636,6 @@ function onMapSort() {
       GM_xmlhttpRequest({
         method: 'GET',
         headers: {
-          Accept: (isEsri || isEsriFeature) ? 'application/json' : 'text/xml'
           Accept: (isEsri || isEsriFeature) ? 'application/json' : 'text/xml'
         },
         url: queryUrl,
@@ -11930,31 +11770,17 @@ function onMapSort() {
                     });
                   }
 
-                  lastQueryInspectorPayload = {
-                    type: 'wms',
-                    contentEl: queryWindowContent,
-                    mapId: mapId,
-                    layersStr: getFeatureInfoControl.params.layers || ''
-                  };
-                  if (openMapsInspectorApi) {
-                    openMapsInspectorApi.maybeAutoIngest(false, {
-                      contentEl: queryWindowContent,
-                      mapId: mapId,
-                      layersStr: getFeatureInfoControl.params.layers || ''
-                    });
-                  }
-
                   queryWindow.style.display = 'block';
-              var escHandler = function(e) {
-                if (e.keyCode == 27) { // Esc key
-                  if (queryWindow.style.display == 'block') {
-                    queryWindow.style.display = 'none';
-                    e.stopPropagation();
-                  }
-                  document.removeEventListener('keydown', escHandler);
-                }
-              };
-              document.addEventListener('keydown', escHandler);
+                  var escHandler = function(e) {
+                    if (e.keyCode == 27) { // Esc key
+                      if (queryWindow.style.display == 'block') {
+                        queryWindow.style.display = 'none';
+                        e.stopPropagation();
+                      }
+                      document.removeEventListener('keydown', escHandler);
+                    }
+                  };
+                  document.addEventListener('keydown', escHandler);
             } else {
               querySymbol.style.color = '#999';
               queryWindowContent.appendChild(querySymbol);
@@ -11971,7 +11797,6 @@ function onMapSort() {
               emptyResponseAdvice.appendChild(kbd);
               if (parts.length > 1) emptyResponseAdvice.appendChild(document.createTextNode(parts.slice(1).join('{hotkey}')));
               queryWindowContent.appendChild(emptyResponseAdvice);
-            }
             }
             }
           } else {
@@ -12340,7 +12165,6 @@ function onMapSort() {
     copyBtn.style.flexShrink = '0';
     copyBtn.addEventListener('click', function() {
       omCopyTextToClipboard(copyValue).then(function() {
-      omCopyTextToClipboard(copyValue).then(function() {
         copyBtn.setAttribute('color', 'positive');
         copyBtn.innerHTML = successHtml;
         setTimeout(function() {
@@ -12408,13 +12232,18 @@ var layerItem = document.createElement('li');
       var parentSwitch = parentGroup.querySelector('wz-toggle-switch');
       var parentObserver = new MutationObserver(() => {
         layerToggle.disabled = !parentSwitch.hasAttribute('checked');
-        toggleCallback && toggleCallback(layerToggle.checked && parentSwitch.hasAttribute('checked'));
+        if (!toggleCallback) return;
+        var intent = layerToggle.checked && parentSwitch.hasAttribute('checked');
+        // Defer: MapHandle may not have assigned setManualVisibility yet during construction.
+        queueMicrotask(function() { toggleCallback(intent); });
       });
       parentObserver.observe(parentSwitch, { attributes: true, attributeFilter: ['checked'] });
 
       // FIX: Use 'change' event for Waze components instead of 'click' to avoid event races
       layerToggle.addEventListener('change', e => {
-        toggleCallback(e.target.checked && parentSwitch.hasAttribute('checked'));
+        if (!toggleCallback) return;
+        var intent = e.target.checked && parentSwitch.hasAttribute('checked');
+        queueMicrotask(function() { toggleCallback(intent); });
       });
 
       // Set initial state (both property AND attribute so it survives Drag & Drop)
@@ -12745,7 +12574,6 @@ function populateAddMapSuggestions(filterText) {
         selectMapToAdd(row.dataset.mapId);
       });
       if (map.area && map.area !== 'user') {
-      if (map.area && map.area !== 'user') {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
         flagImg.alt = '';
@@ -12830,49 +12658,6 @@ function updateMapSelector() {
     });
     syncAddMapViewportHint();
     applyActiveMapsFilter();
-  }
-
-/** Esri REST JSON geometry → OpenLayers.Geometry (EPSG:3857 coords). Shared by ESRI_FEATURE overlay and Map Inspector. */
-function openMapsEsriGeometryToOpenLayers(g) {
-  if (!g || typeof OpenLayers === 'undefined') return null;
-  try {
-    if (g.x !== undefined && g.y !== undefined) {
-      return new OpenLayers.Geometry.Point(Number(g.x), Number(g.y));
-    }
-    if (g.rings && g.rings.length) {
-      var linears = [];
-      for (var ri = 0; ri < g.rings.length; ri++) {
-        var ring = g.rings[ri];
-        if (!ring || !ring.length) continue;
-        var pts = [];
-        for (var pi = 0; pi < ring.length; pi++) {
-          pts.push(new OpenLayers.Geometry.Point(ring[pi][0], ring[pi][1]));
-        }
-        linears.push(new OpenLayers.Geometry.LinearRing(pts));
-      }
-      if (!linears.length) return null;
-      return new OpenLayers.Geometry.Polygon(linears);
-    }
-    if (g.paths && g.paths.length) {
-      var lines = [];
-      for (var pi2 = 0; pi2 < g.paths.length; pi2++) {
-        var path = g.paths[pi2];
-        if (!path || !path.length) continue;
-        var pts2 = [];
-        for (var pj = 0; pj < path.length; pj++) {
-          pts2.push(new OpenLayers.Geometry.Point(path[pj][0], path[pj][1]));
-        }
-        lines.push(new OpenLayers.Geometry.LineString(pts2));
-      }
-      if (!lines.length) return null;
-      if (lines.length === 1) return lines[0];
-      return new OpenLayers.Geometry.MultiLineString(lines);
-    }
-  } catch (e) {
-    return null;
-  }
-  return null;
-}
   }
 
 /** Esri REST JSON geometry → OpenLayers.Geometry (EPSG:3857 coords). Shared by ESRI_FEATURE overlay and Map Inspector. */
@@ -13296,10 +13081,6 @@ function loadTileError(tile, callback) {
         saturate: handle.saturate,
         hue: handle.hue,
         gamma: handle.gamma,
-        invert: handle.invert,
-        blendMode: handle.blendMode,
-        pixelManipulationsOverride: handle.pixelManipulationsOverride,
-        wmsArcgisRestViewportProbe: handle.wmsArcgisRestViewportProbe !== false
         invert: handle.invert,
         blendMode: handle.blendMode,
         pixelManipulationsOverride: handle.pixelManipulationsOverride,
@@ -14037,6 +13818,7 @@ function MapHandle(map, options) {
     this.layer = null;
     /** Map definition (type, title, bbox, layers, …). Required by KML/GMM helpers (`mapHandle.map`). */
     this.map = map;
+    var isEsriFeatureVector = map.type === 'ESRI_FEATURE' || openMapsMapTypeIsKmlVectorOverlay(map.type);
     this.mapId = map.id;
     this.mapLayers = [];
     this.opacity = (options && options.opacity ? options.opacity : "100");
@@ -14426,13 +14208,6 @@ function updateTileLoader() {
   }
 
   function buildMainCard() {
-  function openMapsMapHasZoomMeta(m) {
-    var wmsFloorRaw = m.wmsMinEffectiveZoom != null ? m.wmsMinEffectiveZoom : m.minEffectiveZoom;
-    var hasFloor = m.type === 'WMS' && wmsFloorRaw != null && wmsFloorRaw !== '';
-    return !!(m.zoomRange || hasFloor);
-  }
-
-  function buildMainCard() {
       UI.container = document.createElement('wz-card');
       UI.container.className = 'result maps-menu-item list-item-card';
       UI.container.dataset.mapId = map.id; // FIX: Tag the container for the sort engine!
@@ -14482,7 +14257,6 @@ var handle = document.createElement('div');
       badgeWrapper.appendChild(UI.badge);
 
       // --- OVERLAY FLAG ---
-      if (map.area && map.area !== 'user') {
       if (map.area && map.area !== 'user') {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
@@ -14836,7 +14610,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       var visualCommonBox = document.createElement('div');
       visualCommonBox.style.cssText = 'display:flex; flex-direction:column; gap:10px;';
 
-      var isEsriFeatureVector = map.type === 'ESRI_FEATURE' || openMapsMapTypeIsKmlVectorOverlay(map.type);
       /** Layer-specific colors + ring-in-ring: any map with a Map layers sublayer list (tiles + vectors). */
       var supportsLayerSpecificStyleUI = map.type === 'ESRI_FEATURE' || map.type === 'ESRI' || map.type === 'WMS' || openMapsMapTypeIsKmlVectorOverlay(map.type);
       var hideBboxOption = map.area === 'UN' || openMapsMapTypeIsKmlVectorOverlay(map.type);
@@ -14851,15 +14624,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           }
           saveMapState();
         });
-        transCheck.addEventListener('change', function() {
-          self.transparent = !self.transparent;
-          if (self.layer && typeof self.layer.mergeNewParams === 'function') {
-            try { self.layer.mergeNewParams({ transparent: self.transparent }); } catch (eT) {}
-          }
-          saveMapState();
-        });
         Tooltips.add(transCheck, I18n.t('openmaps.transparent_label_tooltip'));
-        visualCommonBox.appendChild(transCheck);
         visualCommonBox.appendChild(transCheck);
       }
 
@@ -14924,13 +14689,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var opLabel = document.createElement('span');
         opLabel.textContent = I18n.t('openmaps.opacity_label') + ':';
         opacityBox.appendChild(opLabel);
-        var opLabel = document.createElement('span');
-        opLabel.textContent = I18n.t('openmaps.opacity_label') + ':';
-        opacityBox.appendChild(opLabel);
 
-        var opSlider = document.createElement('input');
-        opSlider.type = 'range'; opSlider.max = 100; opSlider.min = 5; opSlider.step = 5; opSlider.value = self.opacity;
-        opSlider.style.cssText = 'flex:1; min-width:80px; margin:0; accent-color:#0099ff; cursor:pointer;';
         var opSlider = document.createElement('input');
         opSlider.type = 'range'; opSlider.max = 100; opSlider.min = 5; opSlider.step = 5; opSlider.value = self.opacity;
         opSlider.style.cssText = 'flex:1; min-width:80px; margin:0; accent-color:#0099ff; cursor:pointer;';
@@ -14938,18 +14697,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var opVal = document.createElement('span');
         opVal.textContent = self.opacity + '%';
         opVal.style.cssText = 'font-weight:bold; min-width:35px; color:#3c4043;';
-        var opVal = document.createElement('span');
-        opVal.textContent = self.opacity + '%';
-        opVal.style.cssText = 'font-weight:bold; min-width:35px; color:#3c4043;';
 
-        opSlider.addEventListener('input', function() {
-          if (self.layer && typeof self.layer.setOpacity === 'function') {
-            self.layer.setOpacity(Math.max(5, Math.min(100, this.value)) / 100);
-          }
-          self.opacity = this.value;
-          opVal.textContent = this.value + '%';
-        });
-        opSlider.addEventListener('change', function() { saveMapState(); });
         opSlider.addEventListener('input', function() {
           if (self.layer && typeof self.layer.setOpacity === 'function') {
             self.layer.setOpacity(Math.max(5, Math.min(100, this.value)) / 100);
@@ -14963,18 +14711,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         opacityBox.appendChild(opVal);
         visualCommonBox.appendChild(opacityBox);
       }
-        opacityBox.appendChild(opSlider);
-        opacityBox.appendChild(opVal);
-        visualCommonBox.appendChild(opacityBox);
-      }
 
-      if (!isEsriFeatureVector) {
-        function createSlider(label, prop, min, max, unit) {
-          var row = document.createElement('div');
-          row.style.cssText = 'display:flex; flex-direction:column;';
-          var labelEl = document.createElement('div');
-          labelEl.style.cssText = 'display:flex; justify-content:space-between; font-size:11px; color:#5f6368;';
-          labelEl.innerHTML = `<span>${label}</span><span id="val-${prop}-${map.id}">${self[prop]}${unit}</span>`;
       if (!isEsriFeatureVector) {
         function createSlider(label, prop, min, max, unit) {
           var row = document.createElement('div');
@@ -14992,30 +14729,12 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
             self.applyFilters();
           });
           slider.addEventListener('change', () => saveMapState());
-          var slider = document.createElement('input');
-          slider.type = 'range'; slider.min = min; slider.max = max; slider.value = self[prop];
-          slider.style.cssText = 'width:100%; cursor:pointer; accent-color:#0099ff;';
-          slider.addEventListener('input', (e) => {
-            self[prop] = e.target.value;
-            document.getElementById(`val-${prop}-${map.id}`).textContent = e.target.value + unit;
-            self.applyFilters();
-          });
-          slider.addEventListener('change', () => saveMapState());
 
           row.appendChild(labelEl);
           row.appendChild(slider);
           return {row, slider};
         }
-          row.appendChild(labelEl);
-          row.appendChild(slider);
-          return {row, slider};
-        }
 
-        var sBright = createSlider(I18n.t('openmaps.slider_brightness'), 'brightness', 0, 200, '%');
-        var sContrast = createSlider(I18n.t('openmaps.slider_contrast'), 'contrast', 0, 200, '%');
-        var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
-        var sHue = createSlider(I18n.t('openmaps.slider_hue_rotate'), 'hue', 0, 360, '°');
-        var sGamma = createSlider(I18n.t('openmaps.slider_gamma'), 'gamma', 10, 200, '%');
         var sBright = createSlider(I18n.t('openmaps.slider_brightness'), 'brightness', 0, 200, '%');
         var sContrast = createSlider(I18n.t('openmaps.slider_contrast'), 'contrast', 0, 200, '%');
         var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
@@ -15024,27 +14743,13 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
 // --- BLEND MODE DROPDOWN ---
         var blendRow = document.createElement('div');
         blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
-        var blendRow = document.createElement('div');
-        blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
 
-        var blendLabel = document.createElement('span');
-        blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
         var blendLabel = document.createElement('span');
         blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
 
         var blendSelect = document.createElement('select');
         blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
-        var blendSelect = document.createElement('select');
-        blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
 
-        var modes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
-        modes.forEach(mode => {
-          var opt = document.createElement('option');
-          opt.value = mode;
-          opt.textContent = mode.split('-').map(function(part) { return part.charAt(0).toUpperCase() + part.slice(1); }).join(' ');
-          if (mode === self.blendMode) opt.selected = true;
-          blendSelect.appendChild(opt);
-        });
         var modes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
         modes.forEach(mode => {
           var opt = document.createElement('option');
@@ -15059,23 +14764,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           self.applyFilters();
           saveMapState();
         });
-        blendSelect.addEventListener('change', (e) => {
-          self.blendMode = e.target.value;
-          self.applyFilters();
-          saveMapState();
-        });
 
-        blendRow.appendChild(blendLabel);
-        blendRow.appendChild(blendSelect);
-        visualCommonBox.appendChild(blendRow);
-        // -----------------------------
-        var invRow = document.createElement('div');
-        invRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;';
-        var invCheck = document.createElement('wz-checkbox');
-        invCheck.textContent = I18n.t('openmaps.invert_colors');
-        invCheck.checked = self.invert;
-        invCheck.addEventListener('change', (e) => { self.invert = e.target.checked; self.applyFilters(); saveMapState(); });
-        invRow.appendChild(invCheck);
         blendRow.appendChild(blendLabel);
         blendRow.appendChild(blendSelect);
         visualCommonBox.appendChild(blendRow);
@@ -15260,187 +14949,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       pmDetails.appendChild(pixelManipulationsSection);
       UI.editContainer.appendChild(pmDetails);
       }
-
-
-
-        var resetBtn = createIconButton('fa-undo', I18n.t('openmaps.reset_visual_default'), true);
-        resetBtn.addEventListener('click', function(e) {
-          if (e && e.preventDefault) e.preventDefault();
-          if (e && e.stopPropagation) e.stopPropagation();
-          self.brightness = 100; self.contrast = 100; self.saturate = 100; self.hue = 0; self.gamma = 100; self.invert = false;
-          [sBright, sContrast, sSaturate, sHue, sGamma].forEach(s => {
-              var p = s.slider.previousSibling.lastChild.id.split('-')[1];
-              s.slider.value = self[p];
-              document.getElementById(s.slider.previousSibling.lastChild.id).textContent = self[p] + (p==='hue'?'°':(p==='blur'?'px':'%'));
-          });
-          invCheck.checked = false;
-          self.blendMode = 'normal'; blendSelect.value = 'normal';
-          self.applyFilters(); saveMapState();
-        });
-        invRow.appendChild(resetBtn);
-
-        [sBright.row, sContrast.row, sSaturate.row, sHue.row, sGamma.row, invRow].forEach(el => visualCommonBox.appendChild(el));
-      }
-
-      if (visualCommonBox.childNodes.length > 0) {
-        slidersContainer.appendChild(visualCommonBox);
-        advColors.appendChild(slidersContainer);
-        UI.editContainer.appendChild(advColors);
-      }
-
-      // --- PIXEL MANIPULATIONS (top-level sibling section; raster/tile only) ---
-      if (!isEsriFeatureVector) {
-      function ensureLayerHasCrossOriginIfNeeded() {
-        // Mirror updateLayers() CORS gating so enabling this feature after the layer exists still works.
-        var wantsPixelManipulation = !!map.pixelManipulations || !!self.improveMap || (self.pixelManipulationsOverride !== null);
-        if (!wantsPixelManipulation) return;
-        if (self.__openmapsTileCrossOrigin) return;
-        if (self.layer) {
-          try { W.map.removeLayer(self.layer); } catch (e) {}
-          self.layer = null;
-        }
-        self.updateLayers();
-      }
-
-      var pmDetails = document.createElement('details');
-      pmDetails.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
-
-      var pmSummary = document.createElement('summary');
-      pmSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
-      pmSummary.innerHTML = '<i class="fa fa-magic" style="margin-right:5px; color:#5f6368;" aria-hidden="true"></i>' + I18n.t('openmaps.pixel_manipulations_title');
-      pmDetails.appendChild(pmSummary);
-
-      var pixelManipulationsSection = document.createElement('div');
-      pixelManipulationsSection.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:8px;';
-
-      var impCheck = document.createElement('wz-checkbox');
-      impCheck.checked = !!self.improveMap;
-      impCheck.textContent = I18n.t('openmaps.map_improvement_label');
-      impCheck.addEventListener('change', () => {
-        self.improveMap = !self.improveMap;
-        ensureLayerHasCrossOriginIfNeeded();
-        if (self.layer) self.layer.redraw();
-        saveMapState();
-      });
-      Tooltips.add(impCheck, I18n.t('openmaps.map_improvement_label_tooltip'));
-      pixelManipulationsSection.appendChild(impCheck);
-
-      var pmInfo = document.createElement('div');
-      pmInfo.style.cssText = 'font-size:11px; color:#70757a; line-height:1.35;';
-      pmInfo.textContent = I18n.t('openmaps.map_improvement_label_tooltip');
-      pixelManipulationsSection.appendChild(pmInfo);
-
-      var pmInfo2 = document.createElement('div');
-      pmInfo2.style.cssText = 'font-size:11px; color:#70757a; line-height:1.35;';
-      pmInfo2.textContent = I18n.t('openmaps.pixel_manipulations_tooltip');
-      pixelManipulationsSection.appendChild(pmInfo2);
-
-      var pmBox = document.createElement('div');
-      pmBox.style.cssText = 'margin-top:0; padding:0; border:none; border-radius:0; background:transparent;';
-
-      var pmHeader = document.createElement('div');
-      pmHeader.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;';
-
-      var pmTitle = document.createElement('div');
-      pmTitle.style.cssText = 'font-weight:600; font-size:12px; color:#3c4043;';
-      pmTitle.textContent = I18n.t('openmaps.pixel_manipulations_title');
-      Tooltips.add(pmTitle, I18n.t('openmaps.pixel_manipulations_tooltip'), true);
-
-      var pmActions = document.createElement('div');
-      pmActions.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;';
-
-      var pmUseDefaultBtn = createIconButton('fa-undo', I18n.t('openmaps.pixel_manipulations_use_default_tooltip'), true);
-      var pmSelectNoneBtn = createIconButton('fa-ban', I18n.t('openmaps.pixel_manipulations_select_none_tooltip'), true);
-      pmActions.appendChild(pmUseDefaultBtn);
-      pmActions.appendChild(pmSelectNoneBtn);
-
-      pmHeader.appendChild(pmTitle);
-      pmHeader.appendChild(pmActions);
-      pmBox.appendChild(pmHeader);
-
-      var defaultOps = openMapsNormalizePixelManipulations(map.pixelManipulations) || [];
-      var defaultLine = document.createElement('div');
-      defaultLine.style.cssText = 'font-size:11px; color:#70757a; margin-bottom:8px; line-height:1.35;';
-      defaultLine.innerHTML = '<strong>' + I18n.t('openmaps.pixel_manipulations_default') + ':</strong> ' + (defaultOps.length ? defaultOps.join(', ') : '—');
-      pmBox.appendChild(defaultLine);
-
-      var overrideLine = document.createElement('div');
-      overrideLine.style.cssText = 'font-size:11px; color:#70757a; margin-bottom:6px; line-height:1.35;';
-      overrideLine.innerHTML = '<strong>' + I18n.t('openmaps.pixel_manipulations_override') + ':</strong>';
-      pmBox.appendChild(overrideLine);
-
-      var pmList = document.createElement('div');
-      pmList.style.cssText = 'display:flex; flex-direction:column; gap:4px; max-height:160px; overflow:auto; padding-right:4px;';
-      pmBox.appendChild(pmList);
-
-      var ops = openMapsAvailablePixelManipulationOps();
-      var pmChecksByOp = {};
-
-      function currentSelectedOps() {
-        var arr = [];
-        ops.forEach(function(op) {
-          var c = pmChecksByOp[op];
-          if (c && c.checked) arr.push(op);
-        });
-        return arr;
-      }
-
-      function setChecksFromList(list) {
-        var set = {};
-        (list || []).forEach(function(x) { set[x] = true; });
-        ops.forEach(function(op) {
-          if (pmChecksByOp[op]) pmChecksByOp[op].checked = !!set[op];
-        });
-      }
-
-      function applyOverrideAndRedraw(newOverride) {
-        var wasNull = (self.pixelManipulationsOverride === null);
-        self.pixelManipulationsOverride = (newOverride === null) ? null : openMapsNormalizePixelManipulations(newOverride);
-        if (wasNull && self.pixelManipulationsOverride !== null) ensureLayerHasCrossOriginIfNeeded();
-        if (self.layer) self.layer.redraw();
-        saveMapState();
-      }
-
-      ops.forEach(function(op) {
-        var row = document.createElement('div');
-        row.style.cssText = 'display:flex; align-items:center; gap:8px;';
-        var cb = document.createElement('wz-checkbox');
-        cb.textContent = op;
-        cb.checked = false;
-        cb.addEventListener('change', function() {
-          applyOverrideAndRedraw(currentSelectedOps());
-        });
-        pmChecksByOp[op] = cb;
-        row.appendChild(cb);
-        pmList.appendChild(row);
-      });
-
-      // Initialize checkbox state from effective list (override if present, else default).
-      setChecksFromList(Array.isArray(self.pixelManipulationsOverride) ? self.pixelManipulationsOverride : defaultOps);
-
-      pmUseDefaultBtn.addEventListener('click', function(e) {
-        if (e && e.preventDefault) e.preventDefault();
-        if (e && e.stopPropagation) e.stopPropagation();
-        applyOverrideAndRedraw(null);
-        setChecksFromList(defaultOps);
-      });
-      pmSelectNoneBtn.addEventListener('click', function(e) {
-        if (e && e.preventDefault) e.preventDefault();
-        if (e && e.stopPropagation) e.stopPropagation();
-        applyOverrideAndRedraw([]);
-        setChecksFromList([]);
-      });
-
-      pixelManipulationsSection.appendChild(pmBox);
-      pmDetails.appendChild(pixelManipulationsSection);
-      UI.editContainer.appendChild(pmDetails);
-      }
-
-
-
-
-
-  
 
       // Sub-Layers (WMS/ESRI: merged catalog from GetCapabilities / MapServer JSON)
       var mapLayersDetailsRoot = null;
@@ -17772,14 +17280,6 @@ this.updateVisibility = function() {
               }
             });
           });
-            loadTileError(obj.tile, msg => {
-              if (msg.ok) {
-                self.clearError();
-              } else {
-                Tooltips.add(UI.error, openMapsEscapeForHtmlTooltip(msg.title) + '\n' + openMapsEscapeForHtmlTooltip(msg.description), true, { html: true });
-              }
-            });
-          });
 
           self.layer.events.register('tileloadstart', null, () => { totalTiles++; updateTileLoader(); });
           self.layer.events.register('tileloaded', null, evt => {
@@ -18744,7 +18244,6 @@ input.open-maps-opacity-slider { vertical-align: middle; display: inline; margin
     document.head.appendChild(styleElement);
   }
   //#endregion
-}
 
 function log(message) {
   if (typeof message === 'string') {
@@ -18769,36 +18268,12 @@ function openMapsLaunchWhenReady(trigger) {
   onWmeReady();
 }
 
-//#region OpenMapsBoot
-var openMapsReadyLaunchStarted = false;
-var openMapsReadyFallbackTimer = null;
-
-function openMapsLaunchWhenReady(trigger) {
-  if (openMapsReadyLaunchStarted) return;
-  openMapsReadyLaunchStarted = true;
-  if (openMapsReadyFallbackTimer) {
-    clearTimeout(openMapsReadyFallbackTimer);
-    openMapsReadyFallbackTimer = null;
-  }
-  log('Launching OpenMaps (' + trigger + ')...');
-  onWmeReady();
-}
-
 function onWmeInitialized() {
   // Use the official SDK-ready state
   if (W?.userscripts?.state?.isReady) {
     openMapsLaunchWhenReady('state ready');
-    openMapsLaunchWhenReady('state ready');
   } else {
     log('WME structure loaded, waiting for "wme-ready" signal...');
-    document.addEventListener('wme-ready', function() {
-      openMapsLaunchWhenReady('wme-ready event');
-    }, { once: true });
-    if (openMapsReadyFallbackTimer) clearTimeout(openMapsReadyFallbackTimer);
-    // Bridge builds occasionally miss `wme-ready`; fire once anyway and let onWmeReady poll OL/W.map.
-    openMapsReadyFallbackTimer = setTimeout(function() {
-      openMapsLaunchWhenReady('wme-ready fallback timeout');
-    }, 2500);
     document.addEventListener('wme-ready', function() {
       openMapsLaunchWhenReady('wme-ready event');
     }, { once: true });
@@ -18812,7 +18287,6 @@ function onWmeInitialized() {
 
 function bootstrap() {
   openMapsInstallHideGooglePlacesSearchThisAreaChip();
-  openMapsInstallHideGooglePlacesSearchThisAreaChip();
   if (typeof W === 'object' && W.userscripts?.state?.isReady) {
     onWmeInitialized();
   } else {
@@ -18822,5 +18296,4 @@ function bootstrap() {
 }
 
 bootstrap();
-//#endregion OpenMapsBoot
 //#endregion OpenMapsBoot
