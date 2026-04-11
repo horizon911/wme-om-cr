@@ -87,6 +87,21 @@ var styleElement;
 
 var OPEN_MAPS_VERSION = '2026.04.08.3';
 
+// Trusted Types / CSP hardening: avoid `innerHTML` where feasible.
+function openMapsClearEl(el) {
+  if (!el) return;
+  try { el.textContent = ''; } catch (e) { /* ignore */ }
+}
+
+function openMapsSetFontAwesomeIcon(el, className) {
+  if (!el) return;
+  openMapsClearEl(el);
+  var i = document.createElement('i');
+  i.className = String(className || '');
+  i.setAttribute('aria-hidden', 'true');
+  el.appendChild(i);
+}
+
 /**
  * Google My Maps (KML) — **piece-by-piece rollout** (satellite broke when this ran unchecked).
  *
@@ -500,6 +515,8 @@ async function onWmeReady() {
       meta_type: 'Type',
       meta_region: 'Region',
       meta_bbox: 'BBox',
+      about: 'About',
+      copy_bbox: 'Copy BBox',
       zoom_meta_band: 'Zoom band',
       zoom_meta_floor: 'Floor',
       zoom_meta_view: 'View',
@@ -980,6 +997,8 @@ async function onWmeReady() {
       meta_type: 'Type',
       meta_region: 'Regio',
       meta_bbox: 'BBox',
+      about: 'Over',
+      copy_bbox: 'BBox kopiëren',
       zoom_meta_band: 'Zoombereik',
       zoom_meta_floor: 'Ondergrens',
       zoom_meta_view: 'Beeld',
@@ -1423,6 +1442,8 @@ async function onWmeReady() {
       copy_map_definition_menu_all_make_enabled_default: 'Copier (toutes les couches, définir les couches activées par défaut)',
       copy_map_definition_menu_enabled_only_make_default: 'Copier (couches activées uniquement, les définir par défaut)',
       copy_done: 'Copié',
+      about: 'À propos',
+      copy_bbox: 'Copier BBox',
       map_layers_show_all: 'Afficher toutes les couches',
       map_layers_hide_all: 'Masquer toutes les couches',
       tou_accept_disabled_tooltip: 'Ouvrez d’abord chaque lien de langue ci-dessus.',
@@ -1526,6 +1547,8 @@ async function onWmeReady() {
       meta_type: 'Tipo',
       meta_region: 'Região',
       meta_bbox: 'BBox',
+      about: 'Sobre',
+      copy_bbox: 'Copiar BBox',
       draw_bbox_on_map: 'Desenhar caixa de limite no mapa',
       visual_adjustments: 'Ajustes visuais',
       slider_brightness: 'Brilho',
@@ -4811,7 +4834,7 @@ async function onWmeReady() {
   /** @returns {boolean} */
   function openMapsLayerNameIsKmlVectorOverlay(olLayerName) {
     var s = olLayerName != null ? String(olLayerName) : '';
-    return s.indexOf('OpenMaps_GOOGLE_MY_MAPS_') === 0 || s.indexOf('OpenMaps_LOCAL_KML_') === 0;
+    return s.indexOf('OpenMaps_GOOGLE_MY_MAPS_') === 0 || s.indexOf('OpenMaps_LOCAL_KML_') === 0 || s.indexOf('OpenMaps_REMOTE_KML_') === 0;
   }
 
   /** Re-apply after `OpenLayers.Layer.Vector` recreate (e.g. eligibility teardown). Idempotent per layer instance. */
@@ -4849,8 +4872,51 @@ async function onWmeReady() {
       };
       proto.__openmapsKmlRendererDrawFeaturePatched = true;
     }
+
+    // Chrome warning: "Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true"
+    // OpenLayers hit-detection uses `getImageData` heavily (via `Layer.getFeatureFromEvent`). Hint the 2D contexts.
+    function patchCanvasRendererWillReadFrequently(proto) {
+      if (!proto || proto.__openmapsCanvasWillReadFrequentlyPatched) return;
+      var init = proto.initialize;
+      if (typeof init !== 'function') return;
+      proto.initialize = function() {
+        var r = init.apply(this, arguments);
+        try {
+          var c = this && this.canvas ? this.canvas : null;
+          if (c && typeof c.getContext === 'function') {
+            var ctx = null;
+            try { ctx = c.getContext('2d', { willReadFrequently: true }); } catch (e1) { ctx = null; }
+            if (!ctx) {
+              try { ctx = c.getContext('2d'); } catch (e2) { ctx = null; }
+            }
+            if (ctx) {
+              if (this.context) this.context = ctx;
+              if (this.canvasContext) this.canvasContext = ctx;
+              if (this.ctx) this.ctx = ctx;
+            }
+          }
+          var hc = this && (this.hitCanvas || this.hitDetectionCanvas) ? (this.hitCanvas || this.hitDetectionCanvas) : null;
+          if (hc && typeof hc.getContext === 'function') {
+            var hctx = null;
+            try { hctx = hc.getContext('2d', { willReadFrequently: true }); } catch (e3) { hctx = null; }
+            if (!hctx) {
+              try { hctx = hc.getContext('2d'); } catch (e4) { hctx = null; }
+            }
+            if (hctx) {
+              if (this.hitContext) this.hitContext = hctx;
+              if (this.hitCtx) this.hitCtx = hctx;
+            }
+          }
+        } catch (eRaf) { /* ignore */ }
+        return r;
+      };
+      proto.__openmapsCanvasWillReadFrequentlyPatched = true;
+    }
     try {
-      if (OpenLayers.Renderer.Canvas && OpenLayers.Renderer.Canvas.prototype) patchRendererProto(OpenLayers.Renderer.Canvas.prototype);
+      if (OpenLayers.Renderer.Canvas && OpenLayers.Renderer.Canvas.prototype) {
+        patchRendererProto(OpenLayers.Renderer.Canvas.prototype);
+        patchCanvasRendererWillReadFrequently(OpenLayers.Renderer.Canvas.prototype);
+      }
       if (OpenLayers.Renderer.SVG && OpenLayers.Renderer.SVG.prototype) patchRendererProto(OpenLayers.Renderer.SVG.prototype);
     } catch (eO) { /* ignore */ }
     __openmapsKmlRendererHooksInstalled = true;
@@ -5308,9 +5374,14 @@ async function onWmeReady() {
     return 'OpenMaps_LOCAL_KML_' + String(mapId);
   }
 
+  /** OpenLayers `layer.name` for remote KML URL entries (`REMOTE_KML`). */
+  function openMapsRemoteKmlLayerOlName(mapId) {
+    return 'OpenMaps_REMOTE_KML_' + String(mapId);
+  }
+
   /** Map types that share the deferred KML vector overlay path (not WME `addLayer`; no `setLayerIndex` sync). */
   function openMapsMapTypeIsKmlVectorOverlay(mapType) {
-    return mapType === 'GOOGLE_MY_MAPS' || mapType === 'LOCAL_KML';
+    return mapType === 'GOOGLE_MY_MAPS' || mapType === 'LOCAL_KML' || mapType === 'REMOTE_KML';
   }
 
   /** Max persisted KML string length per uploaded file (UTF-16 code units); avoids blowing script storage. */
@@ -5511,6 +5582,34 @@ async function onWmeReady() {
       }
     }
     return root;
+  }
+
+  /** Best-effort KML Document title (`<Document><name>…`). */
+  function openMapsKmlExtractDocumentTitle(textG) {
+    var t = String(textG || '');
+    if (!t) return null;
+    var doc = null;
+    try {
+      doc = new DOMParser().parseFromString(t, 'text/xml');
+    } catch (eP) {
+      return null;
+    }
+    if (!doc || doc.getElementsByTagName('parsererror').length) return null;
+    var docEl = null;
+    try {
+      docEl = openMapsKmlFindDocumentElement(doc);
+    } catch (eDoc) {
+      docEl = null;
+    }
+    if (!docEl) return null;
+    var nm = null;
+    try {
+      nm = openMapsKmlChildText(docEl, 'name');
+    } catch (eNm) {
+      nm = null;
+    }
+    nm = nm != null ? String(nm).trim() : '';
+    return nm ? nm : null;
   }
 
   /** Convert KML ABGR color (aabbggrr) to #rrggbb (ignores alpha). */
@@ -6107,7 +6206,7 @@ async function onWmeReady() {
    * Map Inspector: viewport-lite vector enumeration, list/details, optional WMS/ESRI query import.
    * UI is a collapsible `details` block in the Open Maps sidebar (after the active maps list).
    */
-  function initOpenMapsInspector(sidebarTab) {
+  function initOpenMapsInspector(sidebarTab, toolsHost) {
     if (typeof OpenLayers === 'undefined' || !W.map || typeof W.map.getOLMap !== 'function') return;
     var olMap = W.map.getOLMap();
     if (!olMap) return;
@@ -6152,6 +6251,9 @@ async function onWmeReady() {
     var mapEsriHoverPendingEvt = null;
     /** Empty string = no ESRI feature under pointer; non-empty = cache key for last hover hit. */
     var mapEsriHoverLastKey = '';
+    /** Throttle expensive `getFeatureFromEvent` hover hit-testing (Canvas readbacks in OL). */
+    var mapEsriHoverLastHitTestAt = 0;
+    var OPEN_MAPS_HOVER_HITTEST_MIN_MS = 120;
     var truncated = false;
     var viewportGen = 0;
     /** Per viewport scan generation: remote layer request bookkeeping for progress UI. */
@@ -6200,7 +6302,7 @@ async function onWmeReady() {
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'openmaps-inspector-ibtn' + (extraClass ? ' ' + extraClass : '');
-      b.innerHTML = '<i class="fa ' + iconClass + '" aria-hidden="true"></i>';
+      openMapsSetFontAwesomeIcon(b, 'fa ' + iconClass);
       b.setAttribute('aria-label', I18n.t('openmaps.' + tipKey));
       b.title = I18n.t('openmaps.' + tipKey);
       return b;
@@ -6284,8 +6386,8 @@ async function onWmeReady() {
     inspectorLauncher.innerHTML = '<i class="fa fa-list-alt" aria-hidden="true"></i>';
     inspectorLauncher.title = I18n.t('openmaps.inspector_title');
     inspectorLauncher.setAttribute('aria-label', I18n.t('openmaps.inspector_title'));
-    inspectorLauncher.style.cssText = 'width:100%; margin:8px 0 4px 0;';
-    sidebarTab.appendChild(inspectorLauncher);
+    inspectorLauncher.style.cssText = 'flex:0 0 auto; min-width:40px; padding:6px 10px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:1px solid #dadce0; border-radius:6px; background:#fff;';
+    (toolsHost || sidebarTab).appendChild(inspectorLauncher);
 
     var win = document.createElement('div');
     win.className = 'openmaps-inspector-window';
@@ -7483,7 +7585,7 @@ async function onWmeReady() {
       var sched = inspectorRemoteScheduled[g] || 0;
       var done = inspectorRemoteCompleted[g] || 0;
       var showScan = sched > 0 && done < sched;
-      statusLine.innerHTML = '';
+      openMapsClearEl(statusLine);
       statusLine.className = 'openmaps-inspector-status' + (display.length ? ' openmaps-inspector-status--has' : '');
       if (showScan) statusLine.classList.add('openmaps-inspector-status--busy');
       var countSpan = document.createElement('span');
@@ -7517,7 +7619,7 @@ async function onWmeReady() {
     }
 
     function renderFullList() {
-      listHost.innerHTML = '';
+      openMapsClearEl(listHost);
       syncMapGroupDefaults();
       paintInspectorStatusLine();
       var ids = getCombinedOrderedIds();
@@ -8623,6 +8725,10 @@ async function onWmeReady() {
       var evt = mapEsriHoverPendingEvt;
       mapEsriHoverPendingEvt = null;
       if (!evt) return;
+      var now = Date.now ? Date.now() : (new Date()).getTime();
+      // OL vector hit-testing does repeated canvas readbacks; throttle to reduce jank + console noise.
+      if (now - mapEsriHoverLastHitTestAt < OPEN_MAPS_HOVER_HITTEST_MIN_MS) return;
+      mapEsriHoverLastHitTestAt = now;
       var hit = findTopEsriFeatureFromEvent(evt);
       if (hit && hit.feature) {
         hit = { feature: resolveOpenMapsOverlayHitFeature(hit.feature, hit.layer), layer: hit.layer };
@@ -8661,6 +8767,7 @@ async function onWmeReady() {
       mapEsriHoverLastKey = '';
       cancelMapEsriHoverMotion();
       mapHoverHighlightId = null;
+      mapEsriHoverLastHitTestAt = 0;
       applyInspectorDualHighlights();
     }
 
@@ -8964,7 +9071,7 @@ async function onWmeReady() {
           tbody.appendChild(tr);
         });
 
-        overlay._table.innerHTML = '';
+        openMapsClearEl(overlay._table);
         overlay._table.appendChild(thead);
         overlay._table.appendChild(tbody);
       }
@@ -9170,6 +9277,12 @@ async function onWmeReady() {
   // New map layer drawer group
   var omGroup = createLayerToggler(null, true, I18n.t('openmaps.layer_group_title'), null);
 
+  // Top tools strip (satellite + inspector)
+  var openMapsToolsStrip = document.createElement('div');
+  openMapsToolsStrip.className = 'openmaps-tools-strip';
+  openMapsToolsStrip.style.cssText = 'display:flex; align-items:center; gap:8px; margin:0 0 8px 0;';
+  tab.appendChild(openMapsToolsStrip);
+
 // Satellite imagery toggle (prefer WME SDK Map.* — WME_LAYER_NAMES has no satellite; layer name stays the internal string)
 // --- CACHED SATELLITE IMAGERY TOGGLE ---
   var OPEN_MAPS_SAT_LAYER_NAME = 'satellite_imagery';
@@ -9223,7 +9336,8 @@ async function onWmeReady() {
   }
 
   satImagery.textContent = I18n.t('openmaps.satellite_imagery');
-  tab.appendChild(satImagery);
+  satImagery.style.cssText = 'flex:1 1 auto;';
+  openMapsToolsStrip.appendChild(satImagery);
   // ----------------------------------------
 
   // Implement tab content
@@ -9275,7 +9389,7 @@ var handleList = document.createElement('div');
   handleList.className = 'openmaps-map-list';
   tab.appendChild(handleList);
 
-  initOpenMapsInspector(tab);
+  initOpenMapsInspector(tab, openMapsToolsStrip);
 
   // --- SMART DRAG & DROP ENGINE ---
   function refreshMapDrag() {
@@ -10027,10 +10141,14 @@ function onMapSort() {
 
   // Select box to add new Open Maps maps
 // --- NATIVE SEARCHABLE MAP SELECTOR ---
+    var addSourcesContainer = document.createElement('div');
+    addSourcesContainer.className = 'openmaps-add-sources';
+    addSourcesContainer.style.cssText = 'margin-top:12px; padding-top:12px; border-top:1px solid #e8eaed;';
+
     var addMapContainer = document.createElement('div');
     addMapContainer.style.position = 'relative';
     addMapContainer.style.marginTop = '8px';
-    addMapContainer.style.marginBottom = '32px'; // Added significant gap below
+    addMapContainer.style.marginBottom = '16px';
 
   var addMapInput = document.createElement('input');
   addMapInput.type = 'text';
@@ -10078,15 +10196,30 @@ function onMapSort() {
     }
   });
 
-  tab.appendChild(addMapsHeader);
-  tab.appendChild(addMapContainer);
+  addSourcesContainer.appendChild(addMapsHeader);
+  addSourcesContainer.appendChild(addMapContainer);
+
+  // Sidebar: keep Add Sources + Active Maps; custom map management lives in a floating window.
+  var userMapsManageBtnRow = document.createElement('div');
+  userMapsManageBtnRow.style.cssText = 'margin:10px 0 16px 0;';
+  var userMapsManageBtn = document.createElement('wz-button');
+  userMapsManageBtn.setAttribute('size', 'sm');
+  userMapsManageBtn.setAttribute('color', 'secondary');
+  userMapsManageBtn.className = 'openmaps-wz-btn-compact';
+  userMapsManageBtn.textContent = 'Manage your maps';
+  userMapsManageBtnRow.appendChild(userMapsManageBtn);
+  addSourcesContainer.appendChild(userMapsManageBtnRow);
 
   var userMapsSection = document.createElement('div');
   userMapsSection.className = 'openmaps-user-maps-section';
-  userMapsSection.style.marginBottom = '16px';
+  userMapsSection.style.marginBottom = '0';
   var userMapsTitleEl = document.createElement('h4');
   userMapsTitleEl.style.cssText = 'margin:0 0 8px 0;font-size:1.15em;font-weight:bold;';
   userMapsTitleEl.textContent = I18n.t('openmaps.user_maps_section_title');
+  var userMapsIngestTitleEl = document.createElement('div');
+  userMapsIngestTitleEl.className = 'openmaps-user-maps-subtitle';
+  userMapsIngestTitleEl.style.cssText = 'margin:0 0 6px 0;font-size:12px;font-weight:600;color:#3c4043;';
+  userMapsIngestTitleEl.textContent = 'Ingest';
   var userMapsRow = document.createElement('div');
   userMapsRow.style.cssText = 'display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;';
   var userMapsInput = document.createElement('input');
@@ -10123,6 +10256,18 @@ function onMapSort() {
   userMapsKmlHintEl.className = 'openmaps-user-maps-kml-hint';
   userMapsKmlHintEl.style.cssText = 'font-size:11px;color:#70757a;margin-top:6px;line-height:1.35;';
   userMapsKmlHintEl.textContent = I18n.t('openmaps.user_maps_kml_upload_hint');
+  var userMapsHelpDetails = document.createElement('details');
+  userMapsHelpDetails.className = 'openmaps-user-maps-help';
+  userMapsHelpDetails.style.cssText = 'margin-top:6px;';
+  var userMapsHelpSummary = document.createElement('summary');
+  userMapsHelpSummary.textContent = 'Help';
+  userMapsHelpSummary.style.cssText = 'cursor:pointer;font-size:11px;color:#3c4043;user-select:none;';
+  userMapsHelpDetails.appendChild(userMapsHelpSummary);
+  var userMapsHelpBody = document.createElement('div');
+  userMapsHelpBody.style.cssText = 'margin-top:6px;';
+  userMapsHelpBody.appendChild(userMapsHintEl);
+  userMapsHelpBody.appendChild(userMapsKmlHintEl);
+  userMapsHelpDetails.appendChild(userMapsHelpBody);
   var userMapsOptInBanner = document.createElement('div');
   userMapsOptInBanner.className = 'openmaps-user-maps-opt-in-banner';
   userMapsOptInBanner.style.cssText = 'display:none;font-size:11px;color:#b06000;margin-top:8px;line-height:1.4;padding:8px;border-radius:6px;background:var(--background_variant,#fff8e1);border:1px solid var(--border_subtle,#f9a825);';
@@ -10135,7 +10280,7 @@ function onMapSort() {
     userMapsBtn.disabled = retired;
     userMapsInput.style.opacity = retired ? '0.6' : '';
     userMapsBtn.style.opacity = retired ? '0.6' : '';
-    userMapsHintEl.style.display = retired ? 'none' : '';
+    userMapsHelpDetails.style.display = retired ? 'none' : '';
   }
   syncUserMapsOptInBanner();
 
@@ -10162,12 +10307,6 @@ function onMapSort() {
       showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_not_kml'));
       return;
     }
-    var sK = Settings.get();
-    if (!Array.isArray(sK.state.userMaps)) sK.state.userMaps = [];
-    if (sK.state.userMaps.some(function(m) { return m && m.type === 'LOCAL_KML' && m.kmlText === text; })) {
-      showUserMapsMsg(I18n.t('openmaps.user_maps_kml_upload_duplicate'));
-      return;
-    }
     var idK = openMapsNewUserMapId();
     var titleK = openMapsSanitizeKmlFileBaseName(fileLabel);
     var defK = {
@@ -10188,11 +10327,57 @@ function onMapSort() {
       default_layers: ['main'],
       attribution: 'KML file'
     };
-    sK.state.userMaps.push(defK);
-    maps.set(defK.id, defK);
-    Settings.put(sK);
-    selectMapToAdd(String(defK.id));
+    openMapsPersistUserMapDefinition(defK, { activate: true });
+  }
+
+  function openMapsLooksLikeKmlUrl(raw) {
+    var t = String(raw || '').trim();
+    if (!t) return false;
+    if (!/^https?:\/\//i.test(t)) return false;
+    return /\.kml(?:[?#].*)?$/i.test(t) || /[?&]output=kml\b/i.test(t) || /\/kml\b/i.test(t);
+  }
+
+  function openMapsNormalizeUserMapUrl(raw) {
+    var t = String(raw || '').trim();
+    if (!t) return '';
+    t = t.replace(/^[\s"'<(]+|[\s"'>)]+$/g, '').replace(/[\s\)\].,;>]+$/g, '');
+    return t;
+  }
+
+  function openMapsUserMapAlreadyExists(s, def) {
+    if (!s || !s.state || !Array.isArray(s.state.userMaps)) return false;
+    if (!def) return false;
+    if (def.type === 'GOOGLE_MY_MAPS') {
+      return s.state.userMaps.some(function(m) { return m && m.type === 'GOOGLE_MY_MAPS' && m.mid === def.mid; });
+    }
+    if (def.type === 'LOCAL_KML') {
+      return s.state.userMaps.some(function(m) { return m && m.type === 'LOCAL_KML' && m.kmlText === def.kmlText; });
+    }
+    if (def.type === 'REMOTE_KML') {
+      return s.state.userMaps.some(function(m) { return m && m.type === 'REMOTE_KML' && String(m.url || '') === String(def.url || ''); });
+    }
+    return s.state.userMaps.some(function(m) { return m && String(m.id) === String(def.id); });
+  }
+
+  function openMapsPersistUserMapDefinition(def, opts) {
+    var o = opts || {};
+    var s = Settings.get();
+    if (!Array.isArray(s.state.userMaps)) s.state.userMaps = [];
+    if (openMapsUserMapAlreadyExists(s, def)) {
+      showUserMapsMsg(I18n.t(def.type === 'LOCAL_KML' ? 'openmaps.user_maps_kml_upload_duplicate' : 'openmaps.user_maps_add_duplicate'));
+      return null;
+    }
+    if (!def.addedAt) def.addedAt = Date.now();
+    if (!def.origin) def.origin = { kind: 'manual' };
+    s.state.userMaps.push(def);
+    maps.set(def.id, def);
+    Settings.put(s);
+    if (o.activate) selectMapToAdd(String(def.id));
+    try {
+      if (typeof window.__openMapsRenderUserMapsLibrary === 'function') window.__openMapsRenderUserMapsLibrary();
+    } catch (eLibR) { /* ignore */ }
     if (addMapSuggestions.style.display === 'block') populateAddMapSuggestions(addMapInput.value);
+    return def;
   }
 
   function tryAddGoogleMyMap() {
@@ -10201,43 +10386,60 @@ function onMapSort() {
       showUserMapsMsg(I18n.t(openMapsGoogleMyMapsOptInBlockedMessageKey()));
       return;
     }
-    var parsedAdd = openMapsParseGoogleMyMapsInput(userMapsInput.value);
-    if (!parsedAdd) {
-      showUserMapsMsg(I18n.t('openmaps.user_maps_add_invalid'));
+    var raw = openMapsNormalizeUserMapUrl(userMapsInput.value);
+    var parsedAdd = openMapsParseGoogleMyMapsInput(raw);
+    if (parsedAdd) {
+      var idNew = openMapsNewUserMapId();
+      var defNew = {
+        id: idNew,
+        title: I18n.t('openmaps.user_maps_default_title'),
+        source: 'user',
+        touId: 'google-mymaps',
+        area: 'user',
+        type: 'GOOGLE_MY_MAPS',
+        crs: 'EPSG:3857',
+        url: parsedAdd.kmlUrl,
+        mid: parsedAdd.mid,
+        originalUrl: parsedAdd.originalUrl,
+        bbox: [-180, -85, 180, 85],
+        queryable: false,
+        layers: {
+          main: { title: 'KML', abstract: '', queryable: false }
+        },
+        default_layers: ['main'],
+        attribution: 'Google My Maps'
+      };
+      openMapsPersistUserMapDefinition(defNew, { activate: true });
+      userMapsInput.value = '';
       return;
     }
-    var sAdd = Settings.get();
-    if (!Array.isArray(sAdd.state.userMaps)) sAdd.state.userMaps = [];
-    if (sAdd.state.userMaps.some(function(m) { return m && m.type === 'GOOGLE_MY_MAPS' && m.mid === parsedAdd.mid; })) {
-      showUserMapsMsg(I18n.t('openmaps.user_maps_add_duplicate'));
+
+    // Direct remote KML URL (optional ingest path)
+    if (openMapsLooksLikeKmlUrl(raw)) {
+      var idR = openMapsNewUserMapId();
+      var defR = {
+        id: idR,
+        title: openMapsSanitizeKmlFileBaseName(raw.split('/').pop() || 'KML'),
+        source: 'user',
+        touId: 'none',
+        area: 'user',
+        type: 'REMOTE_KML',
+        crs: 'EPSG:3857',
+        url: raw,
+        bbox: [-180, -85, 180, 85],
+        queryable: false,
+        layers: {
+          main: { title: 'KML', abstract: '', queryable: false }
+        },
+        default_layers: ['main'],
+        attribution: 'KML URL'
+      };
+      openMapsPersistUserMapDefinition(defR, { activate: true });
+      userMapsInput.value = '';
       return;
     }
-    var idNew = openMapsNewUserMapId();
-    var defNew = {
-      id: idNew,
-      title: I18n.t('openmaps.user_maps_default_title'),
-      source: 'user',
-      touId: 'google-mymaps',
-      area: 'user',
-      type: 'GOOGLE_MY_MAPS',
-      crs: 'EPSG:3857',
-      url: parsedAdd.kmlUrl,
-      mid: parsedAdd.mid,
-      originalUrl: parsedAdd.originalUrl,
-      bbox: [-180, -85, 180, 85],
-      queryable: false,
-      layers: {
-        main: { title: 'KML', abstract: '', queryable: false }
-      },
-      default_layers: ['main'],
-      attribution: 'Google My Maps'
-    };
-    sAdd.state.userMaps.push(defNew);
-    maps.set(defNew.id, defNew);
-    Settings.put(sAdd);
-    userMapsInput.value = '';
-    selectMapToAdd(String(defNew.id));
-    if (addMapSuggestions.style.display === 'block') populateAddMapSuggestions(addMapInput.value);
+
+    showUserMapsMsg(I18n.t('openmaps.user_maps_add_invalid'));
   }
 
   userMapsBtn.addEventListener('click', function(evU) {
@@ -10298,12 +10500,435 @@ function onMapSort() {
   userMapsRow.appendChild(userMapsKmlUploadBtn);
   userMapsSection.appendChild(userMapsKmlFileInput);
   userMapsSection.appendChild(userMapsTitleEl);
+  userMapsSection.appendChild(userMapsIngestTitleEl);
   userMapsSection.appendChild(userMapsRow);
   userMapsSection.appendChild(userMapsMsg);
   userMapsSection.appendChild(userMapsOptInBanner);
-  userMapsSection.appendChild(userMapsHintEl);
-  userMapsSection.appendChild(userMapsKmlHintEl);
-  tab.appendChild(userMapsSection);
+  userMapsSection.appendChild(userMapsHelpDetails);
+
+  var userMapsLibraryTitleEl = document.createElement('div');
+  userMapsLibraryTitleEl.className = 'openmaps-user-maps-subtitle';
+  userMapsLibraryTitleEl.style.cssText = 'margin:12px 0 6px 0;font-size:12px;font-weight:600;color:#3c4043;';
+  userMapsLibraryTitleEl.textContent = 'Library';
+  var userMapsLibraryControls = document.createElement('div');
+  userMapsLibraryControls.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+  var userMapsLibrarySearch = document.createElement('input');
+  userMapsLibrarySearch.type = 'text';
+  userMapsLibrarySearch.className = 'form-control openmaps-user-maps-library-search';
+  userMapsLibrarySearch.placeholder = 'Search saved maps…';
+  userMapsLibrarySearch.style.cssText = 'flex:1 1 160px;min-width:120px;';
+  userMapsLibraryControls.appendChild(userMapsLibrarySearch);
+  var userMapsLibraryList = document.createElement('div');
+  userMapsLibraryList.className = 'openmaps-user-maps-library-list';
+  userMapsLibraryList.style.cssText = 'margin-top:6px;display:flex;flex-direction:column;gap:6px;';
+
+  function openMapsUserMapsIsActive(mapId) {
+    for (var hi = 0; hi < handles.length; hi++) {
+      if (String(handles[hi].mapId) === String(mapId)) return true;
+    }
+    return false;
+  }
+
+  function renderUserMapsLibrary() {
+    while (userMapsLibraryList.firstChild) userMapsLibraryList.removeChild(userMapsLibraryList.firstChild);
+    var sLib = Settings.get();
+    var arr = (sLib && sLib.state && Array.isArray(sLib.state.userMaps)) ? sLib.state.userMaps.slice() : [];
+    var qLib = String(userMapsLibrarySearch.value || '').trim().toLowerCase();
+    arr = arr.filter(function(m) { return m && m.id != null; });
+    arr.sort(function(a, b) {
+      var ta = (a && typeof a.addedAt === 'number') ? a.addedAt : 0;
+      var tb = (b && typeof b.addedAt === 'number') ? b.addedAt : 0;
+      if (tb !== ta) return tb - ta;
+      var at = String((a && a.title) || '').toLowerCase();
+      var bt = String((b && b.title) || '').toLowerCase();
+      if (at < bt) return -1;
+      if (at > bt) return 1;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    var shown = 0;
+    for (var mi = 0; mi < arr.length; mi++) {
+      var m = arr[mi];
+      var hay = (String(m.title || '') + ' ' + String(m.type || '') + ' ' + String(m.url || '') + ' ' + String(m.mid || '')).toLowerCase();
+      if (qLib && hay.indexOf(qLib) === -1) continue;
+      shown++;
+      var row = document.createElement('div');
+      row.className = 'openmaps-user-maps-library-row';
+      row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--border_subtle,#dadce0);border-radius:8px;background:var(--background_default,#fff);';
+      var textCol = document.createElement('div');
+      textCol.style.cssText = 'flex:1 1 auto;min-width:0;';
+      var title = document.createElement('div');
+      title.style.cssText = 'font-size:12px;font-weight:600;color:#202124;line-height:1.25;word-break:break-word;';
+      title.textContent = m.title || '(untitled)';
+      var meta = document.createElement('div');
+      meta.style.cssText = 'margin-top:2px;font-size:11px;color:#5f6368;line-height:1.25;word-break:break-word;';
+      var active = openMapsUserMapsIsActive(m.id);
+      meta.textContent = (m.type ? String(m.type) : 'MAP') + (active ? ' • Active' : ' • Saved');
+      textCol.appendChild(title);
+      textCol.appendChild(meta);
+      row.appendChild(textCol);
+
+      var actions = document.createElement('div');
+      actions.style.cssText = 'flex:0 0 auto;display:flex;gap:6px;align-items:center;';
+      if (!active) {
+        var actBtn = document.createElement('wz-button');
+        actBtn.setAttribute('size', 'sm');
+        actBtn.setAttribute('color', 'primary');
+        actBtn.className = 'openmaps-wz-btn-compact';
+        actBtn.textContent = 'Activate';
+        actBtn.addEventListener('click', function(mapId) {
+          return function(ev) {
+            if (ev) ev.preventDefault();
+            selectMapToAdd(String(mapId));
+            renderUserMapsLibrary();
+          };
+        }(m.id));
+        actions.appendChild(actBtn);
+      } else {
+        var deactBtn = document.createElement('wz-button');
+        deactBtn.setAttribute('size', 'sm');
+        deactBtn.setAttribute('color', 'secondary');
+        deactBtn.className = 'openmaps-wz-btn-compact';
+        deactBtn.textContent = 'Deactivate';
+        deactBtn.addEventListener('click', function(mapId) {
+          return function(ev) {
+            if (ev) ev.preventDefault();
+            openMapsDeactivateMapById(String(mapId));
+            renderUserMapsLibrary();
+          };
+        }(m.id));
+        actions.appendChild(deactBtn);
+      }
+      var delBtn = document.createElement('wz-button');
+      delBtn.setAttribute('size', 'sm');
+      delBtn.setAttribute('color', 'secondary');
+      delBtn.className = 'openmaps-wz-btn-compact';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', function(mapId) {
+        return function(ev) {
+          if (ev) ev.preventDefault();
+          openMapsDeactivateMapById(String(mapId));
+          openMapsRemoveUserMapDefinition(String(mapId));
+          renderUserMapsLibrary();
+          if (addMapSuggestions.style.display === 'block') populateAddMapSuggestions(addMapInput.value);
+        };
+      }(m.id));
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
+      userMapsLibraryList.appendChild(row);
+    }
+    if (shown === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'openmaps-user-maps-library-empty';
+      empty.style.cssText = 'font-size:11px;color:#5f6368;padding:6px 2px;';
+      empty.textContent = qLib ? 'No saved maps match your search.' : 'No saved maps yet.';
+      userMapsLibraryList.appendChild(empty);
+    }
+  }
+
+  userMapsLibrarySearch.addEventListener('input', function() { renderUserMapsLibrary(); });
+  renderUserMapsLibrary();
+  try { window.__openMapsRenderUserMapsLibrary = renderUserMapsLibrary; } catch (eExp) { /* ignore */ }
+  userMapsSection.appendChild(userMapsLibraryTitleEl);
+  userMapsSection.appendChild(userMapsLibraryControls);
+  userMapsSection.appendChild(userMapsLibraryList);
+
+  // --- Repos UI (Google Sheets) ---
+  var userMapsReposTitleEl = document.createElement('div');
+  userMapsReposTitleEl.className = 'openmaps-user-maps-subtitle';
+  userMapsReposTitleEl.style.cssText = 'margin:12px 0 6px 0;font-size:12px;font-weight:600;color:#3c4043;';
+  userMapsReposTitleEl.textContent = 'Repos';
+
+  var userMapsReposAddRow = document.createElement('div');
+  userMapsReposAddRow.style.cssText = 'display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;';
+  var userMapsRepoUrlInput = document.createElement('input');
+  userMapsRepoUrlInput.type = 'text';
+  userMapsRepoUrlInput.className = 'form-control openmaps-user-maps-repo-url';
+  userMapsRepoUrlInput.placeholder = 'Paste Google Sheet link (published)…';
+  userMapsRepoUrlInput.style.cssText = 'flex:1 1 220px;min-width:160px;';
+  var userMapsRepoModeSel = document.createElement('select');
+  userMapsRepoModeSel.className = 'form-control openmaps-user-maps-repo-mode';
+  userMapsRepoModeSel.style.cssText = 'flex:0 0 auto;min-width:120px;';
+  [{ v: 'simple', t: 'Simple' }, { v: 'rich', t: 'Rich' }].forEach(function(o) {
+    var opt = document.createElement('option');
+    opt.value = o.v;
+    opt.textContent = o.t;
+    userMapsRepoModeSel.appendChild(opt);
+  });
+  var userMapsRepoAddBtn = document.createElement('wz-button');
+  userMapsRepoAddBtn.setAttribute('size', 'sm');
+  userMapsRepoAddBtn.setAttribute('color', 'secondary');
+  userMapsRepoAddBtn.className = 'openmaps-wz-btn-compact';
+  userMapsRepoAddBtn.textContent = 'Add repo';
+  userMapsReposAddRow.appendChild(userMapsRepoUrlInput);
+  userMapsReposAddRow.appendChild(userMapsRepoModeSel);
+  userMapsReposAddRow.appendChild(userMapsRepoAddBtn);
+
+  var userMapsReposMsg = document.createElement('div');
+  userMapsReposMsg.style.cssText = 'display:none;font-size:11px;color:#c5221f;margin-top:6px;line-height:1.35;';
+  function showRepoMsg(t) {
+    userMapsReposMsg.textContent = t || '';
+    userMapsReposMsg.style.display = t ? 'block' : 'none';
+  }
+
+  var userMapsReposList = document.createElement('div');
+  userMapsReposList.className = 'openmaps-user-maps-repos-list';
+  userMapsReposList.style.cssText = 'margin-top:6px;display:flex;flex-direction:column;gap:6px;';
+
+  function openMapsGetRepoState() {
+    var s = Settings.get();
+    if (!s.state.mapRepos) s.state.mapRepos = [];
+    if (!Array.isArray(s.state.mapRepos)) s.state.mapRepos = [];
+    return s;
+  }
+
+  function renderReposList() {
+    while (userMapsReposList.firstChild) userMapsReposList.removeChild(userMapsReposList.firstChild);
+    var s = openMapsGetRepoState();
+    var repos = s.state.mapRepos.slice();
+    if (!repos.length) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'font-size:11px;color:#5f6368;padding:6px 2px;';
+      empty.textContent = 'No repos yet.';
+      userMapsReposList.appendChild(empty);
+      return;
+    }
+    repos.forEach(function(r) {
+      if (!r || !r.id) return;
+      var card = document.createElement('div');
+      card.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--border_subtle,#dadce0);border-radius:8px;background:var(--background_default,#fff);';
+      var text = document.createElement('div');
+      text.style.cssText = 'flex:1 1 auto;min-width:0;';
+      var t1 = document.createElement('div');
+      t1.style.cssText = 'font-size:12px;font-weight:600;color:#202124;line-height:1.25;word-break:break-word;';
+      t1.textContent = r.title || 'Google Sheet repo';
+      var t2 = document.createElement('div');
+      t2.style.cssText = 'margin-top:2px;font-size:11px;color:#5f6368;line-height:1.25;word-break:break-word;';
+      var when = r.lastSyncAt ? (' • Synced ' + new Date(r.lastSyncAt).toLocaleString()) : '';
+      var err = r.lastError ? (' • Error: ' + String(r.lastError)) : '';
+      t2.textContent = (r.mode === 'rich' ? 'Rich' : 'Simple') + (r.enabled === false ? ' • Disabled' : ' • Enabled') + when + err;
+      text.appendChild(t1);
+      text.appendChild(t2);
+      card.appendChild(text);
+
+      var actions = document.createElement('div');
+      actions.style.cssText = 'flex:0 0 auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+
+      var toggleBtn = document.createElement('wz-button');
+      toggleBtn.setAttribute('size', 'sm');
+      toggleBtn.setAttribute('color', 'secondary');
+      toggleBtn.className = 'openmaps-wz-btn-compact';
+      toggleBtn.textContent = (r.enabled === false) ? 'Enable' : 'Disable';
+      toggleBtn.addEventListener('click', function() {
+        var s2 = openMapsGetRepoState();
+        for (var i = 0; i < s2.state.mapRepos.length; i++) {
+          if (s2.state.mapRepos[i] && String(s2.state.mapRepos[i].id) === String(r.id)) {
+            s2.state.mapRepos[i].enabled = !(s2.state.mapRepos[i].enabled === false);
+            break;
+          }
+        }
+        Settings.put(s2);
+        renderReposList();
+      });
+      actions.appendChild(toggleBtn);
+
+      var refBtn = document.createElement('wz-button');
+      refBtn.setAttribute('size', 'sm');
+      refBtn.setAttribute('color', 'secondary');
+      refBtn.className = 'openmaps-wz-btn-compact';
+      refBtn.textContent = 'Refresh';
+      refBtn.addEventListener('click', function() {
+        showRepoMsg('');
+        openMapsSyncRepoOnce(r, function(errX) {
+          if (errX) showRepoMsg('Repo sync failed: ' + String(errX.message || errX));
+          renderReposList();
+          renderUserMapsLibrary();
+        });
+      });
+      actions.appendChild(refBtn);
+
+      var delBtn = document.createElement('wz-button');
+      delBtn.setAttribute('size', 'sm');
+      delBtn.setAttribute('color', 'secondary');
+      delBtn.className = 'openmaps-wz-btn-compact';
+      delBtn.textContent = 'Remove';
+      delBtn.addEventListener('click', function() {
+        var s3 = openMapsGetRepoState();
+        s3.state.mapRepos = s3.state.mapRepos.filter(function(x) { return !x || String(x.id) !== String(r.id); });
+        Settings.put(s3);
+        renderReposList();
+      });
+      actions.appendChild(delBtn);
+
+      card.appendChild(actions);
+      userMapsReposList.appendChild(card);
+    });
+  }
+
+  userMapsRepoAddBtn.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    showRepoMsg('');
+    var url = String(userMapsRepoUrlInput.value || '').trim();
+    if (!url) return;
+    var csvUrl = openMapsGoogleSheetToCsvUrl(url);
+    if (!csvUrl) {
+      showRepoMsg('Could not recognize a Google Sheet URL. Use a docs.google.com/spreadsheets/d/... link (published).');
+      return;
+    }
+    var s = openMapsGetRepoState();
+    var rid = 'om-repo-' + openMapsHash32(url + '|' + Date.now());
+    s.state.mapRepos.push({
+      id: rid,
+      title: 'Google Sheet',
+      sheetUrl: url,
+      mode: userMapsRepoModeSel.value === 'rich' ? 'rich' : 'simple',
+      enabled: true,
+      lastSyncAt: null,
+      lastError: null
+    });
+    Settings.put(s);
+    userMapsRepoUrlInput.value = '';
+    renderReposList();
+    openMapsSyncRepoOnce(s.state.mapRepos[s.state.mapRepos.length - 1], function(err) {
+      if (err) showRepoMsg('Repo sync failed: ' + String(err.message || err));
+      renderReposList();
+      renderUserMapsLibrary();
+    });
+  });
+
+  renderReposList();
+  userMapsSection.appendChild(userMapsReposTitleEl);
+  userMapsSection.appendChild(userMapsReposAddRow);
+  userMapsSection.appendChild(userMapsReposMsg);
+  userMapsSection.appendChild(userMapsReposList);
+
+  function openMapsGetUserMapsManagerUiState() {
+    var s = Settings.get();
+    if (!s.state.userMapsManagerUI || typeof s.state.userMapsManagerUI !== 'object') {
+      s.state.userMapsManagerUI = { open: false, left: 80, top: 80, width: 520, height: 640 };
+      Settings.put(s);
+    }
+    return s.state.userMapsManagerUI;
+  }
+  function openMapsPutUserMapsManagerUiState(next) {
+    try {
+      var s = Settings.get();
+      s.state.userMapsManagerUI = Object.assign({}, openMapsGetUserMapsManagerUiState(), next || {});
+      Settings.put(s);
+    } catch (ePutUi) { /* ignore */ }
+  }
+
+  var userMapsManagerWin = document.createElement('div');
+  userMapsManagerWin.className = 'openmaps-user-maps-manager-window';
+  userMapsManagerWin.style.cssText = 'position:fixed;z-index:100650;display:none;background:var(--background_default,#fff);border:1px solid var(--border_subtle,#dadce0);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.25);overflow:hidden;';
+  var userMapsManagerHeader = document.createElement('div');
+  userMapsManagerHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 10px 8px 10px;border-bottom:1px solid var(--border_subtle,#dadce0);cursor:move;user-select:none;background:var(--background_variant,#f8f9fa);';
+  var userMapsManagerHeaderTitle = document.createElement('div');
+  userMapsManagerHeaderTitle.style.cssText = 'font-size:13px;font-weight:700;color:var(--content_primary,#202124);';
+  userMapsManagerHeaderTitle.textContent = 'Manage your maps';
+  var userMapsManagerHeaderBtns = document.createElement('div');
+  userMapsManagerHeaderBtns.style.cssText = 'display:flex;align-items:center;gap:6px;';
+  var userMapsManagerCloseBtn = document.createElement('button');
+  userMapsManagerCloseBtn.type = 'button';
+  userMapsManagerCloseBtn.className = 'fa fa-times open-maps-icon-button';
+  userMapsManagerCloseBtn.setAttribute('aria-label', 'Close');
+  userMapsManagerHeaderBtns.appendChild(userMapsManagerCloseBtn);
+  userMapsManagerHeader.appendChild(userMapsManagerHeaderTitle);
+  userMapsManagerHeader.appendChild(userMapsManagerHeaderBtns);
+
+  var userMapsManagerBody = document.createElement('div');
+  userMapsManagerBody.style.cssText = 'padding:10px;overflow:auto;resize:both;min-width:360px;min-height:320px;max-width:92vw;max-height:92vh;';
+  userMapsManagerBody.appendChild(userMapsSection);
+
+  userMapsManagerWin.appendChild(userMapsManagerHeader);
+  userMapsManagerWin.appendChild(userMapsManagerBody);
+  document.body.appendChild(userMapsManagerWin);
+
+  function applyUserMapsManagerUiGeometry() {
+    var st = openMapsGetUserMapsManagerUiState();
+    var left = Number(st.left); var top = Number(st.top);
+    var width = Number(st.width); var height = Number(st.height);
+    if (isNaN(left)) left = 80;
+    if (isNaN(top)) top = 80;
+    if (isNaN(width) || width < 360) width = 520;
+    if (isNaN(height) || height < 320) height = 640;
+    userMapsManagerWin.style.left = left + 'px';
+    userMapsManagerWin.style.top = top + 'px';
+    userMapsManagerBody.style.width = width + 'px';
+    userMapsManagerBody.style.height = height + 'px';
+  }
+
+  function openUserMapsManager() {
+    applyUserMapsManagerUiGeometry();
+    userMapsManagerWin.style.display = 'block';
+    openMapsPutUserMapsManagerUiState({ open: true });
+    try { renderUserMapsLibrary(); } catch (eR1) {}
+    try { renderReposList(); } catch (eR2) {}
+  }
+  function closeUserMapsManager() {
+    userMapsManagerWin.style.display = 'none';
+    openMapsPutUserMapsManagerUiState({ open: false });
+  }
+  function toggleUserMapsManager() {
+    if (userMapsManagerWin.style.display === 'none' || !userMapsManagerWin.style.display) openUserMapsManager();
+    else closeUserMapsManager();
+  }
+
+  userMapsManageBtn.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    toggleUserMapsManager();
+  });
+  userMapsManagerCloseBtn.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    closeUserMapsManager();
+  });
+
+  // Drag behavior (free)
+  (function bindDrag() {
+    var dragging = false;
+    var startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    function onMove(e) {
+      if (!dragging) return;
+      var dx = e.clientX - startX;
+      var dy = e.clientY - startY;
+      userMapsManagerWin.style.left = (startLeft + dx) + 'px';
+      userMapsManagerWin.style.top = (startTop + dy) + 'px';
+    }
+    function onUp() {
+      if (!dragging) return;
+      dragging = false;
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+      var rect = userMapsManagerWin.getBoundingClientRect();
+      openMapsPutUserMapsManagerUiState({ left: Math.round(rect.left), top: Math.round(rect.top) });
+    }
+    userMapsManagerHeader.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      dragging = true;
+      var rect = userMapsManagerWin.getBoundingClientRect();
+      startX = e.clientX; startY = e.clientY;
+      startLeft = rect.left; startTop = rect.top;
+      document.addEventListener('mousemove', onMove, true);
+      document.addEventListener('mouseup', onUp, true);
+      e.preventDefault();
+    });
+  })();
+
+  // Persist resize (best effort): observe body size changes when mouseup occurs inside window.
+  userMapsManagerWin.addEventListener('mouseup', function() {
+    try {
+      var w = userMapsManagerBody.offsetWidth;
+      var h = userMapsManagerBody.offsetHeight;
+      if (w && h) openMapsPutUserMapsManagerUiState({ width: w, height: h });
+    } catch (eSz) { /* ignore */ }
+  });
+
+  // Restore on load if previously open.
+  try {
+    var stInit = openMapsGetUserMapsManagerUiState();
+    if (stInit && stInit.open) openUserMapsManager();
+  } catch (eInit) { /* ignore */ }
+
+  tab.appendChild(addSourcesContainer);
 
   var addMapSuggestionsBlurTimer = null;
   var addMapSuggestionsPositionListenersOn = false;
@@ -10785,9 +11410,9 @@ function onMapSort() {
               var content = body ? body.textContent.trim() : '';
               if (body && content.length != 0) {
                   removeUnsafeAttributes(body);
-                    queryWindowOriginalContent.innerHTML = body.innerHTML;
-                    setBorders(queryWindowOriginalContent)
-                    queryWindowContent.innerHTML = body.innerHTML;
+                    openMapsAppendSanitizedBodyHtml(queryWindowOriginalContent, body);
+                    setBorders(queryWindowOriginalContent);
+                    openMapsAppendSanitizedBodyHtml(queryWindowContent, body);
                     var qfs = maps.get(mapId)?.query_filters;
                     if (Array.isArray(qfs)) {
                       qfs.forEach((func) => {
@@ -10837,7 +11462,14 @@ function onMapSort() {
               emptyResponse.textContent = I18n.t('openmaps.query_empty_response');
               queryWindowContent.appendChild(emptyResponse);
               var emptyResponseAdvice = document.createElement('p');
-              emptyResponseAdvice.innerHTML = I18n.t('openmaps.query_empty_response_advice').replace("{hotkey}", "<kbd>" + (/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform) ? "Cmd" : "Ctrl") + "+0</kbd>");
+              openMapsClearEl(emptyResponseAdvice);
+              var adviceT = I18n.t('openmaps.query_empty_response_advice');
+              var parts = String(adviceT).split('{hotkey}');
+              emptyResponseAdvice.appendChild(document.createTextNode(parts[0] || ''));
+              var kbd = document.createElement('kbd');
+              kbd.textContent = (/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform) ? 'Cmd' : 'Ctrl') + '+0';
+              emptyResponseAdvice.appendChild(kbd);
+              if (parts.length > 1) emptyResponseAdvice.appendChild(document.createTextNode(parts.slice(1).join('{hotkey}')));
               queryWindowContent.appendChild(emptyResponseAdvice);
             }
             }
@@ -10890,6 +11522,23 @@ function onMapSort() {
     }
     for (let i = 0; i < node.childNodes.length; i++) {
       removeUnsafeAttributes(node.childNodes[i]);
+    }
+  }
+
+  function openMapsAppendSanitizedBodyHtml(targetEl, bodyEl) {
+    if (!targetEl) return;
+    openMapsClearEl(targetEl);
+    if (!bodyEl) return;
+    // Append DOM nodes instead of assigning `innerHTML` (Trusted Types friendly).
+    try {
+      var frag = document.createDocumentFragment();
+      for (var c = bodyEl.firstChild; c; c = c.nextSibling) {
+        frag.appendChild(c.cloneNode(true));
+      }
+      targetEl.appendChild(frag);
+    } catch (e) {
+      // Fallback: best-effort text to avoid breaking the UI.
+      targetEl.textContent = bodyEl.textContent || '';
     }
   }
 
@@ -11259,6 +11908,33 @@ function getNotAddedMaps() {
     return out;
   }
 
+  // --- Maps-to-add performance caches ---
+  var openMapsAddListCacheToken = 0;
+  var openMapsAddListSortedCache = null; // Array<map>
+  var openMapsAddListHayById = new Map(); // map.id -> lowercased search hay
+
+  function openMapsInvalidateAddListCaches() {
+    openMapsAddListCacheToken++;
+    openMapsAddListSortedCache = null;
+    openMapsAddListHayById.clear();
+  }
+
+  function openMapsGetAddListSortedNotAddedMaps() {
+    if (openMapsAddListSortedCache) return openMapsAddListSortedCache;
+    openMapsAddListSortedCache = getNotAddedMaps().slice().sort(compareMapsForAddList);
+    return openMapsAddListSortedCache;
+  }
+
+  function openMapsAddListHaystackForMap(map) {
+    if (!map) return '';
+    var id = map.id;
+    if (openMapsAddListHayById.has(id)) return openMapsAddListHayById.get(id) || '';
+    var regionLabel = I18n.t('openmaps.areas.' + map.area) || map.area || '';
+    var hay = (String(map.title || '') + ' ' + String(regionLabel || '') + ' ' + String(map.area || '')).toLowerCase();
+    openMapsAddListHayById.set(id, hay);
+    return hay;
+  }
+
   function isMapFavorite(mapId) {
     return Settings.get().state.favoriteMapIds.indexOf(mapId) !== -1;
   }
@@ -11344,6 +12020,10 @@ function selectMapToAdd(mapId) {
       if (!isNaN(n)) addedMap = maps.get(n);
     }
     if (!addedMap) return;
+    var idNorm = String(addedMap.id != null ? addedMap.id : mapId);
+    if (handles.some(function(h) { return h && String(h.mapId) === idNorm; })) {
+      return;
+    }
     if (addedMap.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
       log(I18n.t(openMapsGoogleMyMapsOptInBlockedMessageKey()));
       return;
@@ -11357,18 +12037,137 @@ function selectMapToAdd(mapId) {
     addMapInput.value = '';
     hideAddMapSuggestions();
     addMapInput.blur();
+    openMapsInvalidateAddListCaches();
     updateMapSelector();
     refreshMapDrag();
+    try {
+      if (typeof window.__openMapsRenderUserMapsLibrary === 'function') window.__openMapsRenderUserMapsLibrary();
+    } catch (eLibA) { /* ignore */ }
     var lastCard = handleList.querySelector('.maps-menu-item:last-of-type');
     if (lastCard) lastCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+function openMapsStripSidebarCardsForMapId(mapIdStr) {
+    var idStr = String(mapIdStr);
+    if (!handleList) return;
+    var cards = handleList.querySelectorAll('.maps-menu-item');
+    for (var ci = cards.length - 1; ci >= 0; ci--) {
+      var node = cards[ci];
+      if (!node || String(node.dataset.mapId || '') !== idStr) continue;
+      try { Tooltips.teardownSubtree(node); } catch (eTt) { /* ignore */ }
+      try {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      } catch (eRm) { /* ignore */ }
+    }
+  }
+
+function openMapsFallbackRemoveHandleEntry(h, mapIdStr) {
+    var idStr = String(mapIdStr);
+    for (var ix = handles.length - 1; ix >= 0; ix--) {
+      if (handles[ix] === h) {
+        handles.splice(ix, 1);
+        break;
+      }
+    }
+    var mapDef = h && h.map ? h.map : maps.get(idStr);
+    try {
+      if (h.togglerNode && h.togglerNode.parentNode) h.togglerNode.parentNode.removeChild(h.togglerNode);
+    } catch (eTg) { /* ignore */ }
+    if (h.layer) {
+      try {
+        if (mapDef && openMapsMapTypeIsKmlVectorOverlay(mapDef.type)) openMapsGoogleMyMapsLayerRemoveFromMap(h.layer);
+        else W.map.removeLayer(h.layer);
+      } catch (eL0) { /* ignore */ }
+    }
+    if (h.bboxLayer) {
+      try { W.map.removeLayer(h.bboxLayer); } catch (eB0) { /* ignore */ }
+    }
+    openMapsStripSidebarCardsForMapId(idStr);
+  }
+
+function openMapsDeactivateMapById(mapId) {
+    var idStr = String(mapId);
+    var troubleshoot = (typeof localStorage !== 'undefined' && localStorage.getItem('openmaps-troubleshoot') === '1');
+    for (var hi = handles.length - 1; hi >= 0; hi--) {
+      var h = handles[hi];
+      if (!h) continue;
+      if (String(h.mapId) !== idStr) continue;
+      var ok = false;
+      try {
+        if (typeof h.destroyOpenMapsHandle === 'function') {
+          h.destroyOpenMapsHandle({ deleteUserDefinition: false });
+          ok = true;
+        }
+      } catch (eRm) {
+        if (troubleshoot) {
+          try { log('openMapsDeactivateMapById: destroyOpenMapsHandle failed (mapId=' + idStr + '): ' + (eRm && eRm.message)); } catch (eLg) { /* ignore */ }
+        }
+      }
+      if (!ok) {
+        try {
+          openMapsFallbackRemoveHandleEntry(h, idStr);
+        } catch (eFb) {
+          if (troubleshoot) {
+            try { log('openMapsDeactivateMapById: fallback remove failed (mapId=' + idStr + '): ' + (eFb && eFb.message)); } catch (eLg2) { /* ignore */ }
+          }
+        }
+      }
+    }
+    openMapsStripSidebarCardsForMapId(idStr);
+    if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
+    try { saveMapState(); } catch (eSave) { /* ignore */ }
+    try { updateMapSelector(); } catch (eSel) { /* ignore */ }
+    try { refreshMapDrag(); } catch (eDrag) { /* ignore */ }
+    try { if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged(); } catch (eIn) { /* ignore */ }
+  }
+
+function openMapsDedupeActiveHandlesByMapId() {
+    var firstIdx = Object.create(null);
+    for (var i = 0; i < handles.length; i++) {
+      var hx = handles[i];
+      if (!hx) continue;
+      var mid = String(hx.mapId);
+      if (firstIdx[mid] === undefined) firstIdx[mid] = i;
+    }
+    for (var j = handles.length - 1; j >= 0; j--) {
+      var h2 = handles[j];
+      if (!h2) continue;
+      var id2 = String(h2.mapId);
+      if (firstIdx[id2] === j) continue;
+      var dupOk = false;
+      try {
+        if (typeof h2.destroyOpenMapsHandle === 'function') {
+          h2.destroyOpenMapsHandle({ deleteUserDefinition: false });
+          dupOk = true;
+        }
+      } catch (eDup) { /* ignore */ }
+      if (!dupOk) {
+        try { openMapsFallbackRemoveHandleEntry(h2, id2); } catch (eFb2) { /* ignore */ }
+      }
+    }
   }
 
 function isAddMapIntersectingViewport(map) {
     var currentExtent = getMapExtent();
     if (!currentExtent) return true;
-    var dataProjection = new OpenLayers.Projection('EPSG:4326');
-    var bounds = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(dataProjection, W.map.getProjectionObject());
-    return bounds.intersectsBounds(currentExtent);
+    if (!map || !map.bbox) return true;
+    // Transform viewport extent to EPSG:4326 once and do numeric bbox intersection (fast).
+    try {
+      var olMap = W.map.getOLMap();
+      if (!olMap) return true;
+      var epsg4326 = new OpenLayers.Projection('EPSG:4326');
+      var view4326 = currentExtent.clone().transform(olMap.getProjectionObject(), epsg4326);
+      var vLeft = view4326.left, vBottom = view4326.bottom, vRight = view4326.right, vTop = view4326.top;
+      var bb = map.bbox;
+      var mLeft = Number(bb.left !== undefined ? bb.left : bb[0]);
+      var mBottom = Number(bb.bottom !== undefined ? bb.bottom : bb[1]);
+      var mRight = Number(bb.right !== undefined ? bb.right : bb[2]);
+      var mTop = Number(bb.top !== undefined ? bb.top : bb[3]);
+      if ([vLeft, vBottom, vRight, vTop, mLeft, mBottom, mRight, mTop].some(function(n) { return isNaN(n); })) return true;
+      return !(mRight < vLeft || mLeft > vRight || mTop < vBottom || mBottom > vTop);
+    } catch (e) {
+      return true;
+    }
   }
 
 function populateAddMapSuggestions(filterText) {
@@ -11376,7 +12175,7 @@ function populateAddMapSuggestions(filterText) {
       addMapSuggestions.removeChild(addMapSuggestions.firstChild);
     }
     var q = (filterText || '').trim().toLowerCase();
-    var allNotAdded = getNotAddedMaps().slice().sort(compareMapsForAddList);
+    var allNotAdded = openMapsGetAddListSortedNotAddedMaps();
     var inViewOnly = addMapsFilterMode.value === 'in_view';
     var notAdded = inViewOnly ? allNotAdded.filter(isAddMapIntersectingViewport) : allNotAdded;
     if (allNotAdded.length === 0) {
@@ -11401,7 +12200,7 @@ function populateAddMapSuggestions(filterText) {
     notAdded.forEach(function(map) {
       var regionLabel = I18n.t('openmaps.areas.' + map.area) || map.area || '';
       if (q) {
-        var hay = (map.title + ' ' + regionLabel + ' ' + (map.area || '')).toLowerCase();
+        var hay = openMapsAddListHaystackForMap(map);
         if (hay.indexOf(q) < 0) return;
       }
       rowCount++;
@@ -11475,7 +12274,7 @@ function updateMapSelector() {
 
     handles.forEach(function(handle) {
       var mapSel = maps.get(handle.mapId);
-      if (mapSel && (mapSel.type === 'LOCAL_KML' || mapSel.type === 'GOOGLE_MY_MAPS')) {
+    if (mapSel && (mapSel.type === 'LOCAL_KML' || mapSel.type === 'GOOGLE_MY_MAPS' || mapSel.type === 'REMOTE_KML')) {
         if (handle.outOfArea) {
           handle.outOfArea = false;
           if (handle.layer) handle.layer.setVisibility(!handle.hidden);
@@ -11864,7 +12663,9 @@ function loadTileError(tile, callback) {
     var newTile = document.createElement('canvas');
     newTile.width = event.tile.imgDiv.width;
     newTile.height = event.tile.imgDiv.height;
-    var context = newTile.getContext('2d');
+    // Hint to browsers: we do frequent pixel readbacks (getImageData).
+    // Falls back silently for engines that don't support the option.
+    var context = newTile.getContext('2d', { willReadFrequently: true }) || newTile.getContext('2d');
     context.drawImage(event.tile.imgDiv, 0, 0);
     var imageData = context.getImageData(0, 0, newTile.width, newTile.height);
     var replaceNeeded = false;
@@ -11930,6 +12731,7 @@ function loadTileError(tile, callback) {
     s.state.userMaps = next;
     maps.delete(mapId);
     Settings.put(s);
+    openMapsInvalidateAddListCaches();
     var idxFav = s.state.favoriteMapIds.indexOf(mapId);
     if (idxFav !== -1) {
       s.state.favoriteMapIds.splice(idxFav, 1);
@@ -11942,6 +12744,208 @@ function loadTileError(tile, callback) {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'om-um-' + crypto.randomUUID();
     } catch (eId) { /* ignore */ }
     return 'om-um-' + String(Date.now()) + '-' + String(Math.random()).slice(2, 11);
+  }
+
+  function openMapsHash32(str) {
+    // Simple deterministic 32-bit hash (FNV-1a-ish). Good enough for stable ids.
+    var s = String(str || '');
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return ('00000000' + h.toString(16)).slice(-8);
+  }
+
+  function openMapsGoogleSheetToCsvUrl(sheetUrl) {
+    var u = String(sheetUrl || '').trim();
+    if (!u) return null;
+    // Already looks like a direct csv export.
+    if (/tqx=out:csv/i.test(u) || /output=csv/i.test(u)) return u;
+    var m = u.match(/https?:\/\/docs\.google\.com\/spreadsheets\/d\/([^/]+)/i);
+    if (!m) return null;
+    var id = m[1];
+    var gid = null;
+    var mg = u.match(/[?&#]gid=(\d+)/i);
+    if (mg) gid = mg[1];
+    var out = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(id) + '/gviz/tq?tqx=out:csv';
+    if (gid) out += '&gid=' + encodeURIComponent(gid);
+    return out;
+  }
+
+  function openMapsParseDelimited(text) {
+    var t = String(text || '');
+    if (!t) return [];
+    // Heuristic: prefer tab if present in header line.
+    var firstLine = t.split(/\r?\n/)[0] || '';
+    var delim = firstLine.indexOf('\t') > -1 ? '\t' : ',';
+    var rows = [];
+    var row = [];
+    var cur = '';
+    var inQ = false;
+    for (var i = 0; i < t.length; i++) {
+      var ch = t[i];
+      if (inQ) {
+        if (ch === '"') {
+          if (t[i + 1] === '"') { cur += '"'; i++; }
+          else inQ = false;
+        } else {
+          cur += ch;
+        }
+        continue;
+      }
+      if (ch === '"') { inQ = true; continue; }
+      if (ch === '\r') continue;
+      if (ch === delim) { row.push(cur); cur = ''; continue; }
+      if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; continue; }
+      cur += ch;
+    }
+    row.push(cur);
+    rows.push(row);
+    // Drop trailing empty line
+    if (rows.length && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();
+    return rows;
+  }
+
+  function openMapsUpsertRepoUserMaps(repoId, parsedRows, mode) {
+    var s = Settings.get();
+    if (!Array.isArray(s.state.userMaps)) s.state.userMaps = [];
+    var repoKey = String(repoId || '');
+    var seenRowKeys = Object.create(null);
+
+    function markSeen(rowKey) { seenRowKeys[String(rowKey)] = true; }
+    function buildStableId(rowKey) { return 'om-repo-' + repoKey + '-' + openMapsHash32(String(rowKey)); }
+
+    var rows = Array.isArray(parsedRows) ? parsedRows : [];
+    if (!rows.length) return;
+
+    var header = rows[0] || [];
+    var startIdx = 0;
+    var col = Object.create(null);
+    if (mode === 'rich') {
+      for (var hi = 0; hi < header.length; hi++) {
+        var k = String(header[hi] || '').trim().toLowerCase();
+        if (k) col[k] = hi;
+      }
+      startIdx = 1;
+    }
+
+    for (var ri = startIdx; ri < rows.length; ri++) {
+      var r = rows[ri] || [];
+      var url = '';
+      var title = '';
+      var type = '';
+      if (mode === 'rich') {
+        url = String(r[col.url] || '').trim();
+        title = String(r[col.title] || '').trim();
+        type = String(r[col.type] || '').trim();
+      } else {
+        url = String(r[0] || '').trim();
+        title = String(r[1] || '').trim();
+      }
+      if (!url) continue;
+      var rowKey = url;
+      markSeen(rowKey);
+
+      var normUrl = url;
+      var inferredType = type || (/\.(kml)(?:[?#].*)?$/i.test(normUrl) ? 'REMOTE_KML' : '');
+      if (!inferredType) continue; // v1: only ingest URLs we can infer
+
+      var id = buildStableId(rowKey);
+      var def = {
+        id: id,
+        title: title || openMapsSanitizeKmlFileBaseName(normUrl.split('/').pop() || 'Map'),
+        source: 'user',
+        touId: 'none',
+        area: 'user',
+        type: inferredType,
+        crs: 'EPSG:3857',
+        url: normUrl,
+        bbox: [-180, -85, 180, 85],
+        queryable: false,
+        layers: { main: { title: 'KML', abstract: '', queryable: false } },
+        default_layers: ['main'],
+        attribution: 'Repo'
+      };
+      def.origin = { kind: 'repo', repoId: repoKey, rowKey: String(rowKey) };
+
+      var existingIdx = -1;
+      for (var ui = 0; ui < s.state.userMaps.length; ui++) {
+        var um = s.state.userMaps[ui];
+        if (um && String(um.id) === String(id)) { existingIdx = ui; break; }
+      }
+      if (existingIdx === -1) {
+        def.addedAt = Date.now();
+        s.state.userMaps.push(def);
+      } else {
+        var prev = s.state.userMaps[existingIdx];
+        // Respect manual detach.
+        if (prev && prev.origin && prev.origin.kind === 'manual') continue;
+        s.state.userMaps[existingIdx] = Object.assign({}, prev, def, { addedAt: prev && prev.addedAt ? prev.addedAt : Date.now() });
+      }
+      maps.set(def.id, def);
+    }
+
+    // Mark missing as removedUpstream (do not delete).
+    for (var mj = 0; mj < s.state.userMaps.length; mj++) {
+      var m = s.state.userMaps[mj];
+      if (!m || !m.origin || m.origin.kind !== 'repo' || String(m.origin.repoId) !== repoKey) continue;
+      var rk = m.origin.rowKey != null ? String(m.origin.rowKey) : '';
+      if (!rk) continue;
+      if (!seenRowKeys[rk]) {
+        m.removedUpstream = true;
+      } else {
+        if (m.removedUpstream) delete m.removedUpstream;
+      }
+    }
+
+    Settings.put(s);
+  }
+
+  function openMapsSyncRepoOnce(repo, cb) {
+    var r = repo || {};
+    if (!r.enabled) return cb && cb(null);
+    var csvUrl = openMapsGoogleSheetToCsvUrl(r.sheetUrl);
+    if (!csvUrl) return cb && cb(new Error('bad_url'));
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: csvUrl + (csvUrl.indexOf('?') > -1 ? '&' : '?') + '_ts=' + Date.now(),
+      timeout: 25000,
+      onload: function(res) {
+        if (!res || res.status !== 200) return cb && cb(new Error('http' + (res ? res.status : 0)));
+        var rows = openMapsParseDelimited(res.responseText || '');
+        openMapsUpsertRepoUserMaps(r.id, rows, r.mode === 'rich' ? 'rich' : 'simple');
+        try {
+          var s = Settings.get();
+          if (!Array.isArray(s.state.mapRepos)) s.state.mapRepos = [];
+          for (var i = 0; i < s.state.mapRepos.length; i++) {
+            if (s.state.mapRepos[i] && String(s.state.mapRepos[i].id) === String(r.id)) {
+              s.state.mapRepos[i].lastSyncAt = Date.now();
+              s.state.mapRepos[i].lastError = null;
+              break;
+            }
+          }
+          Settings.put(s);
+        } catch (ePutR) { /* ignore */ }
+        cb && cb(null);
+      },
+      onerror: function() { cb && cb(new Error('network')); },
+      ontimeout: function() { cb && cb(new Error('timeout')); }
+    });
+  }
+
+  function openMapsSyncAllReposOnStartup() {
+    try {
+      var s = Settings.get();
+      if (!s || !s.state || !Array.isArray(s.state.mapRepos)) return;
+      s.state.mapRepos.forEach(function(r) {
+        openMapsSyncRepoOnce(r, function() {
+          try { openMapsInvalidateAddListCaches(); } catch (eInv) {}
+          try { updateMapSelector(); } catch (eSel) {}
+          try { if (typeof window.__openMapsRenderUserMapsLibrary === 'function') window.__openMapsRenderUserMapsLibrary(); } catch (eLib) {}
+        });
+      });
+    } catch (eSync) { /* ignore */ }
   }
 
   function openMapsGoogleMyMapsKmlUrlFromMid(mid) {
@@ -12002,6 +13006,8 @@ function loadTileError(tile, callback) {
   // IMPORTANT: This must run after tileManipulations + pixel manipulation helpers are initialized,
   // because MapHandle's edit panel can reference them during boot.
   mergeOpenMapsUserMapDefinitionsIntoRegistry();
+  // Repo-backed library sync (Google Sheet repos). Runs async; safe to start on every load.
+  openMapsSyncAllReposOnStartup();
   function openMapsShouldRestoreGoogleMyMapsActiveRow(restoredMap, persistedActiveRow) {
     if (!restoredMap || restoredMap.type === 'LOCAL_KML') return true;
     if (restoredMap.type !== 'GOOGLE_MY_MAPS') return true;
@@ -12035,6 +13041,7 @@ function loadTileError(tile, callback) {
         wmsArcgisRestViewportProbe: mapHandle.wmsArcgisRestViewportProbe
       }));
     });
+    openMapsDedupeActiveHandlesByMapId();
     saveMapState();
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
   }
@@ -12453,7 +13460,7 @@ function MapHandle(map, options) {
     // Bounding Box Math (Safely split to prevent OpenLayers NaN corruption)
     this.area = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(new OpenLayers.Projection('EPSG:4326'), W.map.getProjectionObject());
     const currentExtent = getMapExtent();
-    var kmlVectorOverlay = map.type === 'LOCAL_KML' || map.type === 'GOOGLE_MY_MAPS';
+    var kmlVectorOverlay = openMapsMapTypeIsKmlVectorOverlay(map.type);
     this.outOfArea = kmlVectorOverlay ? false : (currentExtent ? !this.area.intersectsBounds(currentExtent) : true);
 
     // UI Element References
@@ -12982,20 +13989,8 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         ' &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
       metaBox.appendChild(metaTop);
 
- // PERMANENT BBOX DISPLAY (Monospace for easy visual comparison)
-      if (map.bbox) {
-        var metaBbox = document.createElement('div');
-        metaBbox.style.cssText = 'margin-top: 4px; font-family: monospace; font-size: 10px; color: #5f6368; user-select: all;';
-
-        // Bulletproof extraction (Defends against Waze secretly converting arrays into OpenLayers objects)
-        var bLeft = parseFloat(map.bbox.left !== undefined ? map.bbox.left : map.bbox[0]).toFixed(4);
-        var bBottom = parseFloat(map.bbox.bottom !== undefined ? map.bbox.bottom : map.bbox[1]).toFixed(4);
-        var bRight = parseFloat(map.bbox.right !== undefined ? map.bbox.right : map.bbox[2]).toFixed(4);
-        var bTop = parseFloat(map.bbox.top !== undefined ? map.bbox.top : map.bbox[3]).toFixed(4);
-
-        metaBbox.innerHTML = '<strong>' + I18n.t('openmaps.meta_bbox') + ':</strong> [' + bLeft + ', ' + bBottom + ', ' + bRight + ', ' + bTop + ']';
-        metaBox.appendChild(metaBbox);
-      }
+      // BBox coordinates are intentionally not shown here to avoid clutter.
+      // If needed, access them via the map's Visual adjustments → BBox “Copy” control.
       if (openMapsMapHasZoomMeta(map)) {
         UI.zoomMetaLine = document.createElement('div');
         UI.zoomMetaLine.style.cssText = 'margin-top: 4px; font-size: 10px; color: #70757a; line-height: 1.35; font-family: monospace, monospace;';
@@ -13003,10 +13998,18 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         Tooltips.add(UI.zoomMetaLine, I18n.t('openmaps.zoom_meta_tooltip'), true);
       }
       if (map.abstract) {
-          var metaDesc = document.createElement('div');
-          metaDesc.style.cssText = 'margin-top: 6px; font-style: italic; color: #70757a;';
-          metaDesc.textContent = map.abstract;
-          metaBox.appendChild(metaDesc);
+        var about = document.createElement('details');
+        about.className = 'openmaps-map-about';
+        about.style.cssText = 'margin-top:8px; border:1px solid #e8eaed; border-radius:8px; padding:6px 8px; background:#fff;';
+        var aboutSum = document.createElement('summary');
+        aboutSum.style.cssText = 'cursor:pointer; font-weight:600; color:#3c4043; outline:none;';
+        aboutSum.textContent = I18n.t('openmaps.about');
+        var aboutBody = document.createElement('div');
+        aboutBody.style.cssText = 'margin-top:6px; font-style: italic; color: #70757a; line-height:1.35;';
+        aboutBody.textContent = map.abstract;
+        about.appendChild(aboutSum);
+        about.appendChild(aboutBody);
+        metaBox.appendChild(about);
       }
       UI.editContainer.appendChild(metaBox);
 
@@ -13072,7 +14075,46 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           self.updateBboxLayer();
           saveMapState();
         });
-        visualCommonBox.appendChild(bboxCheck);
+        var bboxRow = document.createElement('div');
+        bboxRow.className = 'openmaps-bbox-row';
+        bboxRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;';
+        bboxRow.appendChild(bboxCheck);
+
+        if (map.bbox) {
+          var bboxCopyBtn = document.createElement('button');
+          bboxCopyBtn.type = 'button';
+          bboxCopyBtn.className = 'openmaps-bbox-copy-btn';
+          bboxCopyBtn.style.cssText = 'flex:0 0 auto; padding:2px 8px; font-size:11px; border:1px solid #dadce0; border-radius:999px; background:#fff; color:#3c4043; cursor:pointer;';
+          bboxCopyBtn.textContent = I18n.t('openmaps.copy_bbox');
+          bboxCopyBtn.addEventListener('click', function(ev) {
+            if (ev) ev.preventDefault();
+            try {
+              var bb = map.bbox;
+              var bLeft = parseFloat(bb.left !== undefined ? bb.left : bb[0]).toFixed(4);
+              var bBottom = parseFloat(bb.bottom !== undefined ? bb.bottom : bb[1]).toFixed(4);
+              var bRight = parseFloat(bb.right !== undefined ? bb.right : bb[2]).toFixed(4);
+              var bTop = parseFloat(bb.top !== undefined ? bb.top : bb[3]).toFixed(4);
+              var payload = bLeft + ',' + bBottom + ',' + bRight + ',' + bTop;
+              if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                navigator.clipboard.writeText(payload);
+              } else {
+                var ta = document.createElement('textarea');
+                ta.value = payload;
+                ta.style.cssText = 'position:fixed; left:-9999px; top:-9999px;';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                try { document.execCommand('copy'); } catch (e) {}
+                ta.remove();
+              }
+              bboxCopyBtn.textContent = I18n.t('openmaps.copy_done') || 'Copied';
+              setTimeout(function() { bboxCopyBtn.textContent = I18n.t('openmaps.copy_bbox'); }, 900);
+            } catch (eC) { /* ignore */ }
+          });
+          bboxRow.appendChild(bboxCopyBtn);
+        }
+
+        visualCommonBox.appendChild(bboxRow);
       }
 
       if (!isEsriFeatureVector) {
@@ -13669,9 +14711,11 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
             var retryN = self.__openmapsRebuildMapLayersRetry | 0;
             if (retryN < 5) {
               self.__openmapsRebuildMapLayersRetry = retryN + 1;
+              // KML/My Maps can finish fetching before the edit panel DOM exists. Retry with backoff.
+              var waitMs = retryN === 0 ? 0 : (retryN === 1 ? 50 : (retryN === 2 ? 250 : (retryN === 3 ? 1000 : 2000)));
               setTimeout(function() {
                 try { rebuildMapLayersUI(); } catch (eRbRetry) { /* ignore */ }
-              }, 0);
+              }, waitMs);
             }
           }
           return;
@@ -13694,6 +14738,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         layerRedrawNeeded = true;
         self.updateLayers();
         updateMapLayersSummaryCount();
+        try { self.__openmapsKmlUiNeedsRefresh = false; } catch (eClrKmlUi) { /* ignore */ }
       }
 
       function applyCatalogFromEntry(entry) {
@@ -13866,6 +14911,14 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           appendOneLayerRow(layerItem, subLayerContainer);
         });
         UI.editContainer.appendChild(mapLayersDetailsRoot);
+
+        // If KML/My Maps finished parsing before this DOM existed, force one rebuild now.
+        try {
+          if (openMapsMapTypeIsKmlVectorOverlay(map.type) && self.__openmapsKmlUiNeedsRefresh) {
+            rebuildMapLayersUI();
+            if (self.mapLayers && self.mapLayers.length > 1 && UI.mapLayersDetailsRoot) UI.mapLayersDetailsRoot.open = true;
+          }
+        } catch (eKmlUiLate) { /* ignore */ }
 
         if (!subLayerContainer.dataset.omSortableInit) {
           sortable(subLayerContainer, { forcePlaceholderSize: true, placeholderClass: 'result', handle: '.open-maps-drag-handle' })[0].addEventListener('sortupdate', function(e) {
@@ -14392,25 +15445,36 @@ acceptBtn.addEventListener('click', () => {
       rmBtn.innerHTML = '<i class="fa fa-trash" aria-hidden="true"></i>';
       rmBtn.setAttribute('aria-label', I18n.t('openmaps.remove_layer'));
       Tooltips.add(rmBtn, I18n.t('openmaps.remove_layer'));
-      rmBtn.addEventListener('click', () => {
+      function destroyOpenMapsHandle(opts) {
+        var o = opts || {};
+        var deleteUserDefinition = !!o.deleteUserDefinition;
         var hi = handles.indexOf(self);
         if (hi !== -1) handles.splice(hi, 1);
-        if (map.source === 'user') openMapsRemoveUserMapDefinition(map.id);
-        if (layerToggler.parentNode) layerToggler.parentNode.removeChild(layerToggler);
+        if (deleteUserDefinition && map && map.source === 'user') openMapsRemoveUserMapDefinition(map.id);
+        if (layerToggler && layerToggler.parentNode) layerToggler.parentNode.removeChild(layerToggler);
         var card = UI.container;
-        if (card.parentNode) card.parentNode.removeChild(card);
-        Tooltips.teardownSubtree(card);
+        if (card && card.parentNode) card.parentNode.removeChild(card);
+        if (card) Tooltips.teardownSubtree(card);
         if (self.layer) {
-          if (map.type === 'GOOGLE_MY_MAPS') openMapsGoogleMyMapsLayerRemoveFromMap(self.layer);
-          else W.map.removeLayer(self.layer);
+          try {
+            if (openMapsMapTypeIsKmlVectorOverlay(map.type)) openMapsGoogleMyMapsLayerRemoveFromMap(self.layer);
+            else W.map.removeLayer(self.layer);
+          } catch (eRmL) { /* ignore */ }
         }
-        if (self.bboxLayer) W.map.removeLayer(self.bboxLayer);
+        if (self.bboxLayer) {
+          try { W.map.removeLayer(self.bboxLayer); } catch (eRmB) { /* ignore */ }
+        }
         requestAnimationFrame(function() {
-          saveMapState();
-          updateMapSelector();
-          refreshMapDrag();
-          if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
+          try { saveMapState(); } catch (eSave) {}
+          try { updateMapSelector(); } catch (eSel) {}
+          try { refreshMapDrag(); } catch (eDrag) {}
+          try { if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged(); } catch (eInsp) {}
         });
+      }
+      this.destroyOpenMapsHandle = destroyOpenMapsHandle;
+      rmBtn.addEventListener('click', () => {
+        // Deactivate only (do not delete the saved library entry).
+        destroyOpenMapsHandle({ deleteUserDefinition: false });
       });
       rmBox.appendChild(rmLeft);
       rmBox.appendChild(rmBtn);
@@ -14995,9 +16059,11 @@ this.updateVisibility = function() {
 
             case 'GOOGLE_MY_MAPS':
             case 'LOCAL_KML':
+            case 'REMOTE_KML':
                 (function initGoogleMyMapsOrLocalKml() {
                   openMapsInstallKmlRendererDrawFeatureHooksOnce();
                   var sourceIsLocalKml = map.type === 'LOCAL_KML';
+                  var sourceIsRemoteKml = map.type === 'REMOTE_KML';
                   var proj4326 = new OpenLayers.Projection('EPSG:4326');
                   var proj3857 = (typeof W !== 'undefined' && W.map && typeof W.map.getProjectionObject === 'function') ? W.map.getProjectionObject() : new OpenLayers.Projection('EPSG:3857');
                   var kmlFormat = (OpenLayers.Format && OpenLayers.Format.KML) ? new OpenLayers.Format.KML({
@@ -15005,7 +16071,7 @@ this.updateVisibility = function() {
                     externalProjection: proj4326,
                     extractStyles: false
                   }) : null;
-                  var vecOlName = sourceIsLocalKml ? openMapsLocalKmlLayerOlName(map.id) : openMapsGoogleMyMapsLayerOlName(map.id);
+                  var vecOlName = sourceIsLocalKml ? openMapsLocalKmlLayerOlName(map.id) : (sourceIsRemoteKml ? openMapsRemoteKmlLayerOlName(map.id) : openMapsGoogleMyMapsLayerOlName(map.id));
                   self.layer = new OpenLayers.Layer.Vector(vecOlName, {
                     projection: proj3857,
                     displayInLayerSwitcher: false,
@@ -15069,6 +16135,34 @@ this.updateVisibility = function() {
                       showGmmErr(I18n.t('openmaps.user_maps_add_error_parse'));
                       return;
                     }
+                    // Update Google My Maps / KML row title from KML Document name ASAP.
+                    try {
+                      var docTitle = openMapsKmlExtractDocumentTitle(textG);
+                      if (docTitle && typeof docTitle === 'string') {
+                        var prevTitle = (map && typeof map.title === 'string') ? map.title : '';
+                        if (docTitle !== prevTitle) {
+                          map.title = docTitle;
+                          try {
+                            var sTit = Settings.get();
+                            if (sTit && sTit.state && Array.isArray(sTit.state.userMaps)) {
+                              for (var uti = 0; uti < sTit.state.userMaps.length; uti++) {
+                                var umt = sTit.state.userMaps[uti];
+                                if (umt && umt.id === map.id) {
+                                  umt.title = docTitle;
+                                  break;
+                                }
+                              }
+                              Settings.put(sTit);
+                            }
+                          } catch (ePutT) { /* ignore */ }
+                          // Refresh UI pieces that render the map title.
+                          try { if (self.UI && self.UI.title) self.UI.title.textContent = map.title; } catch (eUIT) { /* ignore */ }
+                          try { updateMapSelector(); } catch (eSelT) { /* ignore */ }
+                          try { if (typeof self.updateVisibility === 'function') self.updateVisibility(); } catch (eVisT) { /* ignore */ }
+                          try { if (openMapsInspectorApi && typeof openMapsInspectorApi.notifyHandlesChanged === 'function') openMapsInspectorApi.notifyHandlesChanged(); } catch (eInspT) { /* ignore */ }
+                        }
+                      }
+                    } catch (eDocT) { /* ignore */ }
                     var parsedK = { features: [], layerIds: [], folderTitles: {}, folderIconHrefs: {} };
                     try {
                       parsedK = openMapsKmlTextParseFull(textG, proj4326, proj3857);
@@ -15145,8 +16239,13 @@ this.updateVisibility = function() {
                         return { name: id, visible: v };
                       });
                       try {
+                        self.__openmapsKmlUiNeedsRefresh = true;
                         rebuildMapLayersUI();
                       } catch (eRb) { /* ignore */ }
+                      // If this expanded from a placeholder single layer to multiple folders, auto-open the details.
+                      try {
+                        if (UI.mapLayersDetailsRoot && layerIdsK.length > 1) UI.mapLayersDetailsRoot.open = true;
+                      } catch (eOpenDt) { /* ignore */ }
                       try {
                         var sKml = Settings.get();
                         if (Array.isArray(sKml.state.userMaps)) {
@@ -15614,6 +16713,9 @@ this.updateVisibility = function() {
         } catch (eKmlRe) { /* ignore */ }
       }
       saveMapState();
+      try {
+        if (typeof updateMapLayersSummaryCount === 'function') updateMapLayersSummaryCount();
+      } catch (eMls) { /* ignore */ }
       self.updateVisibility();
       if (openMapsInspectorApi && typeof openMapsInspectorApi.notifyHandlesChanged === 'function') {
         openMapsInspectorApi.notifyHandlesChanged();
