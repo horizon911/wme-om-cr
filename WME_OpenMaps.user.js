@@ -18244,6 +18244,7 @@ input.open-maps-opacity-slider { vertical-align: middle; display: inline; margin
     document.head.appendChild(styleElement);
   }
   //#endregion
+}
 
 function log(message) {
   if (typeof message === 'string') {
