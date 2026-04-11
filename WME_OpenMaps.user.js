@@ -66,6 +66,10 @@
 // @connect     maratlas.discomap.eea.europa.eu
 // @connect     services7.arcgis.com
 // @connect     whc.unesco.org
+// @connect     wwf-sight-maps.org
+// @connect     maratlas.discomap.eea.europa.eu
+// @connect     services7.arcgis.com
+// @connect     whc.unesco.org
 // @connect     *
 // @icon        https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Candy/3D/candy_3d.png
 // @downloadURL https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
@@ -419,9 +423,36 @@ async function onWmeReady() {
       }
       return;
     }
+  if (typeof OpenLayers === 'undefined' || !W.map || typeof W.map.getOLMap !== 'function' || !W.map.getOLMap()) {
+    openMapsOlWaitAttempts += 1;
+    if (openMapsOlWaitAttempts >= OPEN_MAPS_OL_MAX_ATTEMPTS) {
+      if (!openMapsOlGiveUpLogged) {
+        openMapsOlGiveUpLogged = true;
+        log('OpenLayers / W.map not ready after ' + OPEN_MAPS_OL_MAX_ATTEMPTS + 's; stopping retries.');
+      }
+      return;
+    }
     setTimeout(onWmeReady, 1000);
     return;
   }
+  openMapsOlWaitAttempts = 0;
+
+  if (!openMapsWmeSdk && openMapsResolveGetWmeSdkFn()) {
+    openMapsWmeSdk = openMapsGetWmeSdkOnce();
+    if (openMapsWmeSdk) {
+      try {
+        log('WME SDK bound (SDK ' + openMapsWmeSdk.getSDKVersion() + ', WME ' + openMapsWmeSdk.getWMEVersion() + ').');
+      } catch (eV) {
+        log('WME SDK bound.');
+      }
+    } else {
+      log('getWmeSdk unavailable; using legacy W.userscripts / W.map integrations.');
+    }
+  }
+
+  openMapsInstallHideSearchThisAreaChipOnMapMove();
+
+  //#endregion OpenMapsSdkBootstrap
   openMapsOlWaitAttempts = 0;
 
   if (!openMapsWmeSdk && openMapsResolveGetWmeSdkFn()) {
@@ -449,6 +480,10 @@ async function onWmeReady() {
       no_local_maps: 'No maps found for this area',
       hide_tooltips: 'Hide help',
       show_tooltips: 'Show help',
+      sidebar_unlock_low_zoom: 'Unlock sidebar below zoom 12',
+      sidebar_wme_lock_respect: 'Use WME low-zoom sidebar lock',
+      sidebar_unlock_low_zoom_tooltip: 'Lets you use the right sidebar (layers, scripts, etc.) when zoomed out below level 12. WME normally limits interaction there. Turn off if something misbehaves after a WME update.',
+      sidebar_wme_lock_respect_tooltip: 'Restore WME’s default behavior for the right sidebar when zoomed out below level 12.',
       sidebar_unlock_low_zoom: 'Unlock sidebar below zoom 12',
       sidebar_wme_lock_respect: 'Use WME low-zoom sidebar lock',
       sidebar_unlock_low_zoom_tooltip: 'Lets you use the right sidebar (layers, scripts, etc.) when zoomed out below level 12. WME normally limits interaction there. Turn off if something misbehaves after a WME update.',
@@ -481,6 +516,16 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Adjust how transparent the layer is',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Make the map background transparent',
+      map_improvement_label: 'Apply pixel manipulations',
+      map_improvement_label_tooltip: 'Apply pixel-level tile processing (requires redraw; may affect performance).',
+      pixel_manipulations_title: 'Pixel manipulations',
+      pixel_manipulations_default: 'Default',
+      pixel_manipulations_override: 'Override',
+      pixel_manipulations_use_default: 'Use catalog default',
+      pixel_manipulations_select_none: 'Select none',
+      pixel_manipulations_use_default_tooltip: 'Use catalog default (clear override)',
+      pixel_manipulations_select_none_tooltip: 'Select none (override to an empty list)',
+      pixel_manipulations_tooltip: 'Advanced: per-map overrides for tile pixel processing. Works independently from CSS filters and transparency. Changes apply after redraw and may cost performance.',
       map_improvement_label: 'Apply pixel manipulations',
       map_improvement_label_tooltip: 'Apply pixel-level tile processing (requires redraw; may affect performance).',
       pixel_manipulations_title: 'Pixel manipulations',
@@ -683,6 +728,8 @@ async function onWmeReady() {
         HR: 'Croatia',
         CZ: 'Czech Republic',
         UN: 'Universal',
+        EU: 'European Union',
+        user: 'Your maps'
         EU: 'European Union',
         user: 'Your maps'
       },
@@ -936,6 +983,10 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'WME-vergrendeling onder z12',
       sidebar_unlock_low_zoom_tooltip: 'Maakt de rechterzijbalk (lagen, scripts, …) bruikbaar als je verder bent uitgezoomd dan niveau 12. WME beperkt dat normaal. Zet uit als iets raar doet na een WME-update.',
       sidebar_wme_lock_respect_tooltip: 'Herstelt het standaard WME-gedrag voor de rechterzijbalk onder zoomniveau 12.',
+      sidebar_unlock_low_zoom: 'Zijbalk vrij onder zoom 12',
+      sidebar_wme_lock_respect: 'WME-vergrendeling onder z12',
+      sidebar_unlock_low_zoom_tooltip: 'Maakt de rechterzijbalk (lagen, scripts, …) bruikbaar als je verder bent uitgezoomd dan niveau 12. WME beperkt dat normaal. Zet uit als iets raar doet na een WME-update.',
+      sidebar_wme_lock_respect_tooltip: 'Herstelt het standaard WME-gedrag voor de rechterzijbalk onder zoomniveau 12.',
       expand: 'Klik om uit te breiden',
       collapse: 'Klik om te verbergen',
       hideshow_layer: 'Verberg/Toon kaart',
@@ -963,6 +1014,16 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Wijzig de doorzichtigheid van de kaart',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Maak de achtergrond van de kaart transparent',
+      map_improvement_label: 'Pixelmanipulaties toepassen',
+      map_improvement_label_tooltip: 'Pas pixelbewerkingen toe op kaarttegels (hertekenen vereist; kan prestaties beïnvloeden).',
+      pixel_manipulations_title: 'Pixelmanipulaties',
+      pixel_manipulations_default: 'Standaard',
+      pixel_manipulations_override: 'Overschrijven',
+      pixel_manipulations_use_default: 'Catalogusstandaard gebruiken',
+      pixel_manipulations_select_none: 'Niets selecteren',
+      pixel_manipulations_use_default_tooltip: 'Catalogusstandaard gebruiken (overschrijving wissen)',
+      pixel_manipulations_select_none_tooltip: 'Niets selecteren (overschrijven naar een lege lijst)',
+      pixel_manipulations_tooltip: 'Geavanceerd: per-kaart overschrijvingen voor pixelbewerking van tegels. Werkt onafhankelijk van CSS-filters en transparantie. Toegepast na hertekenen; kan prestaties beïnvloeden.',
       map_improvement_label: 'Pixelmanipulaties toepassen',
       map_improvement_label_tooltip: 'Pas pixelbewerkingen toe op kaarttegels (hertekenen vereist; kan prestaties beïnvloeden).',
       pixel_manipulations_title: 'Pixelmanipulaties',
@@ -1166,6 +1227,8 @@ async function onWmeReady() {
         HR: 'Kroatië',
         CZ: 'Tsjechië',
         UN: 'Universal',
+        EU: 'European Union',
+        user: 'Jouw kaarten'
         EU: 'European Union',
         user: 'Jouw kaarten'
       },
@@ -1415,6 +1478,10 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'Verrouillage WME sous zoom 12',
       sidebar_unlock_low_zoom_tooltip: 'Permet d’utiliser la barre latérale droite (couches, scripts, etc.) en dessous du niveau de zoom 12. WME limite cela par défaut. Désactivez si le comportement devient étrange après une mise à jour.',
       sidebar_wme_lock_respect_tooltip: 'Rétablit le comportement WME par défaut pour la barre latérale droite sous le zoom 12.',
+      sidebar_unlock_low_zoom: 'Déverrouiller la barre latérale (z<12)',
+      sidebar_wme_lock_respect: 'Verrouillage WME sous zoom 12',
+      sidebar_unlock_low_zoom_tooltip: 'Permet d’utiliser la barre latérale droite (couches, scripts, etc.) en dessous du niveau de zoom 12. WME limite cela par défaut. Désactivez si le comportement devient étrange après une mise à jour.',
+      sidebar_wme_lock_respect_tooltip: 'Rétablit le comportement WME par défaut pour la barre latérale droite sous le zoom 12.',
       terms_section_title: 'Conditions d’utilisation',
       tou_section_status_accepted: 'Accepté',
       tou_section_status_required: 'Action requise',
@@ -1449,6 +1516,16 @@ async function onWmeReady() {
       tou_accept_disabled_tooltip: 'Ouvrez d’abord chaque lien de langue ci-dessus.',
       no_local_maps: 'Aucune carte disponible ici',
       opacity_label: 'Opacité',
+      map_improvement_label: 'Appliquer des manipulations de pixels',
+      map_improvement_label_tooltip: 'Applique un traitement au niveau des pixels (nécessite un redessin; peut impacter les performances).',
+      pixel_manipulations_title: 'Manipulations de pixels',
+      pixel_manipulations_default: 'Par défaut',
+      pixel_manipulations_override: 'Remplacer',
+      pixel_manipulations_use_default: 'Utiliser la valeur du catalogue',
+      pixel_manipulations_select_none: 'Ne rien sélectionner',
+      pixel_manipulations_use_default_tooltip: 'Utiliser la valeur du catalogue (effacer le remplacement)',
+      pixel_manipulations_select_none_tooltip: 'Ne rien sélectionner (remplacer par une liste vide)',
+      pixel_manipulations_tooltip: 'Avancé : remplacements par carte pour le traitement des pixels des tuiles. Indépendant des filtres CSS et de la transparence. S’applique après redessin et peut coûter en performances.',
       map_improvement_label: 'Appliquer des manipulations de pixels',
       map_improvement_label_tooltip: 'Applique un traitement au niveau des pixels (nécessite un redessin; peut impacter les performances).',
       pixel_manipulations_title: 'Manipulations de pixels',
@@ -1494,6 +1571,10 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'Usar bloqueio WME em zoom baixo',
       sidebar_unlock_low_zoom_tooltip: 'Permite usar a barra lateral direita (camadas, scripts etc.) com zoom abaixo do nível 12. O WME costuma limitar isso. Desative se algo falhar após uma atualização.',
       sidebar_wme_lock_respect_tooltip: 'Restaura o comportamento padrão do WME para a barra lateral direita com zoom abaixo do 12.',
+      sidebar_unlock_low_zoom: 'Liberar barra lateral abaixo do zoom 12',
+      sidebar_wme_lock_respect: 'Usar bloqueio WME em zoom baixo',
+      sidebar_unlock_low_zoom_tooltip: 'Permite usar a barra lateral direita (camadas, scripts etc.) com zoom abaixo do nível 12. O WME costuma limitar isso. Desative se algo falhar após uma atualização.',
+      sidebar_wme_lock_respect_tooltip: 'Restaura o comportamento padrão do WME para a barra lateral direita com zoom abaixo do 12.',
       no_local_maps: 'Não foram encontrados mapas para esta área',
       expand: 'Clique para expandir',
       collapse: 'Clique para colapsar',
@@ -1519,6 +1600,16 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Ajustar a transparência da camada',
       transparent_label: 'Transparência',
       transparent_label_tooltip: 'Fazer o mapa de plano de fundo transparente',
+      map_improvement_label: 'Aplicar manipulações de pixels',
+      map_improvement_label_tooltip: 'Aplicar processamento de pixels nos tiles (requer redesenho; pode afetar o desempenho).',
+      pixel_manipulations_title: 'Manipulações de pixels',
+      pixel_manipulations_default: 'Padrão',
+      pixel_manipulations_override: 'Substituir',
+      pixel_manipulations_use_default: 'Usar padrão do catálogo',
+      pixel_manipulations_select_none: 'Selecionar nenhum',
+      pixel_manipulations_use_default_tooltip: 'Usar padrão do catálogo (limpar substituição)',
+      pixel_manipulations_select_none_tooltip: 'Selecionar nenhum (substituir por lista vazia)',
+      pixel_manipulations_tooltip: 'Avançado: substituições por mapa para processamento de pixels dos tiles. Funciona de forma independente de filtros CSS e transparência. Aplica após redesenho e pode custar desempenho.',
       map_improvement_label: 'Aplicar manipulações de pixels',
       map_improvement_label_tooltip: 'Aplicar processamento de pixels nos tiles (requer redesenho; pode afetar o desempenho).',
       pixel_manipulations_title: 'Manipulações de pixels',
@@ -1736,6 +1827,150 @@ async function onWmeReady() {
           '26': { queryable: true, title: 'Core Network' },
           '28': { queryable: true, title: 'Airports' },
           '32': { queryable: true, title: 'EFTA Core Roads' }
+      }
+    },
+    // WWF SIGHT MapServer: .../WMSServer returns HTTP 400 for WMS GetCapabilities/GetMap (WMS not usable here); use ESRI below.
+    {
+      id: 9920,
+      title: 'UNESCO Natural & Mixed World Heritage (WWF SIGHT)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI',
+      url: 'https://wwf-sight-maps.org/arcgis/rest/services/Global/World_Heritage_Sites/MapServer',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [1, 22],
+      format: 'png32',
+      transparent: true,
+      area: 'UN',
+      tile_size: 256,
+      abstract: 'WWF SIGHT service scope is natural and mixed World Heritage (polygons), not the full cultural-property inventory. For broader WH symbology use EEA Maratlas or UNESCO Sites Navigator points.',
+      attribution: 'UNESCO World Heritage Centre / WWF SIGHT',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage Sites' }
+      }
+    },
+
+    
+    {
+      id: 9921,
+      title: 'UNESCO World Heritage (EEA Maratlas) — ArcGIS REST',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI',
+      url: 'https://maratlas.discomap.eea.europa.eu/arcgis/rest/services/Maratlas/world_heritage/MapServer',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.715278, -54.594722, 178.834533, 71.188889],
+      zoomRange: [1, 22],
+      format: 'png32',
+      transparent: true,
+      area: 'UN',
+      tile_size: 256,
+      abstract: 'EEA Maratlas WH map: labels plus point layers split across scale ranges (many sublayers). Defaults enable label + all site point leaves so coverage matches the service at each zoom; hide groups you do not need in the layer list.',
+      attribution: 'UNESCO World Heritage Centre / EEA',
+      queryable: true,
+      // Leaf MapServer ids only (omit group ids 1,4,7,…) so symbols are not drawn twice; include 0 for labels.
+      default_layers: ['0', '2', '3', '5', '6', '8', '9', '11', '12', '14', '15', '17', '18', '20', '21', '23', '24', '26', '27'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage (labels)' }
+      }
+    },
+    {
+      id: 9922,
+      title: 'UNESCO World Heritage (EEA Maratlas) — WMS',
+      touId: 'unesco',
+      favicon: false,
+      type: 'WMS',
+      url: 'https://maratlas.discomap.eea.europa.eu/arcgis/services/Maratlas/world_heritage/MapServer/WMSServer',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.715278, -54.594722, 178.834533, 71.188889],
+      zoomRange: [1, 22],
+      format: 'image/png',
+      transparent: true,
+      area: 'UN',
+      tile_size: 256,
+      abstract: 'Same Maratlas content as ArcGIS REST: WMS exposes one layer id per scale band. All are enabled by default so sites appear at any zoom (server still applies scale rules per layer).',
+      attribution: 'UNESCO World Heritage Centre / EEA',
+      queryable: true,
+      default_layers: ['1', '2', '4', '5', '7', '8', '10', '11', '13', '14', '16', '17', '19', '20', '22', '23', '25', '26', '27'],
+      layers: {
+          '2': { queryable: true, title: 'World Heritage Sites' }
+      }
+    },
+    {
+      id: 9923,
+      title: 'UNESCO Sites Navigator — Sites (FeatureServer points)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI_FEATURE',
+      // ArcGIS Online hosted FeatureServer (public query). Layer 0 only.
+      url: 'https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/UNESCO/FeatureServer/0',
+      getExternalUrl: () => 'https://experience.arcgis.com/experience/4f1652275d1f4656964b64a20a7346d3',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [3, 22],
+      // Was 10: WME is often used around z6–9; no features rendered below minVectorZoom.
+      minVectorZoom: 3,
+      maxFeatures: 750,
+      transparent: true,
+      area: 'UN',
+      abstract: 'Point per listed property (ArcGIS hosted layer). Paste URL must end with …/FeatureServer/0 (no trailing quote). Loads from zoom 3 up; viewport query returns at most maxFeatures points—zoom in for full local coverage.',
+      attribution: 'UNESCO World Heritage Centre / ArcGIS (Sites Navigator)',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'UNESCO Sites (points)' }
+      }
+    },
+    {
+      id: 9924,
+      title: 'World Heritage Sites — ArcGIS Online (FeatureServer points)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI_FEATURE',
+      url: 'https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_Sites/FeatureServer/0',
+      getExternalUrl: () => 'https://www.arcgis.com/apps/mapviewer/index.html?url=https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_Sites/FeatureServer&source=sd',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [3, 22],
+      minVectorZoom: 3,
+      maxFeatures: 750,
+      transparent: true,
+      area: 'UN',
+      abstract: 'Point layer hosted on ArcGIS Online (World_Heritage_Sites service). Same query limits as other FeatureServer overlays: zoom 3+, at most maxFeatures per viewport—zoom in locally. Distinct dataset from “UNESCO Sites Navigator” in this catalog.',
+      attribution: 'UNESCO World Heritage Centre / ArcGIS Online',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage Sites (points)' }
+      }
+    },
+    {
+      id: 9925,
+      title: 'World Heritage UNESCO — ArcGIS Online (FeatureServer points)',
+      touId: 'unesco',
+      favicon: false,
+      type: 'ESRI_FEATURE',
+      url: 'https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_UNESCO/FeatureServer/0',
+      getExternalUrl: () => 'https://www.arcgis.com/apps/mapviewer/index.html?url=https://services7.arcgis.com/iEMmryaM5E3wkdnU/ArcGIS/rest/services/World_Heritage_UNESCO/FeatureServer&source=sd',
+      crs: 'EPSG:3857',
+      bbox: [-179.9999, -85.0, 179.9999, 85.0],
+      zoomRange: [3, 22],
+      minVectorZoom: 3,
+      maxFeatures: 750,
+      transparent: true,
+      area: 'UN',
+      abstract: 'Point layer on ArcGIS Online (World_Heritage_UNESCO service). Same viewport limits as other FeatureServer entries (zoom 3+, maxFeatures cap). Separate from World_Heritage_Sites and from the UNESCO/ Sites Navigator FeatureServer in this catalog.',
+      attribution: 'UNESCO World Heritage Centre / ArcGIS Online',
+      queryable: true,
+      default_layers: ['0'],
+      layers: {
+          '0': { queryable: true, title: 'World Heritage UNESCO (points)' }
       }
     },
     // WWF SIGHT MapServer: .../WMSServer returns HTTP 400 for WMS GetCapabilities/GetMap (WMS not usable here); use ESRI below.
@@ -4361,7 +4596,9 @@ async function onWmeReady() {
     'al-asig': { name: 'ASIG Geoportal Terms of Use', links: { 'en': 'https://geoportal.asig.gov.al/en/info/terms', 'sq': 'https://geoportal.asig.gov.al/sq/info/kusht' }, selector: '.page-content' },
     'waze-internal': { name: 'Waze Terms of Service', links: { 'en': 'https://www.waze.com/legal/tos' }, selector: 'main' },
     'google-mymaps': { name: 'Google Maps / My Maps — Terms', links: { 'en': 'https://www.google.com/intl/en/help/terms_maps/' }, selector: 'main' },
+    'google-mymaps': { name: 'Google Maps / My Maps — Terms', links: { 'en': 'https://www.google.com/intl/en/help/terms_maps/' }, selector: 'main' },
     'eu-tentec': { name: 'European Commission Legal Notice', links: { 'en': 'https://commission.europa.eu/legal-notice_en' }, selector: 'main' },
+    'unesco': { name: 'UNESCO World Heritage Centre — Licenses & Conditions', links: { 'en': 'https://whc.unesco.org/en/licenses/' }, selector: 'main' },
     'unesco': { name: 'UNESCO World Heritage Centre — Licenses & Conditions', links: { 'en': 'https://whc.unesco.org/en/licenses/' }, selector: 'main' },
     'us-wvu': { name: 'West Virginia GIS Clearinghouse Terms', links: { 'en': 'https://www.mapwv.gov/terms.html' }, selector: 'body' },
     'us-usgs': { name: 'USGS Public Domain Policy', links: { 'en': 'https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits' }, selector: '.main-content' },
@@ -4566,6 +4803,12 @@ async function onWmeReady() {
       if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
         settings.inspectorAutoWmsGetFeatureInfo = true;
       }
+      if (!settings.state.userMaps) {
+        settings.state.userMaps = [];
+      }
+      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
+        settings.inspectorAutoWmsGetFeatureInfo = true;
+      }
       return settings;
     },
     'put': function(obj) {
@@ -4601,6 +4844,23 @@ async function onWmeReady() {
       el.removeAttribute('data-original-title');
     }
 
+
+    function bsTooltipCtor() {
+      return (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) ? bootstrap.Tooltip : null;
+    }
+
+    function disposeBsTooltip(el) {
+      var T = bsTooltipCtor();
+      if (T) {
+        try {
+          var inst = T.getInstance(el);
+          if (inst) inst.dispose();
+        } catch (errD) { /* ignore */ }
+      }
+      el.removeAttribute('data-bs-original-title');
+      el.removeAttribute('data-original-title');
+    }
+
     return {
       'add': function(element, text, force, tooltipOpts) {
         var opts = Object.assign({}, defaultOpts, tooltipOpts || {});
@@ -4613,6 +4873,7 @@ async function onWmeReady() {
           elements.push(element);
           return;
         }
+        disposeBsTooltip(element);
         disposeBsTooltip(element);
         if (!force) {
           var i = elements.indexOf(element);
@@ -4641,15 +4902,44 @@ async function onWmeReady() {
         } catch (errInit) {
           if (useHtml) element.removeAttribute('title');
           else element.title = titleStr;
+        var T = bsTooltipCtor();
+        if (!T) {
+          if (useHtml) element.removeAttribute('title');
+          else element.title = titleStr;
+          return;
+        }
+        try {
+          if (useHtml) element.removeAttribute('title');
+          else element.title = titleStr;
+          new T(element, {
+            title: titleStr,
+            html: useHtml,
+            trigger: opts.trigger,
+            container: opts.container,
+            placement: opts.placement,
+            sanitize: false
+          });
+        } catch (errInit) {
+          if (useHtml) element.removeAttribute('title');
+          else element.title = titleStr;
         }
       },
       'remove': function(element) {
+        disposeBsTooltip(element);
         disposeBsTooltip(element);
         element.title = '';
         var toRemoveIdx = elements.findIndex(function(el) { return el == element; });
         if (toRemoveIdx !== -1) {
           elements.splice(toRemoveIdx, 1);
         }
+      },
+      'hide': function(element) {
+        var T = bsTooltipCtor();
+        if (!T) return;
+        try {
+          var inst = T.getInstance(element);
+          if (inst) inst.hide();
+        } catch (errH) { /* ignore */ }
       },
       'hide': function(element) {
         var T = bsTooltipCtor();
@@ -4691,6 +4981,14 @@ async function onWmeReady() {
             } catch (err1) { /* ignore */ }
           }
           disposeBsTooltip(el);
+          var Th = bsTooltipCtor();
+          if (Th) {
+            try {
+              var ti = Th.getInstance(el);
+              if (ti) ti.hide();
+            } catch (err1) { /* ignore */ }
+          }
+          disposeBsTooltip(el);
           el.removeAttribute('data-original-title');
           el.removeAttribute('data-bs-original-title');
           var idx = elements.indexOf(el);
@@ -4706,11 +5004,13 @@ async function onWmeReady() {
         if (isEnabled) {
           elements.forEach(function(element) {
             disposeBsTooltip(element);
+            disposeBsTooltip(element);
             element.title = '';
           });
         } else {
           elements.forEach(function(element) {
             element.title = element.dataset.title;
+            Tooltips.add(element, element.dataset.title, false, {});
             Tooltips.add(element, element.dataset.title, false, {});
           });
         }
@@ -4757,6 +5057,10 @@ async function onWmeReady() {
   }
   //#endregion
 
+  // OpenLayers default is 0. Setting 1 retries failed tile images once globally (including WME basemap),
+  // which doubles load on errors and can worsen Chrome net::ERR_INSUFFICIENT_RESOURCES when many
+  // overlay layers compete for connections/decodes. Keep at 0.
+  OpenLayers.IMAGE_RELOAD_ATTEMPTS = 0;
   // OpenLayers default is 0. Setting 1 retries failed tile images once globally (including WME basemap),
   // which doubles load on errors and can worsen Chrome net::ERR_INSUFFICIENT_RESOURCES when many
   // overlay layers compete for connections/decodes. Keep at 0.
@@ -9248,11 +9552,34 @@ async function onWmeReady() {
       tabPane = leg1.tabPane;
       if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
     }
+    var tabLabel;
+    var tabPane;
+    if (openMapsWmeSdk && openMapsWmeSdk.Sidebar && typeof openMapsWmeSdk.Sidebar.registerScriptTab === 'function') {
+      try {
+        var regSdk = await openMapsWmeSdk.Sidebar.registerScriptTab();
+        tabLabel = regSdk.tabLabel;
+        tabPane = regSdk.tabPane;
+      } catch (eSdkTab) {
+        try {
+          log('SDK Sidebar.registerScriptTab failed; using W.userscripts: ' + (eSdkTab && eSdkTab.message ? eSdkTab.message : eSdkTab));
+        } catch (eL) { /* ignore */ }
+        var leg0 = W.userscripts.registerSidebarTab('openMaps');
+        tabLabel = leg0.tabLabel;
+        tabPane = leg0.tabPane;
+        if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
+      }
+    } else {
+      var leg1 = W.userscripts.registerSidebarTab('openMaps');
+      tabLabel = leg1.tabLabel;
+      tabPane = leg1.tabPane;
+      if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
+    }
 
     tabLabel.innerHTML = '<span class="fa"></span>';
     tabLabel.title = I18n.t('openmaps.tab_title');
     tabPane.id = 'sidepanel-openMaps';
 
+    return tabPane;
     return tabPane;
   })();
 
@@ -9287,7 +9614,21 @@ async function onWmeReady() {
 // --- CACHED SATELLITE IMAGERY TOGGLE ---
   var OPEN_MAPS_SAT_LAYER_NAME = 'satellite_imagery';
   var wazeSatLayer = W.map.getLayerByName(OPEN_MAPS_SAT_LAYER_NAME);
+  var OPEN_MAPS_SAT_LAYER_NAME = 'satellite_imagery';
+  var wazeSatLayer = W.map.getLayerByName(OPEN_MAPS_SAT_LAYER_NAME);
   const satImagery = document.createElement('wz-checkbox');
+  var satUseSdk = false;
+  if (openMapsWmeSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.isLayerVisible === 'function') {
+    try {
+      satImagery.checked = openMapsWmeSdk.Map.isLayerVisible({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
+      satUseSdk = true;
+    } catch (eSatSdk) {
+      satUseSdk = false;
+    }
+  }
+  if (!satUseSdk) {
+    satImagery.checked = wazeSatLayer.getVisibility();
+  }
   var satUseSdk = false;
   if (openMapsWmeSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.isLayerVisible === 'function') {
     try {
@@ -9302,6 +9643,38 @@ async function onWmeReady() {
   }
 
   satImagery.addEventListener('change', function(e) {
+    var on = e.target.checked;
+    if (satUseSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.setLayerVisibility === 'function') {
+      try {
+        openMapsWmeSdk.Map.setLayerVisibility({ layerName: OPEN_MAPS_SAT_LAYER_NAME, visibility: on });
+        return;
+      } catch (eSet) { /* fall through */ }
+    }
+    wazeSatLayer.setVisibility(on);
+  });
+
+  if (satUseSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.trackLayerEvents === 'function') {
+    try {
+      openMapsWmeSdk.Events.trackLayerEvents({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
+    } catch (eTr) { /* ignore */ }
+    try {
+      openMapsWmeSdk.Events.on({
+        eventName: 'wme-layer-visibility-changed',
+        eventHandler: function(payload) {
+          if (!payload || payload.layerName !== OPEN_MAPS_SAT_LAYER_NAME) return;
+          try {
+            satImagery.checked = openMapsWmeSdk.Map.isLayerVisible({ layerName: OPEN_MAPS_SAT_LAYER_NAME });
+          } catch (eIs) { /* ignore */ }
+        }
+      });
+    } catch (eOn) { /* ignore */ }
+  } else {
+    wazeSatLayer.events.register('visibilitychanged', null, function() {
+      if (satImagery.checked !== wazeSatLayer.getVisibility()) {
+        satImagery.checked = wazeSatLayer.getVisibility();
+      }
+    });
+  }
     var on = e.target.checked;
     if (satUseSdk && openMapsWmeSdk.Map && typeof openMapsWmeSdk.Map.setLayerVisibility === 'function') {
       try {
@@ -10035,6 +10408,19 @@ var handleList = document.createElement('div');
         const rB = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer) : h.bboxLayer;
         ourOlRefs.add(rB);
       }
+    const aerialImageryIndex = openMapsAerialStackFloorForSync(olMap, wazeLayers);
+
+    // Use live OL refs: W.map.getLayers() entries may not be `===` handles[].layer (My Maps is added as raw OpenLayers.Vector).
+    const ourOlRefs = new Set();
+    handles.forEach((h) => {
+      if (h.layer) {
+        const rL = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer) : h.layer;
+        ourOlRefs.add(rL);
+      }
+      if (h.bboxLayer) {
+        const rB = olMap ? (openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer) : h.bboxLayer;
+        ourOlRefs.add(rB);
+      }
     });
 
     let minForeignAbove = Infinity;
@@ -10084,7 +10470,14 @@ var handleList = document.createElement('div');
     }
 
     handles.forEach((h) => {
+    handles.forEach((h) => {
       if (!h.layer) return;
+      if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
+      const rank = participating.indexOf(h);
+      if (rank < 0) return;
+      const z = Math.max(floorZ, topIndex - rank);
+      const lyrOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
+      if (olMap.layers.indexOf(lyrOl) >= 0) olMap.setLayerIndex(lyrOl, z);
       if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
       const rank = participating.indexOf(h);
       if (rank < 0) return;
@@ -10096,6 +10489,11 @@ var handleList = document.createElement('div');
     const maxOurZ = minForeignAbove === Infinity ? Infinity : minForeignAbove - 1;
     handles.forEach(h => {
       if (!h.layer || !h.bboxLayer) return;
+      if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
+      const mainOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
+      const bboxOl = openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer;
+      if (olMap.layers.indexOf(mainOl) < 0 || olMap.layers.indexOf(bboxOl) < 0) return;
+      const ti = olMap.getLayerIndex(mainOl);
       if (!openMapsHandleParticipatesInLayerIndexSync(h)) return;
       const mainOl = openMapsResolveLayerOnOlMap(olMap, h.layer) || h.layer;
       const bboxOl = openMapsResolveLayerOnOlMap(olMap, h.bboxLayer) || h.bboxLayer;
@@ -10125,6 +10523,7 @@ function onMapSort() {
     const newHandles = [];
 
     nodes.forEach(node => {
+      const h = handles.find(handle => String(handle.mapId) === String(node.dataset.mapId));
       const h = handles.find(handle => String(handle.mapId) === String(node.dataset.mapId));
       if (h) newHandles.push(h);
     });
@@ -11029,8 +11428,24 @@ function onMapSort() {
   } else {
     W.map.events.register('moveend', null, updateMapSelector);
   }
+  if (openMapsWmeSdk && openMapsWmeSdk.Events && typeof openMapsWmeSdk.Events.on === 'function') {
+    try {
+      openMapsWmeSdk.Events.on({ eventName: 'wme-map-move-end', eventHandler: updateMapSelector });
+      openMapsWmeSdk.Events.on({ eventName: 'wme-map-zoom-changed', eventHandler: updateMapSelector });
+    } catch (eMapSel) {
+      W.map.events.register('moveend', null, updateMapSelector);
+    }
+  } else {
+    W.map.events.register('moveend', null, updateMapSelector);
+  }
   // ----------------------------------------------------------------------------------
   // --------------------------------------
+
+  try {
+    document.documentElement.classList.remove('openmaps-unlock-wme-sidebar');
+    var omUnlockStyle = document.getElementById('openmaps-wme-sidebar-unlock-style');
+    if (omUnlockStyle && omUnlockStyle.parentNode) omUnlockStyle.parentNode.removeChild(omUnlockStyle);
+  } catch (eOmUnlock) {}
 
   try {
     document.documentElement.classList.remove('openmaps-unlock-wme-sidebar');
@@ -11085,6 +11500,7 @@ function onMapSort() {
 
   //#region Implement map query support
   // Add the control to catch a click on the map area for retrieving map information
+  var lastQueryInspectorPayload = null;
   var lastQueryInspectorPayload = null;
   var queryWindowContent, queryWindowOriginalContent;
   var queryWindow = document.createElement('div');
@@ -11151,6 +11567,22 @@ function onMapSort() {
     }
   });
   queryWindow.appendChild(queryWindowQuery);
+  var queryWindowInspector = document.createElement('wz-button');
+  queryWindowInspector.setAttribute('color', 'clear-icon');
+  queryWindowInspector.setAttribute('size', 'sm');
+  queryWindowInspector.className = 'open-maps-query-window-button-left open-maps-query-window-toolbar-wz';
+  queryWindowInspector.innerHTML = '<i class="fa fa-fw fa-list-alt" aria-hidden="true"></i>';
+  queryWindowInspector.dataset.placement = 'right';
+  queryWindowInspector.setAttribute('aria-label', I18n.t('openmaps.inspector_query_add_btn'));
+  queryWindowInspector.title = I18n.t('openmaps.inspector_query_add_btn_tooltip');
+  Tooltips.add(queryWindowInspector, I18n.t('openmaps.inspector_query_add_btn_tooltip'));
+  queryWindowInspector.addEventListener('click', function() {
+    if (!openMapsInspectorApi || !lastQueryInspectorPayload) return;
+    var p = lastQueryInspectorPayload;
+    if (p.type === 'esri') openMapsInspectorApi.ingestEsriResults(p.json, p.mapId, p.layersStr);
+    else if (p.type === 'wms') openMapsInspectorApi.ingestWmsFromContent(p.contentEl, p.mapId, p.layersStr);
+  });
+  queryWindow.appendChild(queryWindowInspector);
   var queryWindowInspector = document.createElement('wz-button');
   queryWindowInspector.setAttribute('color', 'clear-icon');
   queryWindowInspector.setAttribute('size', 'sm');
@@ -11290,10 +11722,63 @@ function onMapSort() {
       } else {
         // WMS GetFeatureInfo
         queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatureInfo&STYLES=&BBOX=' + getMapExtent().toBBOX() +
+      lastQueryInspectorPayload = null;
+      var mapId = getFeatureInfoControl.params?.id;
+      var queriedMap = mapId ? maps.get(mapId) : null;
+      var isEsri = queriedMap && queriedMap.type === 'ESRI';
+      var isEsriFeature = queriedMap && queriedMap.type === 'ESRI_FEATURE';
+      var queryUrl = '';
+      if (isEsri || isEsriFeature) {
+        // ArcGIS REST Identify (MapServer)
+        var olMap = (W && W.map && typeof W.map.getOLMap === 'function') ? W.map.getOLMap() : null;
+        var ll = null;
+        try {
+          if (olMap && typeof olMap.getLonLatFromPixel === 'function') ll = olMap.getLonLatFromPixel(e.xy);
+          else if (olMap && typeof olMap.getLonLatFromViewPortPx === 'function') ll = olMap.getLonLatFromViewPortPx(e.xy);
+        } catch (err) {
+          ll = null;
+        }
+        var x = ll ? ll.lon : null;
+        var y = ll ? ll.lat : null;
+        if (isEsriFeature) {
+          // ArcGIS FeatureServer point/line/polygon query around click
+          // Distance is in meters for WebMercator when units=esriSRUnit_Meter.
+          var base = String(getFeatureInfoControl.params.url || '').replace(/\/+$/, '');
+          queryUrl =
+            base +
+            '/query?f=json&where=' + encodeURIComponent('1=1') +
+            '&geometry=' + encodeURIComponent(String(x) + ',' + String(y)) +
+            '&geometryType=esriGeometryPoint&inSR=3857&outSR=3857' +
+            '&spatialRel=esriSpatialRelIntersects&distance=25&units=esriSRUnit_Meter' +
+            '&returnGeometry=false&outFields=*' +
+            '&resultRecordCount=25';
+        } else {
+          var extent = getMapExtent();
+          var sz = W.map.getSize();
+          var identifyLayers = getFeatureInfoControl.params.layers || '';
+          // Identify expects `layers=all:<ids>` (or omit for all). Filter to numeric layer ids only.
+          var esriIds = String(identifyLayers || '')
+            .split(',')
+            .map(s => String(s).trim())
+            .filter(s => s && /^-?\d+$/.test(s));
+          var layersParam = esriIds.length ? ('layers=all:' + esriIds.join(',')) : 'layers=all';
+          queryUrl =
+            getFeatureInfoControl.params.url.replace(/\/+$/, '') +
+            '/identify?f=json&geometry=' + encodeURIComponent(String(x) + ',' + String(y)) +
+            '&geometryType=esriGeometryPoint&sr=3857' +
+            '&tolerance=6&returnGeometry=false' +
+            '&mapExtent=' + encodeURIComponent(extent.toBBOX()) +
+            '&imageDisplay=' + encodeURIComponent(String(sz.w) + ',' + String(sz.h) + ',96') +
+            '&' + layersParam;
+        }
+      } else {
+        // WMS GetFeatureInfo
+        queryUrl = getFeatureInfoControl.params.url + '?SERVICE=WMS&REQUEST=GetFeatureInfo&STYLES=&BBOX=' + getMapExtent().toBBOX() +
           '&LAYERS=' + getFeatureInfoControl.params.layers + '&QUERY_LAYERS=' + getFeatureInfoControl.params.layers +
           '&HEIGHT=' + W.map.getSize().h + '&WIDTH=' + W.map.getSize().w +
           // FIX: Added FEATURE_COUNT=50 to force the server to return multiple overlapping layers/objects!
           '&VERSION=1.3.0&CRS=EPSG:3857&I=' + e.xy.x + '&J=' + e.xy.y + '&FEATURE_COUNT=50&INFO_FORMAT=text/html';
+      }
       }
       // --- MODERNIZED DYNAMIC TITLE ---
           // Uses Optional Chaining to prevent null crashes and Template Literals for the string
@@ -11310,6 +11795,7 @@ function onMapSort() {
       GM_xmlhttpRequest({
         method: 'GET',
         headers: {
+          Accept: (isEsri || isEsriFeature) ? 'application/json' : 'text/xml'
           Accept: (isEsri || isEsriFeature) ? 'application/json' : 'text/xml'
         },
         url: queryUrl,
@@ -11444,6 +11930,20 @@ function onMapSort() {
                     });
                   }
 
+                  lastQueryInspectorPayload = {
+                    type: 'wms',
+                    contentEl: queryWindowContent,
+                    mapId: mapId,
+                    layersStr: getFeatureInfoControl.params.layers || ''
+                  };
+                  if (openMapsInspectorApi) {
+                    openMapsInspectorApi.maybeAutoIngest(false, {
+                      contentEl: queryWindowContent,
+                      mapId: mapId,
+                      layersStr: getFeatureInfoControl.params.layers || ''
+                    });
+                  }
+
                   queryWindow.style.display = 'block';
               var escHandler = function(e) {
                 if (e.keyCode == 27) { // Esc key
@@ -11471,6 +11971,7 @@ function onMapSort() {
               emptyResponseAdvice.appendChild(kbd);
               if (parts.length > 1) emptyResponseAdvice.appendChild(document.createTextNode(parts.slice(1).join('{hotkey}')));
               queryWindowContent.appendChild(emptyResponseAdvice);
+            }
             }
             }
           } else {
@@ -11777,6 +12278,31 @@ function onMapSort() {
     });
   }
 
+  function omCopyTextToClipboard(text) {
+    if (text == null) return Promise.reject(new Error('Nothing to copy'));
+    var s = String(text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(s);
+    }
+    return new Promise(function(resolve, reject) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = s;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed; top:-1000px; left:-1000px; opacity:0; pointer-events:none;';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+        document.body.removeChild(ta);
+        if (ok) resolve();
+        else reject(new Error('Copy failed'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   function createClipboardCopier(labelText, copyValue, compact) {
     var container = document.createElement('div');
     container.style.cssText = 'margin-bottom:10px; font-family:monospace; border-radius:4px; display:flex; justify-content:space-between; align-items:center; gap:8px;';
@@ -11813,6 +12339,7 @@ function onMapSort() {
     copyBtn.title = 'Copy to clipboard';
     copyBtn.style.flexShrink = '0';
     copyBtn.addEventListener('click', function() {
+      omCopyTextToClipboard(copyValue).then(function() {
       omCopyTextToClipboard(copyValue).then(function() {
         copyBtn.setAttribute('color', 'positive');
         copyBtn.innerHTML = successHtml;
@@ -12019,6 +12546,11 @@ function selectMapToAdd(mapId) {
       var n = Number(mapId);
       if (!isNaN(n)) addedMap = maps.get(n);
     }
+    var addedMap = maps.get(mapId);
+    if (!addedMap && mapId != null && mapId !== '') {
+      var n = Number(mapId);
+      if (!isNaN(n)) addedMap = maps.get(n);
+    }
     if (!addedMap) return;
     var idNorm = String(addedMap.id != null ? addedMap.id : mapId);
     if (handles.some(function(h) { return h && String(h.mapId) === idNorm; })) {
@@ -12029,6 +12561,7 @@ function selectMapToAdd(mapId) {
       return;
     }
     handles.push(new MapHandle(addedMap));
+    if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
     if (addedMap.touId !== 'none' && TOU_REGISTRY[addedMap.touId] && !isTouAccepted(addedMap.touId)) {
       showTouGateNotice(addedMap.title);
@@ -12212,6 +12745,7 @@ function populateAddMapSuggestions(filterText) {
         selectMapToAdd(row.dataset.mapId);
       });
       if (map.area && map.area !== 'user') {
+      if (map.area && map.area !== 'user') {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
         flagImg.alt = '';
@@ -12296,6 +12830,49 @@ function updateMapSelector() {
     });
     syncAddMapViewportHint();
     applyActiveMapsFilter();
+  }
+
+/** Esri REST JSON geometry → OpenLayers.Geometry (EPSG:3857 coords). Shared by ESRI_FEATURE overlay and Map Inspector. */
+function openMapsEsriGeometryToOpenLayers(g) {
+  if (!g || typeof OpenLayers === 'undefined') return null;
+  try {
+    if (g.x !== undefined && g.y !== undefined) {
+      return new OpenLayers.Geometry.Point(Number(g.x), Number(g.y));
+    }
+    if (g.rings && g.rings.length) {
+      var linears = [];
+      for (var ri = 0; ri < g.rings.length; ri++) {
+        var ring = g.rings[ri];
+        if (!ring || !ring.length) continue;
+        var pts = [];
+        for (var pi = 0; pi < ring.length; pi++) {
+          pts.push(new OpenLayers.Geometry.Point(ring[pi][0], ring[pi][1]));
+        }
+        linears.push(new OpenLayers.Geometry.LinearRing(pts));
+      }
+      if (!linears.length) return null;
+      return new OpenLayers.Geometry.Polygon(linears);
+    }
+    if (g.paths && g.paths.length) {
+      var lines = [];
+      for (var pi2 = 0; pi2 < g.paths.length; pi2++) {
+        var path = g.paths[pi2];
+        if (!path || !path.length) continue;
+        var pts2 = [];
+        for (var pj = 0; pj < path.length; pj++) {
+          pts2.push(new OpenLayers.Geometry.Point(path[pj][0], path[pj][1]));
+        }
+        lines.push(new OpenLayers.Geometry.LineString(pts2));
+      }
+      if (!lines.length) return null;
+      if (lines.length === 1) return lines[0];
+      return new OpenLayers.Geometry.MultiLineString(lines);
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
   }
 
 /** Esri REST JSON geometry → OpenLayers.Geometry (EPSG:3857 coords). Shared by ESRI_FEATURE overlay and Map Inspector. */
@@ -12655,6 +13232,25 @@ function loadTileError(tile, callback) {
     return Object.keys(tileManipulations).slice().sort();
   }
 
+  function openMapsNormalizePixelManipulations(list) {
+    if (!Array.isArray(list)) return null;
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var k = String(list[i] || '').trim();
+      if (!k) continue;
+      if (!tileManipulations.hasOwnProperty(k)) continue;
+      if (seen[k]) continue;
+      seen[k] = true;
+      out.push(k);
+    }
+    return out;
+  }
+
+  function openMapsAvailablePixelManipulationOps() {
+    return Object.keys(tileManipulations).slice().sort();
+  }
+
   // Manipulate a map tile received from the source
   function manipulateTile(event, manipulations) {
     if (event.aborted || !event.tile || !event.tile.imgDiv) {
@@ -12700,6 +13296,10 @@ function loadTileError(tile, callback) {
         saturate: handle.saturate,
         hue: handle.hue,
         gamma: handle.gamma,
+        invert: handle.invert,
+        blendMode: handle.blendMode,
+        pixelManipulationsOverride: handle.pixelManipulationsOverride,
+        wmsArcgisRestViewportProbe: handle.wmsArcgisRestViewportProbe !== false
         invert: handle.invert,
         blendMode: handle.blendMode,
         pixelManipulationsOverride: handle.pixelManipulationsOverride,
@@ -13256,6 +13856,15 @@ function loadTileError(tile, callback) {
     return null;
   }
 
+  /** ArcGIS REST MapServer base when `url` is an Esri WMS endpoint (…/MapServer/WMSServer); else null. Shared by Map Inspector and map options. */
+  function openMapsArcgisRestBaseFromWmsUrl(u) {
+    if (!u || typeof u !== 'string') return null;
+    var s = u.replace(/\/+$/, '').split('?')[0];
+    var m = s.match(/^(https?:\/\/[^/]+)\/(arcgis\d*)\/services\/(.+)\/(MapServer)\/WMSServer$/i);
+    if (m) return m[1] + '/' + m[2] + '/rest/services/' + m[3] + '/' + m[4];
+    return null;
+  }
+
   /** True when fetchLayerCatalogSession will wait on the network (or an in-flight request), not a synchronous cache hit. */
   function willAwaitLayerCatalogNetwork(map, forceRefresh) {
     var ex = sessionLayerCatalog[sessionLayerCatalogKey(map)];
@@ -13377,6 +13986,11 @@ function loadTileError(tile, callback) {
           // (Observed in bridge builds as an uncaught 'forEach' TypeError.)
           sessionLayerCatalog[key] = entry = { status: 'loading', layers: [], waiters: [] };
         }
+        if (!entry) {
+          // Ultra-defensive: if something cleared the session entry, do not crash the whole script.
+          // (Observed in bridge builds as an uncaught 'forEach' TypeError.)
+          sessionLayerCatalog[key] = entry = { status: 'loading', layers: [], waiters: [] };
+        }
         entry.raw = res.responseText;
         entry.capUrl = capUrl;
         var httpErr = res.status && res.status >= 400;
@@ -13398,15 +14012,18 @@ function loadTileError(tile, callback) {
         var waiters = entry.waiters || [];
         delete entry.waiters;
         if (!Array.isArray(waiters)) waiters = [];
+        if (!Array.isArray(waiters)) waiters = [];
         waiters.forEach(function(cb) { if (cb) cb(entry.status === 'error' ? new Error(entry.error || 'parse') : null, entry); });
       },
       onerror: function() {
         var entry = sessionLayerCatalog[key];
         if (!entry) sessionLayerCatalog[key] = entry = { status: 'loading', layers: [], waiters: [] };
+        if (!entry) sessionLayerCatalog[key] = entry = { status: 'loading', layers: [], waiters: [] };
         entry.status = 'error';
         entry.error = 'network';
         var waiters = entry.waiters || [];
         delete entry.waiters;
+        if (!Array.isArray(waiters)) waiters = [];
         if (!Array.isArray(waiters)) waiters = [];
         waiters.forEach(function(cb) { if (cb) cb(new Error('network'), entry); });
       }
@@ -13436,6 +14053,7 @@ function MapHandle(map, options) {
       : null;
     this.displayBbox = (options && options.displayBbox ? true : false);
     if (map.area === 'UN') this.displayBbox = false;
+    if (map.area === 'UN') this.displayBbox = false;
     // NEW: Image Adjustment State
     this.brightness = (options && options.brightness !== undefined ? options.brightness : 100);
     this.contrast = (options && options.contrast !== undefined ? options.contrast : 100);
@@ -13444,6 +14062,7 @@ function MapHandle(map, options) {
     this.gamma = (options && options.gamma !== undefined ? options.gamma : 100);
     this.invert = (options && options.invert ? true : false);
     this.blendMode = (options && options.blendMode ? options.blendMode : 'normal');
+    this.wmsArcgisRestViewportProbe = (options && options.wmsArcgisRestViewportProbe === false) ? false : true;
     this.wmsArcgisRestViewportProbe = (options && options.wmsArcgisRestViewportProbe === false) ? false : true;
     this.layerUI = [];
     this.cloudLayerMeta = {};
@@ -13488,6 +14107,104 @@ function MapHandle(map, options) {
       if (meta.abstract) line += ', abstract: ' + JSON.stringify(meta.abstract);
       line += ', queryable: ' + (meta.queryable ? 'true' : 'false') + ' },';
       return line;
+    }
+
+    function getMapLayerNamesForCopy(mode) {
+      var names = [];
+      if (mode === 'enabledOnly') {
+        self.getLayersForPersistence().forEach(function(l) {
+          if (l.visible) names.push(l.name);
+        });
+        return names;
+      }
+
+      self.getLayersForPersistence().forEach(function(l) {
+        names.push(l.name);
+      });
+
+      // Keep any curated-but-missing layers as well (defensive, should already be covered above)
+      if (map && map.layers) {
+        Object.keys(map.layers).forEach(function(n) { names.push(n); });
+      }
+
+      // Dedup while keeping first occurrence order
+      var seen = {};
+      return names.filter(function(n) {
+        if (!n) return false;
+        if (seen[n]) return false;
+        seen[n] = true;
+        return true;
+      });
+    }
+
+    function getEnabledLayerNamesForCopy() {
+      var enabled = [];
+      self.getLayersForPersistence().forEach(function(l) {
+        if (l.visible) enabled.push(l.name);
+      });
+      return enabled;
+    }
+
+    function buildMapDefinitionSnippet(copyMode) {
+      // copyMode: 'allKeepDefaults' | 'allMakeEnabledDefault' | 'enabledOnlyMakeDefault'
+      var layerMode = (copyMode === 'enabledOnlyMakeDefault') ? 'enabledOnly' : 'all';
+      var names = getMapLayerNamesForCopy(layerMode);
+      var enabledNames = getEnabledLayerNamesForCopy();
+
+      var defaultLayers;
+      if (copyMode === 'allKeepDefaults') defaultLayers = (map.default_layers || []).slice();
+      else defaultLayers = enabledNames.slice();
+
+      function pushLine(arr, k, v, force) {
+        if (!force && (v === undefined || v === null)) return;
+        arr.push('      ' + k + ': ' + v + ',');
+      }
+
+      function formatQueryFilters(qf) {
+        if (!qf) return null;
+        if (!Array.isArray(qf)) return null;
+        var parts = qf.map(function(fn) {
+          if (!fn) return null;
+          if (typeof fn === 'string') return fn;
+          if (typeof fn === 'function' && fn.name) return fn.name;
+          return null;
+        }).filter(Boolean);
+        if (parts.length === 0) return null;
+        return '[ ' + parts.join(', ') + ' ]';
+      }
+
+      var lines = [];
+      lines.push('    {');
+      pushLine(lines, 'id', JSON.stringify(map.id), true);
+      pushLine(lines, 'title', JSON.stringify(map.title), true);
+      pushLine(lines, 'touId', JSON.stringify(map.touId), !!map.touId);
+      pushLine(lines, 'favicon', String(!!map.favicon), !!map.favicon);
+      pushLine(lines, 'icon', JSON.stringify(map.icon), !!map.icon);
+      pushLine(lines, 'type', JSON.stringify(map.type || 'WMS'), true);
+      pushLine(lines, 'url', JSON.stringify(map.url), true);
+      pushLine(lines, 'queryUrl', JSON.stringify(map.queryUrl), !!map.queryUrl);
+      pushLine(lines, 'crs', JSON.stringify(map.crs), !!map.crs);
+      if (map.bbox) pushLine(lines, 'bbox', JSON.stringify(map.bbox), true);
+      if (map.zoomRange) pushLine(lines, 'zoomRange', JSON.stringify(map.zoomRange), true);
+      pushLine(lines, 'format', JSON.stringify(map.format), !!map.format);
+      pushLine(lines, 'transparent', String(!!map.transparent), map.transparent !== undefined);
+      pushLine(lines, 'area', JSON.stringify(map.area), !!map.area);
+      pushLine(lines, 'tile_size', String(map.tile_size), map.tile_size !== undefined);
+      pushLine(lines, 'abstract', JSON.stringify(map.abstract), !!map.abstract);
+      pushLine(lines, 'attribution', JSON.stringify(map.attribution), !!map.attribution);
+      pushLine(lines, 'pixelManipulations', JSON.stringify(map.pixelManipulations), !!map.pixelManipulations);
+      pushLine(lines, 'queryable', String(!!map.queryable), map.queryable !== undefined);
+      var qf = formatQueryFilters(map.query_filters);
+      if (qf) pushLine(lines, 'query_filters', qf, true);
+      pushLine(lines, 'default_layers', JSON.stringify(defaultLayers, null, 0), true);
+
+      lines.push('      layers: {');
+      names.forEach(function(n) {
+        lines.push(buildLayerDefinitionSnippet(n));
+      });
+      lines.push('      }');
+      lines.push('    },');
+      return lines.join('\n');
     }
 
     function getMapLayerNamesForCopy(mode) {
@@ -13696,11 +14413,19 @@ function updateTileLoader() {
 
    this.clearError = function() {
       Tooltips.remove(UI.error);
+      Tooltips.remove(UI.error);
       UI.error.style.display = 'none';
     };
 
 
     // --- 3. UI GENERATORS ---
+  function openMapsMapHasZoomMeta(m) {
+    var wmsFloorRaw = m.wmsMinEffectiveZoom != null ? m.wmsMinEffectiveZoom : m.minEffectiveZoom;
+    var hasFloor = m.type === 'WMS' && wmsFloorRaw != null && wmsFloorRaw !== '';
+    return !!(m.zoomRange || hasFloor);
+  }
+
+  function buildMainCard() {
   function openMapsMapHasZoomMeta(m) {
     var wmsFloorRaw = m.wmsMinEffectiveZoom != null ? m.wmsMinEffectiveZoom : m.minEffectiveZoom;
     var hasFloor = m.type === 'WMS' && wmsFloorRaw != null && wmsFloorRaw !== '';
@@ -13720,6 +14445,7 @@ var handle = document.createElement('div');
       handle.className = 'open-maps-drag-handle';
       handle.style.cssText = 'width:32px; margin-right:8px; display:flex; justify-content:center;';
 
+      self.bgColor = openMapsMapAvatarColorFromTitle(map.title);
       self.bgColor = openMapsMapAvatarColorFromTitle(map.title);
       var bgColor = self.bgColor;
 
@@ -13756,6 +14482,7 @@ var handle = document.createElement('div');
       badgeWrapper.appendChild(UI.badge);
 
       // --- OVERLAY FLAG ---
+      if (map.area && map.area !== 'user') {
       if (map.area && map.area !== 'user') {
         var flagImg = document.createElement('img');
         flagImg.src = 'https://flagcdn.com/16x12/' + map.area.toLowerCase() + '.png';
@@ -13825,6 +14552,10 @@ var handle = document.createElement('div');
         Tooltips.remove(UI.info);
         Tooltips.add(UI.info, I18n.t('openmaps.zoom_meta_tooltip'), true);
       }
+      if (openMapsMapHasZoomMeta(map)) {
+        Tooltips.remove(UI.info);
+        Tooltips.add(UI.info, I18n.t('openmaps.zoom_meta_tooltip'), true);
+      }
       buttons.appendChild(UI.info);
 
     // --- ZOOM TO BBOX BUTTON ---
@@ -13833,6 +14564,7 @@ var handle = document.createElement('div');
 UI.zoomToBboxBtn.addEventListener('click', function(e) {
         e.stopPropagation();
 
+        Tooltips.hide(this);
         Tooltips.hide(this);
 
         if (self.area) {
@@ -13987,6 +14719,48 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span>' +
         inspectorBackendChip +
         ' &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
+      // If this is a WMS URL, indicate which viewport-feature backend Map Inspector will use.
+      // (ArcGIS REST-backed WMS → /MapServer/<id>/query; GeoServer WMS → WFS GetFeature.)
+      // Keep it compact: just append a small tag after the Type chip (no extra label).
+      var inspectorBackendChip = '';
+      if (map.type === 'WMS' && map.url) {
+        try {
+          var u = String(map.url);
+          var s = u.replace(/\/+$/, '').split('?')[0];
+          var inspectorLabel = null;
+          var compactLabel = null;
+
+          if (openMapsArcgisRestBaseFromWmsUrl(u)) {
+            inspectorLabel = I18n.t('openmaps.inspector_wms_arcgis_viewport'); // "WMS (ArcGIS REST)"
+            compactLabel = 'ArcGIS REST';
+          } else {
+            var path = s.replace(/\/+$/, '');
+            var isGeoServer = path.toLowerCase().indexOf('geoserver') !== -1;
+            var endsWithWms = /\/wms$/i.test(path);
+            if (isGeoServer && endsWithWms) {
+              inspectorLabel = I18n.t('openmaps.inspector_wms_wfs_viewport'); // "WMS (GeoServer WFS)"
+              compactLabel = 'GeoServer';
+            }
+          }
+
+          if (inspectorLabel && compactLabel) {
+            var titleEsc = openMapsEscapeForHtmlTooltip(inspectorLabel)
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;');
+            inspectorBackendChip =
+              ' ' +
+              '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;" title="' + titleEsc + '">' +
+              compactLabel +
+              '</span>';
+          }
+        } catch (e) {}
+      }
+
+      metaTop.innerHTML =
+        '<strong>' + I18n.t('openmaps.meta_type') + ':</strong> ' +
+        '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span>' +
+        inspectorBackendChip +
+        ' &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
       metaBox.appendChild(metaTop);
 
       // BBox coordinates are intentionally not shown here to avoid clutter.
@@ -14012,6 +14786,23 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         metaBox.appendChild(about);
       }
       UI.editContainer.appendChild(metaBox);
+
+      if (map.type === 'WMS' && map.url && openMapsArcgisRestBaseFromWmsUrl(map.url)) {
+        var probeWrap = document.createElement('div');
+        probeWrap.style.cssText = 'margin: 8px 0 4px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 8px; background: #f8f9fa;';
+        var probeCb = document.createElement('wz-checkbox');
+        probeCb.checked = self.wmsArcgisRestViewportProbe !== false;
+        probeCb.textContent = I18n.t('openmaps.wms_arcgis_rest_viewport_probe');
+        probeCb.addEventListener('change', function() {
+          self.wmsArcgisRestViewportProbe = !!probeCb.checked;
+          saveMapState();
+          if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
+        });
+        Tooltips.add(probeCb, I18n.t('openmaps.wms_arcgis_rest_viewport_probe_tooltip'), true);
+        probeWrap.appendChild(probeCb);
+        UI.editContainer.appendChild(probeWrap);
+      }
+
 
       if (map.type === 'WMS' && map.url && openMapsArcgisRestBaseFromWmsUrl(map.url)) {
         var probeWrap = document.createElement('div');
@@ -14060,7 +14851,15 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           }
           saveMapState();
         });
+        transCheck.addEventListener('change', function() {
+          self.transparent = !self.transparent;
+          if (self.layer && typeof self.layer.mergeNewParams === 'function') {
+            try { self.layer.mergeNewParams({ transparent: self.transparent }); } catch (eT) {}
+          }
+          saveMapState();
+        });
         Tooltips.add(transCheck, I18n.t('openmaps.transparent_label_tooltip'));
+        visualCommonBox.appendChild(transCheck);
         visualCommonBox.appendChild(transCheck);
       }
 
@@ -14125,7 +14924,13 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var opLabel = document.createElement('span');
         opLabel.textContent = I18n.t('openmaps.opacity_label') + ':';
         opacityBox.appendChild(opLabel);
+        var opLabel = document.createElement('span');
+        opLabel.textContent = I18n.t('openmaps.opacity_label') + ':';
+        opacityBox.appendChild(opLabel);
 
+        var opSlider = document.createElement('input');
+        opSlider.type = 'range'; opSlider.max = 100; opSlider.min = 5; opSlider.step = 5; opSlider.value = self.opacity;
+        opSlider.style.cssText = 'flex:1; min-width:80px; margin:0; accent-color:#0099ff; cursor:pointer;';
         var opSlider = document.createElement('input');
         opSlider.type = 'range'; opSlider.max = 100; opSlider.min = 5; opSlider.step = 5; opSlider.value = self.opacity;
         opSlider.style.cssText = 'flex:1; min-width:80px; margin:0; accent-color:#0099ff; cursor:pointer;';
@@ -14133,7 +14938,18 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var opVal = document.createElement('span');
         opVal.textContent = self.opacity + '%';
         opVal.style.cssText = 'font-weight:bold; min-width:35px; color:#3c4043;';
+        var opVal = document.createElement('span');
+        opVal.textContent = self.opacity + '%';
+        opVal.style.cssText = 'font-weight:bold; min-width:35px; color:#3c4043;';
 
+        opSlider.addEventListener('input', function() {
+          if (self.layer && typeof self.layer.setOpacity === 'function') {
+            self.layer.setOpacity(Math.max(5, Math.min(100, this.value)) / 100);
+          }
+          self.opacity = this.value;
+          opVal.textContent = this.value + '%';
+        });
+        opSlider.addEventListener('change', function() { saveMapState(); });
         opSlider.addEventListener('input', function() {
           if (self.layer && typeof self.layer.setOpacity === 'function') {
             self.layer.setOpacity(Math.max(5, Math.min(100, this.value)) / 100);
@@ -14147,7 +14963,18 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         opacityBox.appendChild(opVal);
         visualCommonBox.appendChild(opacityBox);
       }
+        opacityBox.appendChild(opSlider);
+        opacityBox.appendChild(opVal);
+        visualCommonBox.appendChild(opacityBox);
+      }
 
+      if (!isEsriFeatureVector) {
+        function createSlider(label, prop, min, max, unit) {
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex; flex-direction:column;';
+          var labelEl = document.createElement('div');
+          labelEl.style.cssText = 'display:flex; justify-content:space-between; font-size:11px; color:#5f6368;';
+          labelEl.innerHTML = `<span>${label}</span><span id="val-${prop}-${map.id}">${self[prop]}${unit}</span>`;
       if (!isEsriFeatureVector) {
         function createSlider(label, prop, min, max, unit) {
           var row = document.createElement('div');
@@ -14165,7 +14992,20 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
             self.applyFilters();
           });
           slider.addEventListener('change', () => saveMapState());
+          var slider = document.createElement('input');
+          slider.type = 'range'; slider.min = min; slider.max = max; slider.value = self[prop];
+          slider.style.cssText = 'width:100%; cursor:pointer; accent-color:#0099ff;';
+          slider.addEventListener('input', (e) => {
+            self[prop] = e.target.value;
+            document.getElementById(`val-${prop}-${map.id}`).textContent = e.target.value + unit;
+            self.applyFilters();
+          });
+          slider.addEventListener('change', () => saveMapState());
 
+          row.appendChild(labelEl);
+          row.appendChild(slider);
+          return {row, slider};
+        }
           row.appendChild(labelEl);
           row.appendChild(slider);
           return {row, slider};
@@ -14176,13 +15016,24 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
         var sHue = createSlider(I18n.t('openmaps.slider_hue_rotate'), 'hue', 0, 360, '°');
         var sGamma = createSlider(I18n.t('openmaps.slider_gamma'), 'gamma', 10, 200, '%');
+        var sBright = createSlider(I18n.t('openmaps.slider_brightness'), 'brightness', 0, 200, '%');
+        var sContrast = createSlider(I18n.t('openmaps.slider_contrast'), 'contrast', 0, 200, '%');
+        var sSaturate = createSlider(I18n.t('openmaps.slider_saturation'), 'saturate', 0, 300, '%');
+        var sHue = createSlider(I18n.t('openmaps.slider_hue_rotate'), 'hue', 0, 360, '°');
+        var sGamma = createSlider(I18n.t('openmaps.slider_gamma'), 'gamma', 10, 200, '%');
 // --- BLEND MODE DROPDOWN ---
+        var blendRow = document.createElement('div');
+        blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
         var blendRow = document.createElement('div');
         blendRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#5f6368; margin-top:4px; margin-bottom:4px;';
 
         var blendLabel = document.createElement('span');
         blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
+        var blendLabel = document.createElement('span');
+        blendLabel.textContent = I18n.t('openmaps.blend_mode_label') + ':';
 
+        var blendSelect = document.createElement('select');
+        blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
         var blendSelect = document.createElement('select');
         blendSelect.style.cssText = 'width:60%; padding:2px; font-size:11px; border-radius:4px; border:1px solid #dadce0; cursor:pointer; outline:none; background:#fff;';
 
@@ -14194,7 +15045,20 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           if (mode === self.blendMode) opt.selected = true;
           blendSelect.appendChild(opt);
         });
+        var modes = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
+        modes.forEach(mode => {
+          var opt = document.createElement('option');
+          opt.value = mode;
+          opt.textContent = mode.split('-').map(function(part) { return part.charAt(0).toUpperCase() + part.slice(1); }).join(' ');
+          if (mode === self.blendMode) opt.selected = true;
+          blendSelect.appendChild(opt);
+        });
 
+        blendSelect.addEventListener('change', (e) => {
+          self.blendMode = e.target.value;
+          self.applyFilters();
+          saveMapState();
+        });
         blendSelect.addEventListener('change', (e) => {
           self.blendMode = e.target.value;
           self.applyFilters();
@@ -14212,6 +15076,192 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         invCheck.checked = self.invert;
         invCheck.addEventListener('change', (e) => { self.invert = e.target.checked; self.applyFilters(); saveMapState(); });
         invRow.appendChild(invCheck);
+        blendRow.appendChild(blendLabel);
+        blendRow.appendChild(blendSelect);
+        visualCommonBox.appendChild(blendRow);
+        // -----------------------------
+        var invRow = document.createElement('div');
+        invRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px;';
+        var invCheck = document.createElement('wz-checkbox');
+        invCheck.textContent = I18n.t('openmaps.invert_colors');
+        invCheck.checked = self.invert;
+        invCheck.addEventListener('change', (e) => { self.invert = e.target.checked; self.applyFilters(); saveMapState(); });
+        invRow.appendChild(invCheck);
+
+        var resetBtn = createIconButton('fa-undo', I18n.t('openmaps.reset_visual_default'), true);
+        resetBtn.addEventListener('click', function(e) {
+          if (e && e.preventDefault) e.preventDefault();
+          if (e && e.stopPropagation) e.stopPropagation();
+          self.brightness = 100; self.contrast = 100; self.saturate = 100; self.hue = 0; self.gamma = 100; self.invert = false;
+          [sBright, sContrast, sSaturate, sHue, sGamma].forEach(s => {
+              var p = s.slider.previousSibling.lastChild.id.split('-')[1];
+              s.slider.value = self[p];
+              document.getElementById(s.slider.previousSibling.lastChild.id).textContent = self[p] + (p==='hue'?'°':(p==='blur'?'px':'%'));
+          });
+          invCheck.checked = false;
+          self.blendMode = 'normal'; blendSelect.value = 'normal';
+          self.applyFilters(); saveMapState();
+        });
+        invRow.appendChild(resetBtn);
+
+        [sBright.row, sContrast.row, sSaturate.row, sHue.row, sGamma.row, invRow].forEach(el => visualCommonBox.appendChild(el));
+      }
+
+      if (visualCommonBox.childNodes.length > 0) {
+        slidersContainer.appendChild(visualCommonBox);
+        advColors.appendChild(slidersContainer);
+        UI.editContainer.appendChild(advColors);
+      }
+
+      // --- PIXEL MANIPULATIONS (top-level sibling section; raster/tile only) ---
+      if (!isEsriFeatureVector) {
+      function ensureLayerHasCrossOriginIfNeeded() {
+        // Mirror updateLayers() CORS gating so enabling this feature after the layer exists still works.
+        var wantsPixelManipulation = !!map.pixelManipulations || !!self.improveMap || (self.pixelManipulationsOverride !== null);
+        if (!wantsPixelManipulation) return;
+        if (self.__openmapsTileCrossOrigin) return;
+        if (self.layer) {
+          try { W.map.removeLayer(self.layer); } catch (e) {}
+          self.layer = null;
+        }
+        self.updateLayers();
+      }
+
+      var pmDetails = document.createElement('details');
+      pmDetails.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+
+      var pmSummary = document.createElement('summary');
+      pmSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none;';
+      pmSummary.innerHTML = '<i class="fa fa-magic" style="margin-right:5px; color:#5f6368;" aria-hidden="true"></i>' + I18n.t('openmaps.pixel_manipulations_title');
+      pmDetails.appendChild(pmSummary);
+
+      var pixelManipulationsSection = document.createElement('div');
+      pixelManipulationsSection.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:8px;';
+
+      var impCheck = document.createElement('wz-checkbox');
+      impCheck.checked = !!self.improveMap;
+      impCheck.textContent = I18n.t('openmaps.map_improvement_label');
+      impCheck.addEventListener('change', () => {
+        self.improveMap = !self.improveMap;
+        ensureLayerHasCrossOriginIfNeeded();
+        if (self.layer) self.layer.redraw();
+        saveMapState();
+      });
+      Tooltips.add(impCheck, I18n.t('openmaps.map_improvement_label_tooltip'));
+      pixelManipulationsSection.appendChild(impCheck);
+
+      var pmInfo = document.createElement('div');
+      pmInfo.style.cssText = 'font-size:11px; color:#70757a; line-height:1.35;';
+      pmInfo.textContent = I18n.t('openmaps.map_improvement_label_tooltip');
+      pixelManipulationsSection.appendChild(pmInfo);
+
+      var pmInfo2 = document.createElement('div');
+      pmInfo2.style.cssText = 'font-size:11px; color:#70757a; line-height:1.35;';
+      pmInfo2.textContent = I18n.t('openmaps.pixel_manipulations_tooltip');
+      pixelManipulationsSection.appendChild(pmInfo2);
+
+      var pmBox = document.createElement('div');
+      pmBox.style.cssText = 'margin-top:0; padding:0; border:none; border-radius:0; background:transparent;';
+
+      var pmHeader = document.createElement('div');
+      pmHeader.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;';
+
+      var pmTitle = document.createElement('div');
+      pmTitle.style.cssText = 'font-weight:600; font-size:12px; color:#3c4043;';
+      pmTitle.textContent = I18n.t('openmaps.pixel_manipulations_title');
+      Tooltips.add(pmTitle, I18n.t('openmaps.pixel_manipulations_tooltip'), true);
+
+      var pmActions = document.createElement('div');
+      pmActions.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;';
+
+      var pmUseDefaultBtn = createIconButton('fa-undo', I18n.t('openmaps.pixel_manipulations_use_default_tooltip'), true);
+      var pmSelectNoneBtn = createIconButton('fa-ban', I18n.t('openmaps.pixel_manipulations_select_none_tooltip'), true);
+      pmActions.appendChild(pmUseDefaultBtn);
+      pmActions.appendChild(pmSelectNoneBtn);
+
+      pmHeader.appendChild(pmTitle);
+      pmHeader.appendChild(pmActions);
+      pmBox.appendChild(pmHeader);
+
+      var defaultOps = openMapsNormalizePixelManipulations(map.pixelManipulations) || [];
+      var defaultLine = document.createElement('div');
+      defaultLine.style.cssText = 'font-size:11px; color:#70757a; margin-bottom:8px; line-height:1.35;';
+      defaultLine.innerHTML = '<strong>' + I18n.t('openmaps.pixel_manipulations_default') + ':</strong> ' + (defaultOps.length ? defaultOps.join(', ') : '—');
+      pmBox.appendChild(defaultLine);
+
+      var overrideLine = document.createElement('div');
+      overrideLine.style.cssText = 'font-size:11px; color:#70757a; margin-bottom:6px; line-height:1.35;';
+      overrideLine.innerHTML = '<strong>' + I18n.t('openmaps.pixel_manipulations_override') + ':</strong>';
+      pmBox.appendChild(overrideLine);
+
+      var pmList = document.createElement('div');
+      pmList.style.cssText = 'display:flex; flex-direction:column; gap:4px; max-height:160px; overflow:auto; padding-right:4px;';
+      pmBox.appendChild(pmList);
+
+      var ops = openMapsAvailablePixelManipulationOps();
+      var pmChecksByOp = {};
+
+      function currentSelectedOps() {
+        var arr = [];
+        ops.forEach(function(op) {
+          var c = pmChecksByOp[op];
+          if (c && c.checked) arr.push(op);
+        });
+        return arr;
+      }
+
+      function setChecksFromList(list) {
+        var set = {};
+        (list || []).forEach(function(x) { set[x] = true; });
+        ops.forEach(function(op) {
+          if (pmChecksByOp[op]) pmChecksByOp[op].checked = !!set[op];
+        });
+      }
+
+      function applyOverrideAndRedraw(newOverride) {
+        var wasNull = (self.pixelManipulationsOverride === null);
+        self.pixelManipulationsOverride = (newOverride === null) ? null : openMapsNormalizePixelManipulations(newOverride);
+        if (wasNull && self.pixelManipulationsOverride !== null) ensureLayerHasCrossOriginIfNeeded();
+        if (self.layer) self.layer.redraw();
+        saveMapState();
+      }
+
+      ops.forEach(function(op) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+        var cb = document.createElement('wz-checkbox');
+        cb.textContent = op;
+        cb.checked = false;
+        cb.addEventListener('change', function() {
+          applyOverrideAndRedraw(currentSelectedOps());
+        });
+        pmChecksByOp[op] = cb;
+        row.appendChild(cb);
+        pmList.appendChild(row);
+      });
+
+      // Initialize checkbox state from effective list (override if present, else default).
+      setChecksFromList(Array.isArray(self.pixelManipulationsOverride) ? self.pixelManipulationsOverride : defaultOps);
+
+      pmUseDefaultBtn.addEventListener('click', function(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        applyOverrideAndRedraw(null);
+        setChecksFromList(defaultOps);
+      });
+      pmSelectNoneBtn.addEventListener('click', function(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        applyOverrideAndRedraw([]);
+        setChecksFromList([]);
+      });
+
+      pixelManipulationsSection.appendChild(pmBox);
+      pmDetails.appendChild(pixelManipulationsSection);
+      UI.editContainer.appendChild(pmDetails);
+      }
+
+
 
         var resetBtn = createIconButton('fa-undo', I18n.t('openmaps.reset_visual_default'), true);
         resetBtn.addEventListener('click', function(e) {
@@ -15438,6 +16488,98 @@ acceptBtn.addEventListener('click', () => {
       rmLeft.appendChild(mapCopyMenuRoot);
       // -----------------------------------------------
 
+      // --- Copy map definition (pasteable map entry) ---
+      var mapCopyMenuRoot = document.createElement('div');
+      mapCopyMenuRoot.className = 'open-maps-map-copy-menu-root';
+      mapCopyMenuRoot.style.cssText = 'position:relative; display:inline-block;';
+
+      var mapCopyBtn = createIconButton('fa-copy', I18n.t('openmaps.copy_map_definition_tooltip'), true);
+      var mapCopyPanel = document.createElement('div');
+      mapCopyPanel.className = 'open-maps-map-copy-menu-panel';
+      mapCopyPanel.setAttribute('role', 'menu');
+      mapCopyPanel.style.display = 'none';
+
+      function createMapCopyMenuItem(textKey, mode) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'open-maps-map-copy-menu-item';
+        btn.setAttribute('role', 'menuitem');
+        btn.textContent = I18n.t(textKey);
+        btn.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var snippet = buildMapDefinitionSnippet(mode);
+          omCopyTextToClipboard(snippet).then(function() {
+            closeMapCopyMenu();
+            var prev = btn.textContent;
+            btn.textContent = I18n.t('openmaps.copy_done');
+            setTimeout(function() { btn.textContent = prev; }, 1600);
+          });
+        });
+        return btn;
+      }
+
+      var mapCopyMenuOpen = false;
+      function positionMapCopyMenu() {
+        var rect = mapCopyBtn.getBoundingClientRect();
+        var pw = mapCopyPanel.offsetWidth || 260;
+        var sidebar = document.querySelector('#sidebar') || document.querySelector('#sidepanel') || document.body;
+        var srect = sidebar && sidebar.getBoundingClientRect ? sidebar.getBoundingClientRect() : null;
+        var minLeft = 8, maxLeft = (window.innerWidth - pw - 8);
+        if (srect) {
+          minLeft = Math.max(8, srect.left + 8);
+          maxLeft = Math.min(window.innerWidth - pw - 8, srect.right - pw - 8);
+        }
+        var left = rect.right - pw;
+        if (left < minLeft) left = minLeft;
+        if (left > maxLeft) left = maxLeft;
+        mapCopyPanel.style.left = left + 'px';
+        mapCopyPanel.style.top = (rect.bottom + 2) + 'px';
+      }
+      function closeMapCopyMenu() {
+        if (!mapCopyMenuOpen) return;
+        mapCopyMenuOpen = false;
+        mapCopyPanel.style.display = 'none';
+        document.removeEventListener('click', onDocCloseMapCopyMenu);
+        document.removeEventListener('keydown', onKeyMapCopyMenu);
+        window.removeEventListener('resize', closeMapCopyMenu);
+      }
+      function onDocCloseMapCopyMenu(ev) {
+        if (mapCopyMenuRoot.contains(ev.target)) return;
+        closeMapCopyMenu();
+      }
+      function onKeyMapCopyMenu(ev) {
+        if (ev.key === 'Escape') closeMapCopyMenu();
+      }
+      function openMapCopyMenu() {
+        mapCopyMenuOpen = true;
+        mapCopyPanel.style.display = 'block';
+        requestAnimationFrame(function() {
+          positionMapCopyMenu();
+          requestAnimationFrame(positionMapCopyMenu);
+        });
+        setTimeout(function() {
+          document.addEventListener('click', onDocCloseMapCopyMenu);
+          document.addEventListener('keydown', onKeyMapCopyMenu);
+          window.addEventListener('resize', closeMapCopyMenu);
+        }, 0);
+      }
+
+      mapCopyBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (mapCopyMenuOpen) closeMapCopyMenu();
+        else openMapCopyMenu();
+      });
+
+      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_all_keep_defaults', 'allKeepDefaults'));
+      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_all_make_enabled_default', 'allMakeEnabledDefault'));
+      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_enabled_only_make_default', 'enabledOnlyMakeDefault'));
+      mapCopyMenuRoot.appendChild(mapCopyBtn);
+      mapCopyMenuRoot.appendChild(mapCopyPanel);
+      rmLeft.appendChild(mapCopyMenuRoot);
+      // -----------------------------------------------
+
       var rmBtn = document.createElement('wz-button');
       rmBtn.setAttribute('size', 'sm');
       rmBtn.setAttribute('color', 'secondary');
@@ -15555,6 +16697,7 @@ this.updateBboxLayer = function() {
             displayInLayerSwitcher: false
           });
           self.bboxLayer.openMapsBboxMapId = map.id;
+          self.bboxLayer.openMapsBboxMapId = map.id;
           var feature = new OpenLayers.Feature.Vector(self.area.toGeometry());
           self.bboxLayer.addFeatures([feature]);
           W.map.addLayer(self.bboxLayer);
@@ -15598,6 +16741,25 @@ this.updateVisibility = function() {
       // 2. Info icon logic (Zoom bounds)
       var zoom = W.map.getZoom();
       UI.info.style.display = (isActuallyVisible && map.zoomRange && (zoom < map.zoomRange[0] || zoom > map.zoomRange[1]) ? 'inline' : 'none');
+
+      if (UI.zoomMetaLine) {
+        var wmsFloorRawZm = map.wmsMinEffectiveZoom != null ? map.wmsMinEffectiveZoom : map.minEffectiveZoom;
+        var hasFloorZm = map.type === 'WMS' && wmsFloorRawZm != null && wmsFloorRawZm !== '';
+        var floorValZm = null;
+        if (hasFloorZm) {
+          var fz = Math.floor(Number(wmsFloorRawZm));
+          if (!isNaN(fz) && fz > 0) floorValZm = fz;
+        }
+        var zmParts = [];
+        if (map.zoomRange && map.zoomRange.length >= 2) {
+          zmParts.push(I18n.t('openmaps.zoom_meta_band') + ': ' + map.zoomRange[0] + '–' + map.zoomRange[1]);
+        }
+        if (floorValZm != null) {
+          zmParts.push(I18n.t('openmaps.zoom_meta_floor') + ': ' + floorValZm);
+        }
+        zmParts.push(I18n.t('openmaps.zoom_meta_view') + ': ' + zoom);
+        UI.zoomMetaLine.textContent = zmParts.join(' · ');
+      }
 
       if (UI.zoomMetaLine) {
         var wmsFloorRawZm = map.wmsMinEffectiveZoom != null ? map.wmsMinEffectiveZoom : map.minEffectiveZoom;
@@ -15721,6 +16883,13 @@ this.updateVisibility = function() {
           tileSize: (map.tile_size ? new OpenLayers.Size(map.tile_size, map.tile_size) : new OpenLayers.Size(512, 512))
         };
 
+        // Canvas pixel reads require CORS-enabled tiles. Enable when pixel manipulations may be applied:
+        // - catalog has defaults, OR
+        // - user enabled Apply pixel manipulations, OR
+        // - user set an override (even if empty)
+        var wantsPixelManipulation = !!map.pixelManipulations || !!self.improveMap || (self.pixelManipulationsOverride !== null);
+        if (wantsPixelManipulation) options.tileOptions = { crossOriginKeyword: 'anonymous' };
+        self.__openmapsTileCrossOrigin = !!(options.tileOptions && options.tileOptions.crossOriginKeyword);
         // Canvas pixel reads require CORS-enabled tiles. Enable when pixel manipulations may be applied:
         // - catalog has defaults, OR
         // - user enabled Apply pixel manipulations, OR
@@ -16583,6 +17752,7 @@ this.updateVisibility = function() {
           self.layer.events.register('moveend', null, function(obj) {
             if (obj.zoomChanged) {
               self.updateVisibility();
+              self.updateVisibility();
             }
           });
         }
@@ -16594,6 +17764,14 @@ this.updateVisibility = function() {
             UI.error.style.display = 'inline';
             Tooltips.add(UI.error, 'Checking layer status…', true);
 
+            loadTileError(obj.tile, msg => {
+              if (msg.ok) {
+                self.clearError();
+              } else {
+                Tooltips.add(UI.error, openMapsEscapeForHtmlTooltip(msg.title) + '\n' + openMapsEscapeForHtmlTooltip(msg.description), true, { html: true });
+              }
+            });
+          });
             loadTileError(obj.tile, msg => {
               if (msg.ok) {
                 self.clearError();
@@ -17478,6 +18656,34 @@ this.updateVisibility = function() {
   background: var(--background_variant, #f1f3f4);
 }
 
+#sidepanel-openMaps .open-maps-map-copy-menu-panel {
+  position: fixed;
+  z-index: 10050;
+  min-width: 260px;
+  margin: 0;
+  padding: 4px 0;
+  box-sizing: border-box;
+  background: var(--background_default, #fff);
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+#sidepanel-openMaps .open-maps-map-copy-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--content_primary, #202124);
+}
+#sidepanel-openMaps .open-maps-map-copy-menu-item:hover {
+  background: var(--background_variant, #f1f3f4);
+}
+
 input.open-maps-opacity-slider { vertical-align: middle; display: inline; margin-left: 8px; width: 100px; height: 10px; }
 
 .open-maps-maximum-layers { border-radius: 8px; padding: 8px; background-color: #fff; }
@@ -17563,12 +18769,36 @@ function openMapsLaunchWhenReady(trigger) {
   onWmeReady();
 }
 
+//#region OpenMapsBoot
+var openMapsReadyLaunchStarted = false;
+var openMapsReadyFallbackTimer = null;
+
+function openMapsLaunchWhenReady(trigger) {
+  if (openMapsReadyLaunchStarted) return;
+  openMapsReadyLaunchStarted = true;
+  if (openMapsReadyFallbackTimer) {
+    clearTimeout(openMapsReadyFallbackTimer);
+    openMapsReadyFallbackTimer = null;
+  }
+  log('Launching OpenMaps (' + trigger + ')...');
+  onWmeReady();
+}
+
 function onWmeInitialized() {
   // Use the official SDK-ready state
   if (W?.userscripts?.state?.isReady) {
     openMapsLaunchWhenReady('state ready');
+    openMapsLaunchWhenReady('state ready');
   } else {
     log('WME structure loaded, waiting for "wme-ready" signal...');
+    document.addEventListener('wme-ready', function() {
+      openMapsLaunchWhenReady('wme-ready event');
+    }, { once: true });
+    if (openMapsReadyFallbackTimer) clearTimeout(openMapsReadyFallbackTimer);
+    // Bridge builds occasionally miss `wme-ready`; fire once anyway and let onWmeReady poll OL/W.map.
+    openMapsReadyFallbackTimer = setTimeout(function() {
+      openMapsLaunchWhenReady('wme-ready fallback timeout');
+    }, 2500);
     document.addEventListener('wme-ready', function() {
       openMapsLaunchWhenReady('wme-ready event');
     }, { once: true });
@@ -17582,6 +18812,7 @@ function onWmeInitialized() {
 
 function bootstrap() {
   openMapsInstallHideGooglePlacesSearchThisAreaChip();
+  openMapsInstallHideGooglePlacesSearchThisAreaChip();
   if (typeof W === 'object' && W.userscripts?.state?.isReady) {
     onWmeInitialized();
   } else {
@@ -17591,4 +18822,5 @@ function bootstrap() {
 }
 
 bootstrap();
+//#endregion OpenMapsBoot
 //#endregion OpenMapsBoot
