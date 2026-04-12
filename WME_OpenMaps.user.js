@@ -444,24 +444,6 @@ async function onWmeReady() {
   openMapsInstallHideSearchThisAreaChipOnMapMove();
 
   //#endregion OpenMapsSdkBootstrap
-  openMapsOlWaitAttempts = 0;
-
-  if (!openMapsWmeSdk && openMapsResolveGetWmeSdkFn()) {
-    openMapsWmeSdk = openMapsGetWmeSdkOnce();
-    if (openMapsWmeSdk) {
-      try {
-        log('WME SDK bound (SDK ' + openMapsWmeSdk.getSDKVersion() + ', WME ' + openMapsWmeSdk.getWMEVersion() + ').');
-      } catch (eV) {
-        log('WME SDK bound.');
-      }
-    } else {
-      log('getWmeSdk unavailable; using legacy W.userscripts / W.map integrations.');
-    }
-  }
-
-  openMapsInstallHideSearchThisAreaChipOnMapMove();
-
-  //#endregion OpenMapsSdkBootstrap
 
   //#region Set up translations
   var translations = {
@@ -471,10 +453,6 @@ async function onWmeReady() {
       no_local_maps: 'No maps found for this area',
       hide_tooltips: 'Hide help',
       show_tooltips: 'Show help',
-      sidebar_unlock_low_zoom: 'Unlock sidebar below zoom 12',
-      sidebar_wme_lock_respect: 'Use WME low-zoom sidebar lock',
-      sidebar_unlock_low_zoom_tooltip: 'Lets you use the right sidebar (layers, scripts, etc.) when zoomed out below level 12. WME normally limits interaction there. Turn off if something misbehaves after a WME update.',
-      sidebar_wme_lock_respect_tooltip: 'Restore WME’s default behavior for the right sidebar when zoomed out below level 12.',
       sidebar_unlock_low_zoom: 'Unlock sidebar below zoom 12',
       sidebar_wme_lock_respect: 'Use WME low-zoom sidebar lock',
       sidebar_unlock_low_zoom_tooltip: 'Lets you use the right sidebar (layers, scripts, etc.) when zoomed out below level 12. WME normally limits interaction there. Turn off if something misbehaves after a WME update.',
@@ -507,16 +485,6 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Adjust how transparent the layer is',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Make the map background transparent',
-      map_improvement_label: 'Apply pixel manipulations',
-      map_improvement_label_tooltip: 'Apply pixel-level tile processing (requires redraw; may affect performance).',
-      pixel_manipulations_title: 'Pixel manipulations',
-      pixel_manipulations_default: 'Default',
-      pixel_manipulations_override: 'Override',
-      pixel_manipulations_use_default: 'Use catalog default',
-      pixel_manipulations_select_none: 'Select none',
-      pixel_manipulations_use_default_tooltip: 'Use catalog default (clear override)',
-      pixel_manipulations_select_none_tooltip: 'Select none (override to an empty list)',
-      pixel_manipulations_tooltip: 'Advanced: per-map overrides for tile pixel processing. Works independently from CSS filters and transparency. Changes apply after redraw and may cost performance.',
       map_improvement_label: 'Apply pixel manipulations',
       map_improvement_label_tooltip: 'Apply pixel-level tile processing (requires redraw; may affect performance).',
       pixel_manipulations_title: 'Pixel manipulations',
@@ -972,10 +940,6 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'WME-vergrendeling onder z12',
       sidebar_unlock_low_zoom_tooltip: 'Maakt de rechterzijbalk (lagen, scripts, …) bruikbaar als je verder bent uitgezoomd dan niveau 12. WME beperkt dat normaal. Zet uit als iets raar doet na een WME-update.',
       sidebar_wme_lock_respect_tooltip: 'Herstelt het standaard WME-gedrag voor de rechterzijbalk onder zoomniveau 12.',
-      sidebar_unlock_low_zoom: 'Zijbalk vrij onder zoom 12',
-      sidebar_wme_lock_respect: 'WME-vergrendeling onder z12',
-      sidebar_unlock_low_zoom_tooltip: 'Maakt de rechterzijbalk (lagen, scripts, …) bruikbaar als je verder bent uitgezoomd dan niveau 12. WME beperkt dat normaal. Zet uit als iets raar doet na een WME-update.',
-      sidebar_wme_lock_respect_tooltip: 'Herstelt het standaard WME-gedrag voor de rechterzijbalk onder zoomniveau 12.',
       expand: 'Klik om uit te breiden',
       collapse: 'Klik om te verbergen',
       hideshow_layer: 'Verberg/Toon kaart',
@@ -1003,16 +967,6 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Wijzig de doorzichtigheid van de kaart',
       transparent_label: 'Transparent',
       transparent_label_tooltip: 'Maak de achtergrond van de kaart transparent',
-      map_improvement_label: 'Pixelmanipulaties toepassen',
-      map_improvement_label_tooltip: 'Pas pixelbewerkingen toe op kaarttegels (hertekenen vereist; kan prestaties beïnvloeden).',
-      pixel_manipulations_title: 'Pixelmanipulaties',
-      pixel_manipulations_default: 'Standaard',
-      pixel_manipulations_override: 'Overschrijven',
-      pixel_manipulations_use_default: 'Catalogusstandaard gebruiken',
-      pixel_manipulations_select_none: 'Niets selecteren',
-      pixel_manipulations_use_default_tooltip: 'Catalogusstandaard gebruiken (overschrijving wissen)',
-      pixel_manipulations_select_none_tooltip: 'Niets selecteren (overschrijven naar een lege lijst)',
-      pixel_manipulations_tooltip: 'Geavanceerd: per-kaart overschrijvingen voor pixelbewerking van tegels. Werkt onafhankelijk van CSS-filters en transparantie. Toegepast na hertekenen; kan prestaties beïnvloeden.',
       map_improvement_label: 'Pixelmanipulaties toepassen',
       map_improvement_label_tooltip: 'Pas pixelbewerkingen toe op kaarttegels (hertekenen vereist; kan prestaties beïnvloeden).',
       pixel_manipulations_title: 'Pixelmanipulaties',
@@ -1465,10 +1419,6 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'Verrouillage WME sous zoom 12',
       sidebar_unlock_low_zoom_tooltip: 'Permet d’utiliser la barre latérale droite (couches, scripts, etc.) en dessous du niveau de zoom 12. WME limite cela par défaut. Désactivez si le comportement devient étrange après une mise à jour.',
       sidebar_wme_lock_respect_tooltip: 'Rétablit le comportement WME par défaut pour la barre latérale droite sous le zoom 12.',
-      sidebar_unlock_low_zoom: 'Déverrouiller la barre latérale (z<12)',
-      sidebar_wme_lock_respect: 'Verrouillage WME sous zoom 12',
-      sidebar_unlock_low_zoom_tooltip: 'Permet d’utiliser la barre latérale droite (couches, scripts, etc.) en dessous du niveau de zoom 12. WME limite cela par défaut. Désactivez si le comportement devient étrange après une mise à jour.',
-      sidebar_wme_lock_respect_tooltip: 'Rétablit le comportement WME par défaut pour la barre latérale droite sous le zoom 12.',
       terms_section_title: 'Conditions d’utilisation',
       tou_section_status_accepted: 'Accepté',
       tou_section_status_required: 'Action requise',
@@ -1503,16 +1453,6 @@ async function onWmeReady() {
       tou_accept_disabled_tooltip: 'Ouvrez d’abord chaque lien de langue ci-dessus.',
       no_local_maps: 'Aucune carte disponible ici',
       opacity_label: 'Opacité',
-      map_improvement_label: 'Appliquer des manipulations de pixels',
-      map_improvement_label_tooltip: 'Applique un traitement au niveau des pixels (nécessite un redessin; peut impacter les performances).',
-      pixel_manipulations_title: 'Manipulations de pixels',
-      pixel_manipulations_default: 'Par défaut',
-      pixel_manipulations_override: 'Remplacer',
-      pixel_manipulations_use_default: 'Utiliser la valeur du catalogue',
-      pixel_manipulations_select_none: 'Ne rien sélectionner',
-      pixel_manipulations_use_default_tooltip: 'Utiliser la valeur du catalogue (effacer le remplacement)',
-      pixel_manipulations_select_none_tooltip: 'Ne rien sélectionner (remplacer par une liste vide)',
-      pixel_manipulations_tooltip: 'Avancé : remplacements par carte pour le traitement des pixels des tuiles. Indépendant des filtres CSS et de la transparence. S’applique après redessin et peut coûter en performances.',
       map_improvement_label: 'Appliquer des manipulations de pixels',
       map_improvement_label_tooltip: 'Applique un traitement au niveau des pixels (nécessite un redessin; peut impacter les performances).',
       pixel_manipulations_title: 'Manipulations de pixels',
@@ -1558,10 +1498,6 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'Usar bloqueio WME em zoom baixo',
       sidebar_unlock_low_zoom_tooltip: 'Permite usar a barra lateral direita (camadas, scripts etc.) com zoom abaixo do nível 12. O WME costuma limitar isso. Desative se algo falhar após uma atualização.',
       sidebar_wme_lock_respect_tooltip: 'Restaura o comportamento padrão do WME para a barra lateral direita com zoom abaixo do 12.',
-      sidebar_unlock_low_zoom: 'Liberar barra lateral abaixo do zoom 12',
-      sidebar_wme_lock_respect: 'Usar bloqueio WME em zoom baixo',
-      sidebar_unlock_low_zoom_tooltip: 'Permite usar a barra lateral direita (camadas, scripts etc.) com zoom abaixo do nível 12. O WME costuma limitar isso. Desative se algo falhar após uma atualização.',
-      sidebar_wme_lock_respect_tooltip: 'Restaura o comportamento padrão do WME para a barra lateral direita com zoom abaixo do 12.',
       no_local_maps: 'Não foram encontrados mapas para esta área',
       expand: 'Clique para expandir',
       collapse: 'Clique para colapsar',
@@ -1587,16 +1523,6 @@ async function onWmeReady() {
       opacity_label_tooltip: 'Ajustar a transparência da camada',
       transparent_label: 'Transparência',
       transparent_label_tooltip: 'Fazer o mapa de plano de fundo transparente',
-      map_improvement_label: 'Aplicar manipulações de pixels',
-      map_improvement_label_tooltip: 'Aplicar processamento de pixels nos tiles (requer redesenho; pode afetar o desempenho).',
-      pixel_manipulations_title: 'Manipulações de pixels',
-      pixel_manipulations_default: 'Padrão',
-      pixel_manipulations_override: 'Substituir',
-      pixel_manipulations_use_default: 'Usar padrão do catálogo',
-      pixel_manipulations_select_none: 'Selecionar nenhum',
-      pixel_manipulations_use_default_tooltip: 'Usar padrão do catálogo (limpar substituição)',
-      pixel_manipulations_select_none_tooltip: 'Selecionar nenhum (substituir por lista vazia)',
-      pixel_manipulations_tooltip: 'Avançado: substituições por mapa para processamento de pixels dos tiles. Funciona de forma independente de filtros CSS e transparência. Aplica após redesenho e pode custar desempenho.',
       map_improvement_label: 'Aplicar manipulações de pixels',
       map_improvement_label_tooltip: 'Aplicar processamento de pixels nos tiles (requer redesenho; pode afetar o desempenho).',
       pixel_manipulations_title: 'Manipulações de pixels',
@@ -9518,34 +9444,11 @@ async function onWmeReady() {
       tabPane = leg1.tabPane;
       if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
     }
-    var tabLabel;
-    var tabPane;
-    if (openMapsWmeSdk && openMapsWmeSdk.Sidebar && typeof openMapsWmeSdk.Sidebar.registerScriptTab === 'function') {
-      try {
-        var regSdk = await openMapsWmeSdk.Sidebar.registerScriptTab();
-        tabLabel = regSdk.tabLabel;
-        tabPane = regSdk.tabPane;
-      } catch (eSdkTab) {
-        try {
-          log('SDK Sidebar.registerScriptTab failed; using W.userscripts: ' + (eSdkTab && eSdkTab.message ? eSdkTab.message : eSdkTab));
-        } catch (eL) { /* ignore */ }
-        var leg0 = W.userscripts.registerSidebarTab('openMaps');
-        tabLabel = leg0.tabLabel;
-        tabPane = leg0.tabPane;
-        if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
-      }
-    } else {
-      var leg1 = W.userscripts.registerSidebarTab('openMaps');
-      tabLabel = leg1.tabLabel;
-      tabPane = leg1.tabPane;
-      if (W.userscripts.waitForElementConnected) await W.userscripts.waitForElementConnected(tabPane);
-    }
 
     tabLabel.innerHTML = '<span class="fa"></span>';
     tabLabel.title = I18n.t('openmaps.tab_title');
     tabPane.id = 'sidepanel-openMaps';
 
-    return tabPane;
     return tabPane;
   })();
 
@@ -14195,7 +14098,6 @@ function updateTileLoader() {
 
    this.clearError = function() {
       Tooltips.remove(UI.error);
-      Tooltips.remove(UI.error);
       UI.error.style.display = 'none';
     };
 
@@ -14326,10 +14228,6 @@ var handle = document.createElement('div');
         Tooltips.remove(UI.info);
         Tooltips.add(UI.info, I18n.t('openmaps.zoom_meta_tooltip'), true);
       }
-      if (openMapsMapHasZoomMeta(map)) {
-        Tooltips.remove(UI.info);
-        Tooltips.add(UI.info, I18n.t('openmaps.zoom_meta_tooltip'), true);
-      }
       buttons.appendChild(UI.info);
 
     // --- ZOOM TO BBOX BUTTON ---
@@ -14338,7 +14236,6 @@ var handle = document.createElement('div');
 UI.zoomToBboxBtn.addEventListener('click', function(e) {
         e.stopPropagation();
 
-        Tooltips.hide(this);
         Tooltips.hide(this);
 
         if (self.area) {
@@ -14493,48 +14390,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span>' +
         inspectorBackendChip +
         ' &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
-      // If this is a WMS URL, indicate which viewport-feature backend Map Inspector will use.
-      // (ArcGIS REST-backed WMS → /MapServer/<id>/query; GeoServer WMS → WFS GetFeature.)
-      // Keep it compact: just append a small tag after the Type chip (no extra label).
-      var inspectorBackendChip = '';
-      if (map.type === 'WMS' && map.url) {
-        try {
-          var u = String(map.url);
-          var s = u.replace(/\/+$/, '').split('?')[0];
-          var inspectorLabel = null;
-          var compactLabel = null;
-
-          if (openMapsArcgisRestBaseFromWmsUrl(u)) {
-            inspectorLabel = I18n.t('openmaps.inspector_wms_arcgis_viewport'); // "WMS (ArcGIS REST)"
-            compactLabel = 'ArcGIS REST';
-          } else {
-            var path = s.replace(/\/+$/, '');
-            var isGeoServer = path.toLowerCase().indexOf('geoserver') !== -1;
-            var endsWithWms = /\/wms$/i.test(path);
-            if (isGeoServer && endsWithWms) {
-              inspectorLabel = I18n.t('openmaps.inspector_wms_wfs_viewport'); // "WMS (GeoServer WFS)"
-              compactLabel = 'GeoServer';
-            }
-          }
-
-          if (inspectorLabel && compactLabel) {
-            var titleEsc = openMapsEscapeForHtmlTooltip(inspectorLabel)
-              .replace(/"/g, '&quot;')
-              .replace(/'/g, '&#39;');
-            inspectorBackendChip =
-              ' ' +
-              '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;" title="' + titleEsc + '">' +
-              compactLabel +
-              '</span>';
-          }
-        } catch (e) {}
-      }
-
-      metaTop.innerHTML =
-        '<strong>' + I18n.t('openmaps.meta_type') + ':</strong> ' +
-        '<span style="background:#e8eaed; padding:1px 4px; border-radius:3px; color:#3c4043; border: 1px solid #dadce0;">' + (map.type || 'WMS') + '</span>' +
-        inspectorBackendChip +
-        ' &nbsp;|&nbsp; <strong>' + I18n.t('openmaps.meta_region') + ':</strong> ' + (I18n.t('openmaps.areas.' + map.area) || map.area);
       metaBox.appendChild(metaTop);
 
       // BBox coordinates are intentionally not shown here to avoid clutter.
@@ -14560,23 +14415,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         metaBox.appendChild(about);
       }
       UI.editContainer.appendChild(metaBox);
-
-      if (map.type === 'WMS' && map.url && openMapsArcgisRestBaseFromWmsUrl(map.url)) {
-        var probeWrap = document.createElement('div');
-        probeWrap.style.cssText = 'margin: 8px 0 4px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 8px; background: #f8f9fa;';
-        var probeCb = document.createElement('wz-checkbox');
-        probeCb.checked = self.wmsArcgisRestViewportProbe !== false;
-        probeCb.textContent = I18n.t('openmaps.wms_arcgis_rest_viewport_probe');
-        probeCb.addEventListener('change', function() {
-          self.wmsArcgisRestViewportProbe = !!probeCb.checked;
-          saveMapState();
-          if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
-        });
-        Tooltips.add(probeCb, I18n.t('openmaps.wms_arcgis_rest_viewport_probe_tooltip'), true);
-        probeWrap.appendChild(probeCb);
-        UI.editContainer.appendChild(probeWrap);
-      }
-
 
       if (map.type === 'WMS' && map.url && openMapsArcgisRestBaseFromWmsUrl(map.url)) {
         var probeWrap = document.createElement('div');
@@ -16391,13 +16229,6 @@ this.updateVisibility = function() {
           tileSize: (map.tile_size ? new OpenLayers.Size(map.tile_size, map.tile_size) : new OpenLayers.Size(512, 512))
         };
 
-        // Canvas pixel reads require CORS-enabled tiles. Enable when pixel manipulations may be applied:
-        // - catalog has defaults, OR
-        // - user enabled Apply pixel manipulations, OR
-        // - user set an override (even if empty)
-        var wantsPixelManipulation = !!map.pixelManipulations || !!self.improveMap || (self.pixelManipulationsOverride !== null);
-        if (wantsPixelManipulation) options.tileOptions = { crossOriginKeyword: 'anonymous' };
-        self.__openmapsTileCrossOrigin = !!(options.tileOptions && options.tileOptions.crossOriginKeyword);
         // Canvas pixel reads require CORS-enabled tiles. Enable when pixel manipulations may be applied:
         // - catalog has defaults, OR
         // - user enabled Apply pixel manipulations, OR
