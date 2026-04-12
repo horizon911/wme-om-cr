@@ -76,7 +76,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.12.3
+// @version     2026.04.12.2
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -89,7 +89,7 @@
 
 var styleElement;
 
-var OPEN_MAPS_VERSION = '2026.04.12.3';
+var OPEN_MAPS_VERSION = '2026.04.12.2';
 
 // Trusted Types / CSP hardening: avoid `innerHTML` where feasible.
 function openMapsClearEl(el) {
@@ -955,9 +955,7 @@ async function onWmeReady() {
         v2026_04_08_03: '- **KML inner color parity:** Map symbols and inner rings use **`openMapsKmlResolvedFolderFillHex`** — same rule as Map Inspector (prefer folder **`openMapsKmlColorHex`** from KML Style when set, else title+folder hash). Fixes teal list vs green map when My Maps / KML defines an explicit folder color.',
         v2026_04_11_01: '- **Waze accreditation:** Replaced mandatory Terms-of-Use acceptance with a per-map **Source & Waze** section (provider terms links are informational only). Shows accreditation vs Waze’s **Map Data Attribution** help page, link to that page, and a prefilled **Open Source Data Layer Request** Google Form. Catalog attribution status is driven by **`OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION`** (see `OPENMAPS_WAZE_ATTRIBUTION_VERIFICATION.md`). Removed ToU lock UI, sidebar notice, active-maps “ToU pending” filter, reset-all-terms control, and background ToU fetch/revoke logic.',
         v2026_04_11_02: '- **Source & Waze:** Layer-request Google Form username prefill reads the editor name from **`unsafeWindow.W.loginManager`** / SDK **`User`** (Backbone-style models included). **Waze** box background and border track the same colors as the summary **accreditation** pill. **`Not on Waze list`** explanation now states what that means for using the overlay in WME (informal context vs treating it as an approved Waze-named source).',
-        v2026_04_12_01: '- **Developer mode & Waze `not_listed`:** Seven taps on **Active maps** toggles persisted developer mode. Catalog maps **not on Waze’s list** are hidden from **Maps to add** unless developer mode is on. With developer mode, those rows stay locked until **I agree** under **Source & Waze** (session-scoped; cleared when developer mode turns off). Padlock + disabled Waze checkbox and sub-layer controls while locked; **rebuildMapLayersUI** exposed for correct sub-layer list after gate changes; session keys align string/numeric map ids.',
-        v2026_04_12_02: '- **Waze `not_listed` polish (`2026.04.12.2`):** **Active maps** hides those catalog rows when developer mode is off (same rule as **Maps to add**). **Not Accredited** pill matches **Source & Waze** summary (compact label + colors); pill sits on its own row under the title; summary badge opens **Source & Waze** when locked (keyboard-accessible).',
-        v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Not Accredited** uses tighter chip styling (UA **button** reset, smaller radius). **I agree** hides the **Source & Waze** summary badge as well as the map-card control; the pill row stays collapsed when nothing to show.'
+        v2026_04_12_01: '- **Developer mode & Waze `not_listed`:** Seven taps on **Active maps** toggles persisted developer mode. Catalog maps **not on Waze’s list** are hidden from **Maps to add** unless developer mode is on. With developer mode, those rows stay locked until **I agree** under **Source & Waze** (session-scoped; cleared when developer mode turns off). Padlock + disabled Waze checkbox and sub-layer controls while locked; **rebuildMapLayersUI** exposed for correct sub-layer list after gate changes; session keys align string/numeric map ids.'
       }
     },
     nl: {
@@ -1470,8 +1468,7 @@ async function onWmeReady() {
         v2026_04_11_01: '- **Waze-accreditatie:** Verplichte acceptatie van gebruiksvoorwaarden vervangen door **Bron & Waze** per kaart (aanbiederslinks alleen informatief). Toont status t.o.v. Waze **Map Data Attribution**, link en vooringevuld Google Formulier. ToU-slot, zijbalkmelding, filter «Gebruiksvoorwaarden open», reset-knop en achtergrond-ToU-logica verwijderd.',
         v2026_04_11_02: '- **Bron & Waze:** Voorinvullen van de editornaam in het Google Formulier via **`unsafeWindow.W.loginManager`** / SDK **User** (o.a. Backbone-modellen). Achtergrond en rand van het **Waze**-vak volgen de kleuren van de accreditatie-pill. **Niet op de Waze-lijst** legt nu uit wat dat betekent voor gebruik in WME (informele context vs. goedgekeurde bron).',
         v2026_04_12_01: '- **Ontwikkelaarsmodus & Waze `not_listed`:** zeven tikken op **Actieve kaarten** schakelt de bewaarde ontwikkelaarsmodus. Cataloguskaarten **niet op de Waze-lijst** ontbreken in **Toe te voegen kaarten** tenzij de modus aan staat. Met modus aan blijven rijen vergrendeld tot **Ik ga akkoord** onder **Bron & Waze** (sessie; gewist bij uit). Hangslot + uitgeschakelde Waze-checkbox en sublaagknoppen; **`rebuildMapLayersUI`** beschikbaar voor juiste sublaaglijst; sessiesleutels voor string/numerieke map-id’s.',
-        v2026_04_12_02: '- **Waze `not_listed` verfijning (`2026.04.12.2`):** **Actieve kaarten** verbergt die catalogusrijen zonder ontwikkelaarsmodus (zelfde regel als **Toe te voegen kaarten**). **Niet geaccrediteerd**-pill komt overeen met **Bron & Waze**-samenvatting (compact label + kleuren); pill op eigen rij onder de titel; samenvattingsbadge opent **Bron & Waze** bij vergrendeling (toetsenbord).',
-        v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Niet geaccrediteerd** is compacter als chip (UA **knop**-reset, kleinere hoekradius). **Ik ga akkoord** verbergt ook de **Bron & Waze**-samenvattingsbadge naast de kaartregel; de pill-rij blijft dichtgeklapt als er niets te tonen is.'
+        v2026_04_12_02: '- **Waze `not_listed` verfijning (`2026.04.12.2`):** **Actieve kaarten** verbergt die catalogusrijen zonder ontwikkelaarsmodus (zelfde regel als **Toe te voegen kaarten**). **Niet geaccrediteerd**-pill komt overeen met **Bron & Waze**-samenvatting (compact label + kleuren); pill op eigen rij onder de titel; samenvattingsbadge opent **Bron & Waze** bij vergrendeling (toetsenbord).'
       }
     },
     fr: {
@@ -1581,8 +1578,7 @@ async function onWmeReady() {
         v2026_04_11_01: '- **Accréditation Waze :** acceptation obligatoire des CGU remplacée par la section **Source et Waze** (liens fournisseur informatifs). Statut vs **Map Data Attribution**, lien et formulaire Google prérempli. Suppression du verrou ToU, de la bannière, du filtre « ToU en attente », du reset global et des contrôles réseau ToU.',
         v2026_04_11_02: '- **Source et Waze :** préremplissage du nom d’éditeur du formulaire Google via **`unsafeWindow.W.loginManager`** / SDK **User** (modèles Backbone inclus). Fond et bordure du bloc **Waze** alignés sur la pillule d’**accréditation**. **Absent de la liste Waze** explique désormais la conséquence pour l’usage dans WME (contexte informel vs source approuvée).',
         v2026_04_12_01: '- **Mode développeur & Waze `not_listed` :** sept appuis sur **Cartes actives** bascule le mode développeur enregistré. Les cartes catalogue **absentes de la liste Waze** sont masquées dans **Cartes à ajouter** sauf si le mode est actif. Avec le mode, les lignes restent verrouillées jusqu’à **J’accepte** sous **Source et Waze** (session ; effacé à la désactivation). Cadenas + case Waze et sous-couches désactivés ; **`rebuildMapLayersUI`** exposé pour la liste des sous-couches ; clés de session alignées id chaîne/numérique.',
-        v2026_04_12_02: '- **Finition Waze `not_listed` (`2026.04.12.2`) :** **Cartes actives** masque ces lignes catalogue sans mode développeur (même règle que **Cartes à ajouter**). Pastille **Non accrédité** alignée sur le résumé **Source et Waze** (libellé compact + couleurs) ; pastille sur sa propre ligne sous le titre ; le badge ouvre **Source et Waze** si verrouillé (clavier).',
-        v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`) :** **Non accrédité** en chip plus serrée (reset **bouton** navigateur, coins plus petits). **J’accepte** masque aussi le badge du résumé **Source et Waze** comme la pastille de la carte ; la ligne de pastille reste repliée s’il n’y a rien à afficher.'
+        v2026_04_12_02: '- **Finition Waze `not_listed` (`2026.04.12.2`) :** **Cartes actives** masque ces lignes catalogue sans mode développeur (même règle que **Cartes à ajouter**). Pastille **Non accrédité** alignée sur le résumé **Source et Waze** (libellé compact + couleurs) ; pastille sur sa propre ligne sous le titre ; le badge ouvre **Source et Waze** si verrouillé (clavier).'
       }
     },
     'pt-BR': {
@@ -1786,8 +1782,7 @@ async function onWmeReady() {
         v2026_04_11_01: '- **Credenciação Waze:** aceitação obrigatória de termos substituída pela secção **Fonte e Waze** (links do fornecedor só informativos). Mostra estado face a **Map Data Attribution**, ligação e formulário Google pré-preenchido. Removidos bloqueio ToU, aviso na barra lateral, filtro «ToU pendente», reset global e motor ToU em segundo plano.',
         v2026_04_11_02: '- **Fonte e Waze:** pré-preenchimento do nome do editor no formulário Google via **`unsafeWindow.W.loginManager`** / SDK **User** (incl. modelos Backbone). Fundo e contorno da caixa **Waze** alinhados com a pill de **credenciação**. **Não consta na lista Waze** explica agora o que isso implica para uso no WME (contexto informal vs. fonte aprovada).',
         v2026_04_12_01: '- **Modo de programador & Waze `not_listed`:** sete toques em **Mapas ativos** alterna o modo de programador guardado. Mapas de catálogo **fora da lista Waze** não aparecem em **Mapas a adicionar** sem o modo. Com o modo, as linhas ficam bloqueadas até **Concordo** em **Fonte e Waze** (sessão; limpo ao desligar). Cadeado + caixa Waze e subcamadas desativados ; **`rebuildMapLayersUI`** exposto para a lista de subcamadas ; chaves de sessão alinham id string/número.',
-        v2026_04_12_02: '- **Refino Waze `not_listed` (`2026.04.12.2`):** **Mapas ativos** oculta essas linhas de catálogo sem modo de programador (mesma regra que **Mapas a adicionar**). Pastilha **Não credenciado** alinhada ao resumo **Fonte e Waze** (rótulo compacto + cores); pastilha numa linha própria sob o título; o badge abre **Fonte e Waze** quando bloqueado (teclado).',
-        v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`):** **Não credenciado** mais compacto estilo chip (reset de **botão** do navegador, cantos menores). **Concordo** oculta também o badge do resumo **Fonte e Waze** como o controlo do cartão; a linha da pastilha fica fechada quando não há nada a mostrar.'
+        v2026_04_12_02: '- **Refino Waze `not_listed` (`2026.04.12.2`):** **Mapas ativos** oculta essas linhas de catálogo sem modo de programador (mesma regra que **Mapas a adicionar**). Pastilha **Não credenciado** alinhada ao resumo **Fonte e Waze** (rótulo compacto + cores); pastilha numa linha própria sob o título; o badge abre **Fonte e Waze** quando bloqueado (teclado).'
       }
     }
   };
@@ -4698,9 +4693,9 @@ async function onWmeReady() {
     return { bg: '#e8f0fe', fg: '#1967d2', boxBorder: '#8ab4f8', key: 'openmaps.waze_accred_badge_unknown' };
   }
 
-  /** Shared compact chip look for map card + Source & Waze summary when status is `not_listed` (UA button reset for height parity with type chips). */
+  /** Shared compact pill look for map card + Source & Waze summary when status is `not_listed`. */
   function openMapsWazeNotListedAccredPillCss(boxBorder, bg, fg) {
-    return 'display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;box-sizing:border-box;margin:0;min-height:0;appearance:none;-webkit-appearance:none;-moz-appearance:none;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;border:1px solid ' + boxBorder + ';background:' + bg + ';color:' + fg + ';line-height:1.1;font-family:inherit;white-space:nowrap;vertical-align:middle;';
+    return 'display:inline-flex;align-items:center;flex-shrink:0;font-size:9px;font-weight:600;padding:1px 6px;border-radius:10px;border:1px solid ' + boxBorder + ';background:' + bg + ';color:' + fg + ';line-height:1.3;font-family:inherit;white-space:nowrap;';
   }
 
   var OPEN_MAPS_WAZE_NOT_LISTED_SESSION_STORAGE_KEY = 'openmaps-waze-not-listed-agreed';
@@ -13960,7 +13955,7 @@ function MapHandle(map, options) {
     this.outOfArea = kmlVectorOverlay ? false : (currentExtent ? !this.area.intersectsBounds(currentExtent) : true);
 
     // UI Element References
-    var UI = { touDetails: null, syncSourceWazeSection: null, mapLayersNoActiveMark: null, mapLayersSubContainer: null, mapLayersDetailsRoot: null, orphanHintEl: null, layerCatalogLoadingEl: null, accredPillRow: null };
+    var UI = { touDetails: null, syncSourceWazeSection: null, mapLayersNoActiveMark: null, mapLayersSubContainer: null, mapLayersDetailsRoot: null, orphanHintEl: null, layerCatalogLoadingEl: null };
 
     function getLayerMeta(name) {
       if (map.layers[name]) {
@@ -14421,10 +14416,9 @@ var handle = document.createElement('div');
       }
       var accredPillRow = document.createElement('div');
       accredPillRow.className = 'openmaps-map-card-accred-pill-row';
-      accredPillRow.style.cssText = 'display:none;align-items:center;width:100%;min-width:0;margin-top:2px;';
+      accredPillRow.style.cssText = 'display:flex;align-items:center;width:100%;min-width:0;margin-top:4px;';
       accredPillRow.appendChild(UI.notAccreditedPill);
       textContainer.appendChild(accredPillRow);
-      UI.accredPillRow = accredPillRow;
       UI.topRow.appendChild(textContainer);
 
       
@@ -15753,26 +15747,18 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           var devOn = !!Settings.get().developerMode;
           var agreed = openMapsWazeNotListedSessionHasAgreed(self.mapId) || openMapsWazeNotListedSessionHasAgreed(map.id);
           if (st.code === 'not_listed') {
-            if (agreed) {
-              accBadge.style.cssText = 'display:none;';
-              accBadge.textContent = '';
+            accBadge.style.cssText = openMapsWazeNotListedAccredPillCss(bs.boxBorder, bs.bg, bs.fg) + 'margin-left:4px;';
+            var tagTxt = I18n.t('openmaps.waze_accred_tag_not_accredited');
+            accBadge.textContent = tagTxt;
+            accBadge.setAttribute('aria-label', tagTxt);
+            if (devOn && !agreed) {
+              accBadge.setAttribute('role', 'button');
+              accBadge.tabIndex = 0;
+              accBadge.style.cursor = 'pointer';
+            } else {
               accBadge.removeAttribute('role');
               accBadge.removeAttribute('tabindex');
-              accBadge.removeAttribute('aria-label');
-            } else {
-              accBadge.style.cssText = openMapsWazeNotListedAccredPillCss(bs.boxBorder, bs.bg, bs.fg) + 'margin-left:4px;';
-              var tagTxt = I18n.t('openmaps.waze_accred_tag_not_accredited');
-              accBadge.textContent = tagTxt;
-              accBadge.setAttribute('aria-label', tagTxt);
-              if (devOn) {
-                accBadge.setAttribute('role', 'button');
-                accBadge.tabIndex = 0;
-                accBadge.style.cursor = 'pointer';
-              } else {
-                accBadge.removeAttribute('role');
-                accBadge.removeAttribute('tabindex');
-                accBadge.style.cursor = 'default';
-              }
+              accBadge.style.cursor = 'default';
             }
           } else {
             accBadge.style.cssText = 'font-size:10px; font-weight:600; padding:2px 6px; border-radius:10px; margin-left:4px; white-space:nowrap;';
@@ -16203,14 +16189,11 @@ this.updateVisibility = function() {
 
       if (UI.syncSourceWazeSection) UI.syncSourceWazeSection();
 
-      var showAccredGatePill = openMapsIsCatalogWazeNotListedMap(map) && Settings.get().developerMode &&
-        !openMapsWazeNotListedSessionHasAgreed(self.mapId) &&
-        !openMapsWazeNotListedSessionHasAgreed(map.id);
       if (UI.notAccreditedPill) {
-        UI.notAccreditedPill.style.display = showAccredGatePill ? 'inline-flex' : 'none';
-      }
-      if (UI.accredPillRow) {
-        UI.accredPillRow.style.display = showAccredGatePill ? 'flex' : 'none';
+        var showPill = openMapsIsCatalogWazeNotListedMap(map) && Settings.get().developerMode &&
+          !openMapsWazeNotListedSessionHasAgreed(self.mapId) &&
+          !openMapsWazeNotListedSessionHasAgreed(map.id);
+        UI.notAccreditedPill.style.display = showPill ? 'inline-flex' : 'none';
       }
 
       if (UI.mapLayersActionsBtn) {
