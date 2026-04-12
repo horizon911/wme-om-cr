@@ -4700,7 +4700,7 @@ async function onWmeReady() {
 
   /** Shared compact chip look for map card + Source & Waze summary when status is `not_listed` (UA button reset for height parity with type chips). */
   function openMapsWazeNotListedAccredPillCss(boxBorder, bg, fg) {
-    return 'display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;box-sizing:border-box;margin:0;min-height:0;max-height:none;height:auto;appearance:none;-webkit-appearance:none;-moz-appearance:none;font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;border:1px solid ' + boxBorder + ';background:' + bg + ';color:' + fg + ';line-height:1.15;font-family:inherit;white-space:nowrap;vertical-align:middle;';
+    return 'display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;box-sizing:border-box;margin:0;min-height:0;appearance:none;-webkit-appearance:none;-moz-appearance:none;font-size:9px;font-weight:600;padding:0 5px;border-radius:4px;border:1px solid ' + boxBorder + ';background:' + bg + ';color:' + fg + ';line-height:1.1;font-family:inherit;white-space:nowrap;vertical-align:middle;';
   }
 
   var OPEN_MAPS_WAZE_NOT_LISTED_SESSION_STORAGE_KEY = 'openmaps-waze-not-listed-agreed';
@@ -15370,25 +15370,17 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var extra = cloud.filter(function(c) { return curatedKeys.indexOf(c.name) === -1; })
           .sort(function(a, b) { return (a.title || a.name).localeCompare(b.title || b.name); });
         extra.forEach(function(c) { mergedNames.push(c.name); });
-        var catalogMergeGateBlocked = openMapsWazeNotListedLayerUseBlocked(map, self.mapId);
         self.mapLayers = mergedNames.map(function(name) {
           var v;
           if (Object.prototype.hasOwnProperty.call(vis, name)) v = vis[name];
           else {
             var prev = prevMapLayers.find(function(m) { return m.name === name; });
-            if (catalogMergeGateBlocked) {
-              v = map.default_layers.indexOf(name) !== -1;
-            } else {
-              v = prev ? prev.visible : (map.default_layers.indexOf(name) !== -1);
-            }
+            v = prev ? prev.visible : (map.default_layers.indexOf(name) !== -1);
           }
           return { name: name, visible: v };
         });
         rebuildMapLayersUI();
         saveMapState();
-        try {
-          if (typeof self.applyWazeNotListedGate === 'function') self.applyWazeNotListedGate();
-        } catch (eCatGate) { /* ignore */ }
       }
 
       function ensureLayerCatalogLoaded(forceRefresh, onDone) {
@@ -15985,22 +15977,14 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         self.mapLayers.forEach(function(l) { l.visible = false; });
         self.__openmapsWazeNotListedGateBlocked = true;
         if (typeof self.updateLayers === 'function') self.updateLayers();
-      } else if (!blocked && wasBlocked) {
+      } else if (!blocked && wasBlocked && self.__openmapsWazeNotListedStash) {
         var st = self.__openmapsWazeNotListedStash;
-        if (st) {
-          self.hidden = !!st.hidden;
-          var byName = {};
-          (st.mapLayers || []).forEach(function(x) { byName[x.name] = !!x.visible; });
-          self.mapLayers.forEach(function(l) {
-            if (Object.prototype.hasOwnProperty.call(byName, l.name)) l.visible = byName[l.name];
-            else l.visible = map.default_layers.indexOf(l.name) !== -1;
-          });
-        } else {
-          self.hidden = false;
-          self.mapLayers.forEach(function(l) {
-            l.visible = map.default_layers.indexOf(l.name) !== -1;
-          });
-        }
+        self.hidden = !!st.hidden;
+        var byName = {};
+        st.mapLayers.forEach(function(x) { byName[x.name] = !!x.visible; });
+        self.mapLayers.forEach(function(l) {
+          if (Object.prototype.hasOwnProperty.call(byName, l.name)) l.visible = byName[l.name];
+        });
         self.__openmapsWazeNotListedStash = null;
         self.__openmapsWazeNotListedGateBlocked = false;
         if (typeof self.updateLayers === 'function') self.updateLayers();
@@ -18017,29 +18001,16 @@ this.updateVisibility = function() {
 }
 #sidepanel-openMaps .openmaps-layer-tag {
   display: inline-block;
-  padding: 0 5px;
-  font-size: 9px;
+  padding: 1px 6px;
+  font-size: 10px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.35;
   letter-spacing: 0.01em;
   color: var(--content_secondary, #5f6368);
   background: var(--background_variant, #f1f3f4);
   border: 1px solid var(--divider_default, #dadce0);
-  border-radius: 3px;
+  border-radius: 4px;
   white-space: nowrap;
-}
-
-/* Map card “Not accredited” chip: WME/wz buttons often impose a tall min-height — keep it compact */
-#sidepanel-openMaps .openmaps-not-accredited-pill {
-  margin: 0 !important;
-  padding: 1px 5px !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  line-height: 1.15 !important;
-  font-size: 9px !important;
-}
-#sidepanel-openMaps .openmaps-map-card-accred-pill-row {
-  line-height: 1;
 }
 
 #sidepanel-openMaps .open-maps-layer-card-menu-panel {
