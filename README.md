@@ -21,6 +21,12 @@ The **Candy Remix** focuses on aligning the script with modern WME SDK standards
 
 ## Changelog
 
+### 2026.04.12
+
+- **Developer mode & Waze `not_listed` gating:** Seven quick taps on the **Active maps** title (within a few seconds) enables persisted **developer mode**. Catalog maps whose **Source & Waze** accreditation is **Not on Waze list** are hidden from **Maps to add** by default and cannot be added until developer mode is on. Turning developer mode off **locks** any such rows already in **Active maps** (lock icon, Waze layer menu checkbox disabled, sub-layer eyes disabled) until developer mode is on again. **Exit developer mode** is in the OpenMaps sidebar footer next to the help toggle.
+- **2026.04.12.2 — Session “I agree”:** With developer mode, those catalog maps can be added but stay off the canvas until **I agree** under **Source & Waze** (per session; cleared when developer mode turns off). A **Not Accredited** tag on the row opens that panel; the summary pill uses the same label; Waze accreditation copy and exit-developer confirm text were updated accordingly.
+- **2026.04.12.3 — I agree unlock + tag:** **I agree** now triggers a visible unlock: the gate calls the real in-panel **rebuild map layers** helper (it was previously out of scope from `applyWazeNotListedGate`, so layer UI stayed wrong). Consent is keyed by **`mapId`** with numeric/string parity; **I agree** is a native button with an immediate + deferred gate refresh. **Not Accredited** is an inline compact pill next to the title and hides after session agreement for that map.
+
 ### 2026.04.11
 
 - **Waze accreditation workflow:** Replaced mandatory in-script **Terms of Use** acceptance with a per-map **Source & Waze** section. **Provider terms** are optional informational links when the catalog defines a `touId`. **Waze** box shows accreditation status (vs [Map Data Attribution](https://support.google.com/waze/answer/12075833)), a link to that help page, and a prefilled [Open Source Data Layer Request](https://docs.google.com/forms/d/e/1FAIpQLSckKm-9hDRALxD2qhngvffzFppOS9C8FDD2w8yuiIE0En8Q8A/viewform) URL. Status for built-in layers comes from `OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION` (see `OPENMAPS_WAZE_ATTRIBUTION_VERIFICATION.md`). Removed ToU lock on the visibility control, sidebar ToU notice, **ToU pending** active-maps filter, **Revoke all terms** control, and background ToU fetch/revoke logic.
