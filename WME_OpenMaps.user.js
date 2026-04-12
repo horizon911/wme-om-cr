@@ -4804,12 +4804,6 @@ async function onWmeReady() {
       if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
         settings.inspectorAutoWmsGetFeatureInfo = true;
       }
-      if (!settings.state.userMaps) {
-        settings.state.userMaps = [];
-      }
-      if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
-        settings.inspectorAutoWmsGetFeatureInfo = true;
-      }
       return settings;
     },
     'put': function(obj) {
@@ -4845,23 +4839,6 @@ async function onWmeReady() {
       el.removeAttribute('data-original-title');
     }
 
-
-    function bsTooltipCtor() {
-      return (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) ? bootstrap.Tooltip : null;
-    }
-
-    function disposeBsTooltip(el) {
-      var T = bsTooltipCtor();
-      if (T) {
-        try {
-          var inst = T.getInstance(el);
-          if (inst) inst.dispose();
-        } catch (errD) { /* ignore */ }
-      }
-      el.removeAttribute('data-bs-original-title');
-      el.removeAttribute('data-original-title');
-    }
-
     return {
       'add': function(element, text, force, tooltipOpts) {
         var opts = Object.assign({}, defaultOpts, tooltipOpts || {});
@@ -4874,7 +4851,6 @@ async function onWmeReady() {
           elements.push(element);
           return;
         }
-        disposeBsTooltip(element);
         disposeBsTooltip(element);
         if (!force) {
           var i = elements.indexOf(element);
@@ -4907,20 +4883,11 @@ async function onWmeReady() {
       },
       'remove': function(element) {
         disposeBsTooltip(element);
-        disposeBsTooltip(element);
         element.title = '';
         var toRemoveIdx = elements.findIndex(function(el) { return el == element; });
         if (toRemoveIdx !== -1) {
           elements.splice(toRemoveIdx, 1);
         }
-      },
-      'hide': function(element) {
-        var T = bsTooltipCtor();
-        if (!T) return;
-        try {
-          var inst = T.getInstance(element);
-          if (inst) inst.hide();
-        } catch (errH) { /* ignore */ }
       },
       'hide': function(element) {
         var T = bsTooltipCtor();
@@ -4962,14 +4929,6 @@ async function onWmeReady() {
             } catch (err1) { /* ignore */ }
           }
           disposeBsTooltip(el);
-          var Th = bsTooltipCtor();
-          if (Th) {
-            try {
-              var ti = Th.getInstance(el);
-              if (ti) ti.hide();
-            } catch (err1) { /* ignore */ }
-          }
-          disposeBsTooltip(el);
           el.removeAttribute('data-original-title');
           el.removeAttribute('data-bs-original-title');
           var idx = elements.indexOf(el);
@@ -4985,13 +4944,11 @@ async function onWmeReady() {
         if (isEnabled) {
           elements.forEach(function(element) {
             disposeBsTooltip(element);
-            disposeBsTooltip(element);
             element.title = '';
           });
         } else {
           elements.forEach(function(element) {
             element.title = element.dataset.title;
-            Tooltips.add(element, element.dataset.title, false, {});
             Tooltips.add(element, element.dataset.title, false, {});
           });
         }
@@ -12072,31 +12029,6 @@ function onMapSort() {
     });
   }
 
-  function omCopyTextToClipboard(text) {
-    if (text == null) return Promise.reject(new Error('Nothing to copy'));
-    var s = String(text);
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(s);
-    }
-    return new Promise(function(resolve, reject) {
-      try {
-        var ta = document.createElement('textarea');
-        ta.value = s;
-        ta.setAttribute('readonly', '');
-        ta.style.cssText = 'position:fixed; top:-1000px; left:-1000px; opacity:0; pointer-events:none;';
-        document.body.appendChild(ta);
-        ta.select();
-        var ok = false;
-        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
-        document.body.removeChild(ta);
-        if (ok) resolve();
-        else reject(new Error('Copy failed'));
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-
   function createClipboardCopier(labelText, copyValue, compact) {
     var container = document.createElement('div');
     container.style.cssText = 'margin-bottom:10px; font-family:monospace; border-radius:4px; display:flex; justify-content:space-between; align-items:center; gap:8px;';
@@ -15518,98 +15450,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         });
         rmLeft.appendChild(capBtn);
       }
-
-      // --- Copy map definition (pasteable map entry) ---
-      var mapCopyMenuRoot = document.createElement('div');
-      mapCopyMenuRoot.className = 'open-maps-map-copy-menu-root';
-      mapCopyMenuRoot.style.cssText = 'position:relative; display:inline-block;';
-
-      var mapCopyBtn = createIconButton('fa-copy', I18n.t('openmaps.copy_map_definition_tooltip'), true);
-      var mapCopyPanel = document.createElement('div');
-      mapCopyPanel.className = 'open-maps-map-copy-menu-panel';
-      mapCopyPanel.setAttribute('role', 'menu');
-      mapCopyPanel.style.display = 'none';
-
-      function createMapCopyMenuItem(textKey, mode) {
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'open-maps-map-copy-menu-item';
-        btn.setAttribute('role', 'menuitem');
-        btn.textContent = I18n.t(textKey);
-        btn.addEventListener('click', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var snippet = buildMapDefinitionSnippet(mode);
-          omCopyTextToClipboard(snippet).then(function() {
-            closeMapCopyMenu();
-            var prev = btn.textContent;
-            btn.textContent = I18n.t('openmaps.copy_done');
-            setTimeout(function() { btn.textContent = prev; }, 1600);
-          });
-        });
-        return btn;
-      }
-
-      var mapCopyMenuOpen = false;
-      function positionMapCopyMenu() {
-        var rect = mapCopyBtn.getBoundingClientRect();
-        var pw = mapCopyPanel.offsetWidth || 260;
-        var sidebar = document.querySelector('#sidebar') || document.querySelector('#sidepanel') || document.body;
-        var srect = sidebar && sidebar.getBoundingClientRect ? sidebar.getBoundingClientRect() : null;
-        var minLeft = 8, maxLeft = (window.innerWidth - pw - 8);
-        if (srect) {
-          minLeft = Math.max(8, srect.left + 8);
-          maxLeft = Math.min(window.innerWidth - pw - 8, srect.right - pw - 8);
-        }
-        var left = rect.right - pw;
-        if (left < minLeft) left = minLeft;
-        if (left > maxLeft) left = maxLeft;
-        mapCopyPanel.style.left = left + 'px';
-        mapCopyPanel.style.top = (rect.bottom + 2) + 'px';
-      }
-      function closeMapCopyMenu() {
-        if (!mapCopyMenuOpen) return;
-        mapCopyMenuOpen = false;
-        mapCopyPanel.style.display = 'none';
-        document.removeEventListener('click', onDocCloseMapCopyMenu);
-        document.removeEventListener('keydown', onKeyMapCopyMenu);
-        window.removeEventListener('resize', closeMapCopyMenu);
-      }
-      function onDocCloseMapCopyMenu(ev) {
-        if (mapCopyMenuRoot.contains(ev.target)) return;
-        closeMapCopyMenu();
-      }
-      function onKeyMapCopyMenu(ev) {
-        if (ev.key === 'Escape') closeMapCopyMenu();
-      }
-      function openMapCopyMenu() {
-        mapCopyMenuOpen = true;
-        mapCopyPanel.style.display = 'block';
-        requestAnimationFrame(function() {
-          positionMapCopyMenu();
-          requestAnimationFrame(positionMapCopyMenu);
-        });
-        setTimeout(function() {
-          document.addEventListener('click', onDocCloseMapCopyMenu);
-          document.addEventListener('keydown', onKeyMapCopyMenu);
-          window.addEventListener('resize', closeMapCopyMenu);
-        }, 0);
-      }
-
-      mapCopyBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (mapCopyMenuOpen) closeMapCopyMenu();
-        else openMapCopyMenu();
-      });
-
-      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_all_keep_defaults', 'allKeepDefaults'));
-      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_all_make_enabled_default', 'allMakeEnabledDefault'));
-      mapCopyPanel.appendChild(createMapCopyMenuItem('openmaps.copy_map_definition_menu_enabled_only_make_default', 'enabledOnlyMakeDefault'));
-      mapCopyMenuRoot.appendChild(mapCopyBtn);
-      mapCopyMenuRoot.appendChild(mapCopyPanel);
-      rmLeft.appendChild(mapCopyMenuRoot);
-      // -----------------------------------------------
 
       // --- Copy map definition (pasteable map entry) ---
       var mapCopyMenuRoot = document.createElement('div');
