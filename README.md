@@ -11,7 +11,7 @@ The **Candy Remix** focuses on aligning the script with modern WME SDK standards
 * **Advanced Visual Adjustments:** Take full control of how layers render with native CSS blend modes (Multiply, Screen, Overlay, etc.), alongside real-time sliders for Opacity, Brightness, Contrast, Saturation, and Gamma.
 * **Modernized UI:** A rebuilt sidebar interface featuring clean metadata headers, easily comparable monospace bounding boxes, and compact avatar badges with regional flags.
 * **WME SDK Native:** Rewritten to utilize the official Waze Map Editor SDK, ensuring maximum stability and future-proofing against internal Waze rendering updates.
-* **Asynchronous Engine:** Background "Terms of Use" validation and map layer state synchronization are handled asynchronously to ensure the editor remains snappy and responsive.
+* **Asynchronous Engine:** Map layer state synchronization is handled asynchronously so the editor stays responsive. Per-map **Source & Waze** links Waze’s [Map Data Attribution](https://support.google.com/waze/answer/12075833) guidance and an optional prefilled [layer request form](https://docs.google.com/forms/d/e/1FAIpQLSckKm-9hDRALxD2qhngvffzFppOS9C8FDD2w8yuiIE0En8Q8A/viewform); provider terms are informational only and do not lock layers.
 
 ## Installation
 
@@ -20,6 +20,11 @@ The **Candy Remix** focuses on aligning the script with modern WME SDK standards
 3. Refresh the Waze Map Editor. The OpenMaps tab () will automatically appear in the left sidebar.
 
 ## Changelog
+
+### 2026.04.11
+
+- **Waze accreditation workflow:** Replaced mandatory in-script **Terms of Use** acceptance with a per-map **Source & Waze** section. **Provider terms** are optional informational links when the catalog defines a `touId`. **Waze** box shows accreditation status (vs [Map Data Attribution](https://support.google.com/waze/answer/12075833)), a link to that help page, and a prefilled [Open Source Data Layer Request](https://docs.google.com/forms/d/e/1FAIpQLSckKm-9hDRALxD2qhngvffzFppOS9C8FDD2w8yuiIE0En8Q8A/viewform) URL. Status for built-in layers comes from `OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION` (see `OPENMAPS_WAZE_ATTRIBUTION_VERIFICATION.md`). Removed ToU lock on the visibility control, sidebar ToU notice, **ToU pending** active-maps filter, **Revoke all terms** control, and background ToU fetch/revoke logic.
+- **Source & Waze polish (2026.04.11.2):** Google Form **editor name** prefill resolves the logged-in user from page **`W.loginManager`** (including Backbone-style models) and the script’s WME **SDK** instance; the **Waze** panel uses the same background/border palette as the accreditation pill; **Not on Waze list** copy explains practical limits on treating the overlay as a Waze-approved map source in WME.
 
 ### 2026.04.08
 

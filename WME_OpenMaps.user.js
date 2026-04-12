@@ -76,7 +76,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.08.3
+// @version     2026.04.11.2
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -89,7 +89,7 @@
 
 var styleElement;
 
-var OPEN_MAPS_VERSION = '2026.04.08.3';
+var OPEN_MAPS_VERSION = '2026.04.11.2';
 
 // Trusted Types / CSP hardening: avoid `innerHTML` where feasible.
 function openMapsClearEl(el) {
@@ -509,7 +509,24 @@ async function onWmeReady() {
       server_capabilities_error: 'Failed to reach server. Check console for details.',
       saved_layers_orphan_hint: '{n} saved layer name(s) were not found on the server and were removed.',
       saved_layers_orphan_hint_local: '{n} saved layer name(s) no longer match this map and were removed.',
-      terms_section_title: 'Terms of Use',
+      terms_section_title: 'Source & Waze',
+      source_provider_terms_box_title: 'Provider terms (informational)',
+      source_provider_terms_intro: 'Links to the data provider’s terms or license when supplied in the catalog.',
+      source_provider_no_tou_catalog: 'This map has no catalog provider-terms URL (touId is none or not registered).',
+      source_waze_accred_box_title: 'Waze accreditation',
+      waze_map_data_attribution_link: 'Map Data Attribution (Waze Help)',
+      waze_layer_request_form_link: 'Request layer (Google Form)',
+      waze_layer_request_form_purpose_line: 'OpenMaps catalog layer; requesting Waze accreditation per community process.',
+      waze_accred_badge_listed: 'On Waze list',
+      waze_accred_badge_partial: 'Partial match',
+      waze_accred_badge_not_listed: 'Not on Waze list',
+      waze_accred_badge_n_a: 'Supplier / N/A',
+      waze_accred_badge_unknown: 'Verify locally',
+      waze_accred_expl_listed: 'This attribution is explicitly named (or clearly matches) on Waze’s public Map Data Attribution page. Still follow local policy for overlays.',
+      waze_accred_expl_partial: 'Related to sources Waze lists for Flanders open data (names may differ from current agencies). Confirm in the help article before assuming coverage.',
+      waze_accred_expl_not_listed: 'Not Waze-accredited: this catalog attribution is not on Waze’s Map Data Attribution list. It is not permitted for use as an approved map reference in WME. To request accreditation, use the layer request link below. For Waze’s accredited third-party map sources, use the Map Data Attribution link below.',
+      waze_accred_expl_n_a_supplier: 'Waze / Google layers are map supplier data, not third-party bullets on that attribution list.',
+      waze_accred_expl_unknown: 'No scripted status (user map, missing attribution, or a new source). Verify against Waze’s Map Data Attribution page and local guidance yourself.',
       tou_section_status_accepted: 'Accepted',
       tou_section_status_required: 'Action required',
       tou_section_status_dismissed: 'Unverified (this session)',
@@ -623,7 +640,7 @@ async function onWmeReady() {
       user_maps_add_error_network: 'Could not download map data. Check the link and try again.',
       user_maps_add_error_parse: 'Could not parse KML. The map may use features this editor cannot read yet.',
       user_maps_kml_unsupported: 'This WME build has no KML parser (OpenLayers.Format.KML).',
-      user_maps_hint: 'Use the same URL you see in the address bar on google.com/maps/d/… (e.g. …/edit?mid=… or …/viewer?mid=…). OpenMaps loads the map geometry from Google automatically. Accept Google’s terms in map details before enabling.',
+      user_maps_hint: 'Use the same URL you see in the address bar on google.com/maps/d/… (e.g. …/edit?mid=… or …/viewer?mid=…). OpenMaps loads the map geometry from Google automatically. Review provider terms under Source & Waze in map details if needed.',
       user_maps_feature_retired_hint: 'Google My Maps is turned off in this script version — it repeatedly broke WME satellite imagery. Saved maps stay in storage but are not drawn or restored to the active list. Advanced users only: set unsafeWindow.__OPEN_MAPS_FORCE_GMM__ = true before the script loads, then in the console run localStorage.setItem("openmaps-enable-google-mymaps","1") and reload.',
       user_maps_force_unlock_instructions: 'My Maps is off in this script build, but you unlocked it with unsafeWindow.__OPEN_MAPS_FORCE_GMM__. Run localStorage.setItem("openmaps-enable-google-mymaps","1") on this tab, then reload WME. Remove openmaps-disable-google-mymaps if you set it.',
       user_maps_drawing_off_instructions: 'To draw My Maps on the map: run localStorage.setItem("openmaps-enable-google-mymaps","1") on this tab, then reload WME. If you set openmaps-disable-google-mymaps to 1 earlier, remove that key first.',
@@ -926,7 +943,9 @@ async function onWmeReady() {
         v2026_04_07_10: '- **KML fix:** `MapHandle` now exposes **`this.map`** (the map definition). KML folder styles and master sync had been no-ops because helpers read **`mapHandle.map`**, which was never set.',
         v2026_04_08_01: '- **Map Feature Styles:** Fix ESRI_FEATURE clickability bug by syncing layerKey logic in trySelectEsriFeatureFromClick with runViewportIndex. Add layerSpecificStyle to MapHandle, saveMapState, and buildEditPanel UI. Update appendOneLayerRow to toggle layer avatar hash colors based on layerSpecificStyle. Update openMapsEsriPointVectorStyle and parseFeaturesToOl to render round-in-round map symbols. Update Map Inspector styling helpers to reflect round-in-round logic when checked.',
         v2026_04_08_02: '- **KML + layer styles:** KML vector layers are included in map hit-testing (`pointer-events: none` capture path). Click/hover use the same `stableFeatureId` segment as Map Inspector (`kml_<folder>`), not `main`. "Use layer-specific styles" appears for **WMS**, **ESRI** (MapServer), **ESRI_FEATURE**, and KML; changing it calls **`notifyHandlesChanged`**. Single inner-ring ratio (**OPENMAPS_POINT_INNER_RADIUS_FRAC**) for list avatars, map points, and inspector lift symbols; ESRI_FEATURE hover/selection uses outer map color + inner layer hash when enabled; KML point/line highlights respect the checkbox (map-only stroke when off).',
-        v2026_04_08_03: '- **KML inner color parity:** Map symbols and inner rings use **`openMapsKmlResolvedFolderFillHex`** — same rule as Map Inspector (prefer folder **`openMapsKmlColorHex`** from KML Style when set, else title+folder hash). Fixes teal list vs green map when My Maps / KML defines an explicit folder color.'
+        v2026_04_08_03: '- **KML inner color parity:** Map symbols and inner rings use **`openMapsKmlResolvedFolderFillHex`** — same rule as Map Inspector (prefer folder **`openMapsKmlColorHex`** from KML Style when set, else title+folder hash). Fixes teal list vs green map when My Maps / KML defines an explicit folder color.',
+        v2026_04_11_01: '- **Waze accreditation:** Replaced mandatory Terms-of-Use acceptance with a per-map **Source & Waze** section (provider terms links are informational only). Shows accreditation vs Waze’s **Map Data Attribution** help page, link to that page, and a prefilled **Open Source Data Layer Request** Google Form. Catalog attribution status is driven by **`OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION`** (see `OPENMAPS_WAZE_ATTRIBUTION_VERIFICATION.md`). Removed ToU lock UI, sidebar notice, active-maps “ToU pending” filter, reset-all-terms control, and background ToU fetch/revoke logic.',
+        v2026_04_11_02: '- **Source & Waze:** Layer-request Google Form username prefill reads the editor name from **`unsafeWindow.W.loginManager`** / SDK **`User`** (Backbone-style models included). **Waze** box background and border track the same colors as the summary **accreditation** pill. **`Not on Waze list`** explanation now states what that means for using the overlay in WME (informal context vs treating it as an approved Waze-named source).'
       }
     },
     nl: {
@@ -991,7 +1010,24 @@ async function onWmeReady() {
       server_capabilities_error: 'Server niet bereikbaar. Zie console voor details.',
       saved_layers_orphan_hint: '{n} opgeslagen laagnaam(men) niet op de server gevonden en verwijderd.',
       saved_layers_orphan_hint_local: '{n} opgeslagen laagnaam(men) komen niet meer overeen met deze kaart en zijn verwijderd.',
-      terms_section_title: 'Gebruiksvoorwaarden',
+      terms_section_title: 'Bron & Waze',
+      source_provider_terms_box_title: 'Voorwaarden aanbieder (informatief)',
+      source_provider_terms_intro: 'Links naar de voorwaarden of licentie van de aanbieder wanneer die in de catalogus staan.',
+      source_provider_no_tou_catalog: 'Deze kaart heeft geen catalogus-URL voor aanbiedersvoorwaarden (touId is none of niet geregistreerd).',
+      source_waze_accred_box_title: 'Waze-accreditatie',
+      waze_map_data_attribution_link: 'Map Data Attribution (Waze Help)',
+      waze_layer_request_form_link: 'Laag aanvragen (Google Formulier)',
+      waze_layer_request_form_purpose_line: 'OpenMaps-cataloguslaag; Waze-accreditatie aanvragen volgens communityproces.',
+      waze_accred_badge_listed: 'Op Waze-lijst',
+      waze_accred_badge_partial: 'Gedeeltelijke match',
+      waze_accred_badge_not_listed: 'Niet op Waze-lijst',
+      waze_accred_badge_n_a: 'Leverancier / n.v.t.',
+      waze_accred_badge_unknown: 'Lokaal verifiëren',
+      waze_accred_expl_listed: 'Deze attributie staat expliciet (of duidelijk overeenkomend) op de openbare Waze-pagina Map Data Attribution. Volg nog steeds lokaal beleid voor overlays.',
+      waze_accred_expl_partial: 'Verwant aan bronnen die Waze vermeldt voor Vlaams open data (namen kunnen afwijken). Controleer het helpartikel voordat je dekking aanneemt.',
+      waze_accred_expl_not_listed: 'Niet Waze-geaccrediteerd: deze catalogusattributie staat niet op de Map Data Attribution-lijst van Waze. Gebruik als goedgekeurde kaartreferentie in WME is niet toegestaan. Accreditatie aanvragen: onderstaande link naar het laag-aanvraagformulier. Geaccrediteerde kaartbronnen: onderstaande Map Data Attribution-link.',
+      waze_accred_expl_n_a_supplier: 'Waze/Google-lagen zijn leveranciersdata, geen externe bullets op die attributielijst.',
+      waze_accred_expl_unknown: 'Geen scriptstatus (gebruikerskaart, ontbrekende attributie of nieuwe bron). Verifieer zelf met Waze Map Data Attribution en lokale richtlijnen.',
       tou_section_status_accepted: 'Geaccepteerd',
       tou_section_status_required: 'Actie vereist',
       tou_section_status_dismissed: 'Niet geverifieerd (deze sessie)',
@@ -1105,7 +1141,7 @@ async function onWmeReady() {
       user_maps_add_error_network: 'Kaartgegevens downloaden mislukt. Controleer de link en probeer opnieuw.',
       user_maps_add_error_parse: 'KML verwerken mislukt. De kaart gebruikt misschien elementen die deze editor nog niet leest.',
       user_maps_kml_unsupported: 'Deze WME-build heeft geen KML-parser (OpenLayers.Format.KML).',
-      user_maps_hint: 'Gebruik dezelfde URL als in de adresbalk op google.com/maps/d/… (bijv. …/edit?mid=… of …/viewer?mid=…). OpenMaps haalt de geometrie automatisch bij Google. Accepteer de voorwaarden in de kaartdetails voordat je inschakelt.',
+      user_maps_hint: 'Gebruik dezelfde URL als in de adresbalk op google.com/maps/d/… (bijv. …/edit?mid=… of …/viewer?mid=…). OpenMaps haalt de geometrie automatisch bij Google. Bekijk desnoods aanbiedersvoorwaarden onder Bron & Waze in de kaartdetails.',
       user_maps_feature_retired_hint: 'Google My Maps staat uit in deze scriptversie — het brak herhaaldelijk WME-satellietbeelden. Opgeslagen kaarten blijven in opslag maar worden niet getekend of niet teruggezet in de actieve lijst. Alleen gevorderde gebruikers: zet unsafeWindow.__OPEN_MAPS_FORCE_GMM__ = true vóór het script laadt, voer daarna in de console localStorage.setItem("openmaps-enable-google-mymaps","1") uit en herlaad.',
       user_maps_force_unlock_instructions: 'My Maps staat uit in deze scriptbuild, maar je hebt ontgrendeld met unsafeWindow.__OPEN_MAPS_FORCE_GMM__. Voer op dit tabblad localStorage.setItem("openmaps-enable-google-mymaps","1") uit en herlaad WME. Verwijder openmaps-disable-google-mymaps als je die gezet hebt.',
       user_maps_drawing_off_instructions: 'Om My Maps op de kaart te tekenen: voer op dit tabblad localStorage.setItem("openmaps-enable-google-mymaps","1") uit en herlaad WME. Als je eerder openmaps-disable-google-mymaps op 1 hebt gezet, verwijder die sleutel eerst.',
@@ -1409,7 +1445,9 @@ async function onWmeReady() {
         v2026_04_07_10: '- **KML-fix:** `MapHandle` exposeert nu **`this.map`** (de mapdefinitie). Mapstijlen/sync waren no-ops omdat helpers **`mapHandle.map`** lazen, wat nooit gezet was.',
         v2026_04_08_01: '- **Kaartstijlen:** "Laagspecifieke stijlen gebruiken" vinkje toegevoegd (visuele aanpassingen) voor ESRI_FEATURE. Klikbaarheid opgelost.',
         v2026_04_08_02: '- **KML + stijlen:** KML-vectorlagen tellen mee bij kaart-hit-testing; klik/hover gebruiken dezelfde laagsleutel als Map Inspector (`kml_<folder>`). Vinkje ook voor **WMS**, **ESRI** en KML; wijziging roept **`notifyHandlesChanged`** aan. Eén binnenring-verhouding voor lijst-, kaart- en highlight-symbolen; ESRI_FEATURE-hover volgt laaghashes als aan; KML-lijn/highlight respecteert uitgeschakelde laagstijlen.',
-        v2026_04_08_03: '- **KML binnenkleur:** Kaart en binnenring gebruiken dezelfde kleurkeuze als Map Inspector (KML-**Style**-hex indien aanwezig, anders hash).'
+        v2026_04_08_03: '- **KML binnenkleur:** Kaart en binnenring gebruiken dezelfde kleurkeuze als Map Inspector (KML-**Style**-hex indien aanwezig, anders hash).',
+        v2026_04_11_01: '- **Waze-accreditatie:** Verplichte acceptatie van gebruiksvoorwaarden vervangen door **Bron & Waze** per kaart (aanbiederslinks alleen informatief). Toont status t.o.v. Waze **Map Data Attribution**, link en vooringevuld Google Formulier. ToU-slot, zijbalkmelding, filter «Gebruiksvoorwaarden open», reset-knop en achtergrond-ToU-logica verwijderd.',
+        v2026_04_11_02: '- **Bron & Waze:** Voorinvullen van de editornaam in het Google Formulier via **`unsafeWindow.W.loginManager`** / SDK **User** (o.a. Backbone-modellen). Achtergrond en rand van het **Waze**-vak volgen de kleuren van de accreditatie-pill. **Niet op de Waze-lijst** legt nu uit wat dat betekent voor gebruik in WME (informele context vs. goedgekeurde bron).'
       }
     },
     fr: {
@@ -1419,7 +1457,25 @@ async function onWmeReady() {
       sidebar_wme_lock_respect: 'Verrouillage WME sous zoom 12',
       sidebar_unlock_low_zoom_tooltip: 'Permet d’utiliser la barre latérale droite (couches, scripts, etc.) en dessous du niveau de zoom 12. WME limite cela par défaut. Désactivez si le comportement devient étrange après une mise à jour.',
       sidebar_wme_lock_respect_tooltip: 'Rétablit le comportement WME par défaut pour la barre latérale droite sous le zoom 12.',
-      terms_section_title: 'Conditions d’utilisation',
+      terms_section_title: 'Source et Waze',
+      source_provider_terms_box_title: 'Conditions du fournisseur (information)',
+      source_provider_terms_intro: 'Liens vers les conditions ou la licence du fournisseur lorsque le catalogue les fournit.',
+      source_provider_no_tou_catalog: 'Cette carte n’a pas d’URL de conditions fournisseur dans le catalogue (touId absent ou non enregistré).',
+      source_waze_accred_box_title: 'Accréditation Waze',
+      waze_map_data_attribution_link: 'Map Data Attribution (aide Waze)',
+      waze_layer_request_form_link: 'Demander la couche (formulaire Google)',
+      waze_layer_request_form_purpose_line: 'Couche catalogue OpenMaps ; demande d’accréditation Waze selon le processus communautaire.',
+      waze_accred_badge_listed: 'Sur la liste Waze',
+      waze_accred_badge_partial: 'Correspondance partielle',
+      waze_accred_badge_not_listed: 'Pas sur la liste Waze',
+      waze_accred_badge_n_a: 'Fournisseur / n.d.',
+      waze_accred_badge_unknown: 'Vérifier localement',
+      waze_accred_expl_listed: 'Cette attribution est nommée explicitement (ou correspond clairement) sur la page publique Map Data Attribution de Waze. Respectez toujours la politique locale pour les superpositions.',
+      waze_accred_expl_partial: 'Lié aux sources que Waze cite pour les données ouvertes flamandes (les libellés peuvent différer). Vérifiez l’article d’aide avant d’assumer une couverture.',
+      waze_accred_expl_not_listed: 'Non accrédité Waze : cette attribution catalogue n’apparaît pas sur la page Map Data Attribution de Waze. Utilisation comme référence cartographique approuvée dans WME non autorisée. Demande d’accréditation : lien du formulaire ci-dessous. Sources cartographiques tierces accréditées : lien Map Data Attribution ci-dessous.',
+      waze_accred_expl_n_a_supplier: 'Les couches Waze/Google sont des données du fournisseur de carte, pas des entrées « tiers » sur cette liste d’attribution.',
+      waze_accred_expl_unknown: 'Pas de statut script (carte utilisateur, attribution manquante ou nouvelle source). Vérifiez vous-même avec Map Data Attribution et les consignes locales.',
+      user_maps_hint: 'Utilisez la même URL que dans la barre d’adresse sur google.com/maps/d/… (ex. …/edit?mid=… ou …/viewer?mid=…). OpenMaps charge la géométrie depuis Google. Consultez au besoin les conditions sous Source et Waze dans les détails de la carte.',
       tou_section_status_accepted: 'Accepté',
       tou_section_status_required: 'Action requise',
       tou_section_status_dismissed: 'Non vérifié (cette session)',
@@ -1488,7 +1544,9 @@ async function onWmeReady() {
         v2026_04_07_10: '- **Correctif KML :** `MapHandle` expose désormais **`this.map`** (définition de carte). Les styles/sync KML ne faisaient rien car les helpers lisaient **`mapHandle.map`**, jamais défini.',
         v2026_04_08_01: '- **Styles par couche :** case « Utiliser des styles spécifiques à la couche » pour ESRI_FEATURE ; sélection au clic corrigée (clé de couche alignée avec l’inspecteur).',
         v2026_04_08_02: '- **KML + styles :** les couches KML participent au test de collision sur la carte ; clic/survol utilisent la même clé **`kml_<dossier>`** que l’inspecteur. La case est aussi proposée pour **WMS**, **ESRI** (tuiles) et KML ; changement → **`notifyHandlesChanged`**. Rayon intérieur unifié pour pastilles liste / points carte / surbrillance ; surbrillance ESRI_FEATURE avec anneau intérieur par sous-couche si l’option est cochée ; lignes KML en couleur carte si l’option est décochée.',
-        v2026_04_08_03: '- **KML couleur intérieure :** carte et anneau intérieur utilisent la même règle que l’inspecteur (hex **Style** KML du dossier si présent, sinon hachage).'
+        v2026_04_08_03: '- **KML couleur intérieure :** carte et anneau intérieur utilisent la même règle que l’inspecteur (hex **Style** KML du dossier si présent, sinon hachage).',
+        v2026_04_11_01: '- **Accréditation Waze :** acceptation obligatoire des CGU remplacée par la section **Source et Waze** (liens fournisseur informatifs). Statut vs **Map Data Attribution**, lien et formulaire Google prérempli. Suppression du verrou ToU, de la bannière, du filtre « ToU en attente », du reset global et des contrôles réseau ToU.',
+        v2026_04_11_02: '- **Source et Waze :** préremplissage du nom d’éditeur du formulaire Google via **`unsafeWindow.W.loginManager`** / SDK **User** (modèles Backbone inclus). Fond et bordure du bloc **Waze** alignés sur la pillule d’**accréditation**. **Absent de la liste Waze** explique désormais la conséquence pour l’usage dans WME (contexte informel vs source approuvée).'
       }
     },
     'pt-BR': {
@@ -1541,7 +1599,25 @@ async function onWmeReady() {
       layer_catalog_loading: 'A carregar lista de camadas do servidor…',
       find_available_layers_loaded: 'Camadas disponíveis carregadas',
       find_available_layers_retry: 'Falha ao obter (clique para tentar de novo)',
-      terms_section_title: 'Termos de uso',
+      terms_section_title: 'Fonte e Waze',
+      source_provider_terms_box_title: 'Termos do fornecedor (informação)',
+      source_provider_terms_intro: 'Ligações aos termos ou licença do fornecedor quando o catálogo as inclui.',
+      source_provider_no_tou_catalog: 'Este mapa não tem URL de termos do fornecedor no catálogo (touId none ou não registado).',
+      source_waze_accred_box_title: 'Credenciação Waze',
+      waze_map_data_attribution_link: 'Map Data Attribution (ajuda Waze)',
+      waze_layer_request_form_link: 'Pedir camada (formulário Google)',
+      waze_layer_request_form_purpose_line: 'Camada de catálogo OpenMaps; pedido de credenciação Waze segundo o processo da comunidade.',
+      waze_accred_badge_listed: 'Na lista Waze',
+      waze_accred_badge_partial: 'Correspondência parcial',
+      waze_accred_badge_not_listed: 'Fora da lista Waze',
+      waze_accred_badge_n_a: 'Fornecedor / N/A',
+      waze_accred_badge_unknown: 'Verificar localmente',
+      waze_accred_expl_listed: 'Esta atribuição aparece explicitamente (ou corresponde claramente) na página pública Map Data Attribution da Waze. Siga ainda a política local para sobreposições.',
+      waze_accred_expl_partial: 'Relacionada com fontes que a Waze lista para dados abertos da Flandres (os nomes podem diferir). Confirme no artigo de ajuda antes de assumir cobertura.',
+      waze_accred_expl_not_listed: 'Sem credenciação Waze: esta atribuição de catálogo não consta na página Map Data Attribution da Waze. Não é permitido usá-la como referência de mapa aprovada no WME. Para pedir credenciação, use a ligação do formulário abaixo. Para as fontes de mapa de terceiros credenciadas pela Waze, use a ligação Map Data Attribution abaixo.',
+      waze_accred_expl_n_a_supplier: 'Camadas Waze/Google são dados do fornecedor do mapa, não entradas de terceiros nessa lista de atribuição.',
+      waze_accred_expl_unknown: 'Sem estado no script (mapa do utilizador, atribuição em falta ou fonte nova). Verifique com Map Data Attribution e orientação local.',
+      user_maps_hint: 'Use o mesmo URL da barra de endereço em google.com/maps/d/… (ex. …/edit?mid=… ou …/viewer?mid=…). O OpenMaps carrega a geometria a partir do Google. Se precisar, veja termos do fornecedor em Fonte e Waze nos detalhes do mapa.',
       tou_section_status_accepted: 'Aceito',
       tou_section_status_required: 'Ação necessária',
       tou_section_status_dismissed: 'Não verificado (esta sessão)',
@@ -1661,10 +1737,13 @@ async function onWmeReady() {
         v2026_04_07_10: '- **Correção KML:** `MapHandle` expõe agora **`this.map`** (definição do mapa). Estilos/sync KML não corriam porque os helpers liam **`mapHandle.map`**, que nunca era definido.',
         v2026_04_08_01: '- **Estilos por camada:** caixa « Usar estilos específicos da camada » para ESRI_FEATURE; clique no mapa corrigido (chave de camada alinhada ao inspector).',
         v2026_04_08_02: '- **KML + estilos:** vetores KML entram no teste de clique no mapa; clique/hover usam a mesma chave **`kml_<pasta>`** que o Map Inspector. A caixa também aparece para **WMS**, **ESRI** (mosaico) e KML; ao mudar chama-se **`notifyHandlesChanged`**. Proporção única do anel interno para avatares da lista, pontos no mapa e realces; realce ESRI_FEATURE com cor interna por subcamada quando ativo; linhas KML com cor do mapa quando desligado.',
-        v2026_04_08_03: '- **KML cor interna:** mapa e anel interno usam a mesma regra que o inspector (hex **Style** da pasta KML se existir, senão hash).'
+        v2026_04_08_03: '- **KML cor interna:** mapa e anel interno usam a mesma regra que o inspector (hex **Style** da pasta KML se existir, senão hash).',
+        v2026_04_11_01: '- **Credenciação Waze:** aceitação obrigatória de termos substituída pela secção **Fonte e Waze** (links do fornecedor só informativos). Mostra estado face a **Map Data Attribution**, ligação e formulário Google pré-preenchido. Removidos bloqueio ToU, aviso na barra lateral, filtro «ToU pendente», reset global e motor ToU em segundo plano.',
+        v2026_04_11_02: '- **Fonte e Waze:** pré-preenchimento do nome do editor no formulário Google via **`unsafeWindow.W.loginManager`** / SDK **User** (incl. modelos Backbone). Fundo e contorno da caixa **Waze** alinhados com a pill de **credenciação**. **Não consta na lista Waze** explica agora o que isso implica para uso no WME (contexto informal vs. fonte aprovada).'
       }
     }
   };
+  translations['nl-BE'] = translations.nl;
   translations['en-GB'] = translations['en-US'] = translations.en;
   I18n.translations[I18n.currentLocale()].openmaps = translations.en;
   Object.keys(translations).forEach(function(locale) {
@@ -4531,6 +4610,173 @@ async function onWmeReady() {
     'cz-cuzk': { name: 'ČÚZK Conditions for Network Services', links: { 'en': 'https://cuzk.gov.cz/English/Practical-Information/Conditions-of-Provision-for-Spatial-Data-and-Netwo/Conditions-for-Provision-of-CUZK-Network-Services.aspx', 'cs': 'https://www.cuzk.cz/Predpisy/Podminky-poskytovani-prostor-dat-a-sitovych-sluzeb/Podminky-poskytovani-prostorovych-dat-CUZK.aspx' }, selector: 'main' }
   };
 
+  /**
+   * Waze “Map Data Attribution” help page vs OpenMaps catalog `attribution` strings.
+   * @see OPENMAPS_WAZE_ATTRIBUTION_VERIFICATION.md (repository root — extend when adding catalog layers).
+   */
+  var OPEN_MAPS_WAZE_MAP_DATA_ATTRIBUTION_HELP_URL = 'https://support.google.com/waze/answer/12075833';
+  var OPEN_MAPS_WAZE_LAYER_REQUEST_FORM_BASE = 'https://docs.google.com/forms/d/e/1FAIpQLSckKm-9hDRALxD2qhngvffzFppOS9C8FDD2w8yuiIE0En8Q8A/viewform';
+
+  var OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION = {
+    'Waze / Google': 'n_a_supplier',
+    'MD iMAP': 'listed',
+    'Državna geodetska uprava Republike Hrvatske': 'listed',
+    'Agentschap Informatie Vlaanderen': 'partial',
+    'AIV': 'partial',
+    'MOW Vlaanderen': 'partial',
+    'Agentschap Digitaal Vlaanderen': 'partial'
+  };
+
+  function openMapsWazeAccreditationStatus(map) {
+    if (!map) return { code: 'unknown' };
+    if (map.source === 'user' || map.area === 'user') return { code: 'unknown' };
+    var attr = map.attribution != null ? String(map.attribution).trim() : '';
+    if (!attr) return { code: 'unknown' };
+    var mapped = OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION[attr];
+    if (mapped) return { code: mapped };
+    return { code: 'not_listed' };
+  }
+
+  function openMapsEncodeGoogleFormParam(str) {
+    if (str == null) return '';
+    return encodeURIComponent(String(str));
+  }
+
+  function openMapsTouRegistryPreferredTermsUrl(touId) {
+    if (!touId || touId === 'none') return '';
+    var reg = TOU_REGISTRY[touId];
+    if (!reg || !reg.links) return '';
+    if (reg.links.en) return reg.links.en;
+    var keys = Object.keys(reg.links);
+    return keys.length ? String(reg.links[keys[0]] || '') : '';
+  }
+
+  function openMapsPickWmeUsernameString(val) {
+    if (val == null) return '';
+    if (typeof val === 'number' && !isNaN(val)) return String(val).trim();
+    if (typeof val === 'string') {
+      var s = val.trim();
+      return s || '';
+    }
+    if (typeof val === 'object') {
+      var o = val;
+      if (typeof o.get === 'function') {
+        var gKeys = ['userName', 'username', 'name', 'nickName', 'nick_name', 'displayName', 'display_name', 'rawUserName', 'login'];
+        for (var gi = 0; gi < gKeys.length; gi++) {
+          try {
+            var gv = o.get(gKeys[gi]);
+            if (gv != null && gv !== o) {
+              var gs = openMapsPickWmeUsernameString(gv);
+              if (gs) return gs;
+            }
+          } catch (eGk) { /* ignore */ }
+        }
+      }
+      try {
+        if (o.attributes && typeof o.attributes === 'object' && o.attributes !== o) {
+          var ga = openMapsPickWmeUsernameString(o.attributes);
+          if (ga) return ga;
+        }
+      } catch (eAttr) { /* ignore */ }
+      try {
+        if (o.user && typeof o.user === 'object' && o.user !== o) {
+          var gu = openMapsPickWmeUsernameString(o.user);
+          if (gu) return gu;
+        }
+      } catch (eUsr) { /* ignore */ }
+      var cand = o.userName != null ? o.userName : (o.username != null ? o.username : (o.name != null ? o.name : (o.user_name != null ? o.user_name : (o.displayName != null ? o.displayName : (o.display_name != null ? o.display_name : (o.nickName != null ? o.nickName : (o.login != null ? o.login : '')))))));
+      return openMapsPickWmeUsernameString(cand);
+    }
+    return '';
+  }
+
+  /** WME editor username for prefilled forms (best-effort across W.loginManager and SDK). */
+  function openMapsGetWazeEditorUsername() {
+    function tryFromW(Wref) {
+      if (!Wref || !Wref.loginManager) return '';
+      var lm = Wref.loginManager;
+      try {
+        if (lm.userName != null || lm.username != null) {
+          var d0 = openMapsPickWmeUsernameString(lm.userName != null ? lm.userName : lm.username);
+          if (d0) return d0;
+        }
+      } catch (eD0) { /* ignore */ }
+      try {
+        if (typeof lm.getUserName === 'function') {
+          var a = openMapsPickWmeUsernameString(lm.getUserName());
+          if (a) return a;
+        }
+      } catch (eA) { /* ignore */ }
+      try {
+        if (typeof lm.getUser === 'function') {
+          var b = openMapsPickWmeUsernameString(lm.getUser());
+          if (b) return b;
+        }
+      } catch (eB) { /* ignore */ }
+      try {
+        if (lm.user) {
+          var c = openMapsPickWmeUsernameString(lm.user);
+          if (c) return c;
+        }
+      } catch (eC) { /* ignore */ }
+      return '';
+    }
+    try {
+      if (typeof unsafeWindow !== 'undefined' && unsafeWindow.W) {
+        var wu0 = tryFromW(unsafeWindow.W);
+        if (wu0) return wu0;
+      }
+    } catch (eUw) { /* ignore */ }
+    try {
+      if (typeof W === 'object' && W) {
+        var wu = tryFromW(W);
+        if (wu) return wu;
+      }
+    } catch (e0) { /* ignore */ }
+    try {
+      var sdk = openMapsWmeSdk || openMapsGetWmeSdkOnce();
+      if (sdk && sdk.User) {
+        var U = sdk.User;
+        if (typeof U.getUserName === 'function') {
+          var u1 = openMapsPickWmeUsernameString(U.getUserName());
+          if (u1) return u1;
+        }
+        if (typeof U.getUsername === 'function') {
+          var u2 = openMapsPickWmeUsernameString(U.getUsername());
+          if (u2) return u2;
+        }
+        if (typeof U.getLoggedInUser === 'function') {
+          var u3 = openMapsPickWmeUsernameString(U.getLoggedInUser());
+          if (u3) return u3;
+        }
+        if (typeof U.getCurrentUser === 'function') {
+          var u4 = openMapsPickWmeUsernameString(U.getCurrentUser());
+          if (u4) return u4;
+        }
+      }
+    } catch (e3) { /* ignore */ }
+    return '';
+  }
+
+  function openMapsBuildLayerRequestFormUrl(map) {
+    if (!map) return OPEN_MAPS_WAZE_LAYER_REQUEST_FORM_BASE + '?usp=pp_url';
+    var q = ['usp=pp_url'];
+    q.push('entry.1098391018=' + openMapsEncodeGoogleFormParam(map.title != null ? map.title : ''));
+    q.push('entry.563772859=' + openMapsEncodeGoogleFormParam(map.url != null ? map.url : ''));
+    var typeStr = map.type != null ? String(map.type) : '';
+    q.push('entry.1280812668=' + openMapsEncodeGoogleFormParam(typeStr));
+    var touLink = openMapsTouRegistryPreferredTermsUrl(map.touId);
+    if (touLink) q.push('entry.397977399=' + openMapsEncodeGoogleFormParam(touLink));
+    q.push('entry.1928191016=' + openMapsEncodeGoogleFormParam(I18n.t('openmaps.waze_layer_request_form_purpose_line')));
+    var ctx = 'attribution=' + (map.attribution != null ? String(map.attribution) : '') +
+      '; id=' + (map.id != null ? String(map.id) : '') +
+      '; area=' + (map.area != null ? String(map.area) : '');
+    q.push('entry.1346401512=' + openMapsEncodeGoogleFormParam(ctx));
+    var wu = openMapsGetWazeEditorUsername();
+    if (wu) q.push('entry.238118795=' + openMapsEncodeGoogleFormParam(wu));
+    return OPEN_MAPS_WAZE_LAYER_REQUEST_FORM_BASE + '?' + q.join('&');
+  }
+
   var Settings = {
     'get': function() {
       var settings;
@@ -4549,13 +4795,6 @@ async function onWmeReady() {
       if (!settings.state.active) {
         settings.state.active = [];
     }
-      // NEW: Ensure accepted ToUs object exists
-      if (!settings.state.acceptedToUs) {
-        settings.state.acceptedToUs = {};
-      }
-      if (!settings.state.touUnreachableBypass) {
-        settings.state.touUnreachableBypass = {};
-      }
       if (!settings.state.favoriteMapIds) {
         settings.state.favoriteMapIds = [];
       }
@@ -4585,156 +4824,6 @@ async function onWmeReady() {
       return typeof localStorage.OpenMaps != 'undefined';
     }
   };
-
-// --- TERMS OF USE HELPER ---
-  var touUnreachableSessionDismissed = Object.create(null);
-
-  function isTouAccepted(touId) {
-    if (touId === 'none') return true; // Explicitly declared as no ToU required
-    if (!touId || !TOU_REGISTRY[touId]) return false; // Missing or invalid ToU = LOCKED
-    var s = Settings.get();
-    if (s.state.acceptedToUs && s.state.acceptedToUs[touId]) return true;
-    return !!touUnreachableSessionDismissed[touId];
-  }
-
-  function hasStoredTouAcceptance(touId) {
-    if (touId === 'none') return true;
-    if (!touId || !TOU_REGISTRY[touId]) return false;
-    var s = Settings.get();
-    return !!(s.state.acceptedToUs && s.state.acceptedToUs[touId]);
-  }
-
-// --- MODERN ASYNC REQUEST WRAPPER ---
-  const omFetch = (options) => new Promise((resolve, reject) => {
-    GM_xmlhttpRequest({ ...options, onload: resolve, onerror: reject, ontimeout: reject });
-  });
-
-  function formatTouFetchError(err) {
-    if (err == null) return 'Request failed';
-    if (typeof err === 'string') return err;
-    if (typeof err === 'object') {
-      if (err.message) return String(err.message);
-      if (err.error) return String(err.error);
-      if (err.statusText) return String(err.statusText);
-      if (err.status != null) return 'Request failed (HTTP ' + err.status + ')';
-    }
-    return String(err);
-  }
-
-  function formatTouUnreachableDetail(res) {
-    var msg = res.msg;
-    if (msg != null && typeof msg === 'object') {
-      msg = msg.message || msg.error || JSON.stringify(msg);
-    }
-    msg = (msg == null || msg === '') ? 'Network or connection error.' : String(msg);
-    if (res.httpStatus != null) {
-      return 'HTTP ' + res.httpStatus + ' — ' + msg.replace(/^HTTP\s+\d+\s*[—\-]?\s*/i, '');
-    }
-    return msg;
-  }
-
-  /** Fetch ToU URL without requiring prior acceptance (for first-load UI probe). */
-  async function probeToUReachability(touId, callback) {
-    var result;
-    const touObj = TOU_REGISTRY[touId];
-    if (!touObj) {
-      result = { status: 'invalid' };
-    } else {
-      const checkUrl = touObj.links[Object.keys(touObj.links)[0]];
-      try {
-        const res = await omFetch({ method: 'GET', url: checkUrl, timeout: 10000 });
-        if (res.status !== 200) {
-          result = { status: 'unreachable', httpStatus: res.status, msg: 'HTTP ' + res.status };
-        } else {
-          const doc = new DOMParser().parseFromString(res.responseText, 'text/html');
-          const el = doc.querySelector(touObj.selector) || doc.body;
-          if (!el) {
-            result = { status: 'unreachable', httpStatus: res.status, msg: 'Selector not found' };
-          } else {
-            el.querySelectorAll('script, style, svg, nav, footer, header').forEach(function(n) { n.remove(); });
-            var currentLen = el.textContent.replace(/\s+/g, ' ').trim().length;
-            result = { status: 'ok', len: currentLen };
-          }
-        }
-      } catch (err) {
-        result = { status: 'unreachable', msg: formatTouFetchError(err) };
-      }
-    }
-    if (callback) callback(result);
-    return result;
-  }
-
-  async function performToUCheck(touId, force, callback) {
-    const s = Settings.get();
-    const touObj = TOU_REGISTRY[touId];
-    if (!touObj || !s.state.acceptedToUs?.[touId]) return callback?.({ status: 'ignored' });
-
-    let accData = s.state.acceptedToUs[touId];
-    const now = Date.now();
-    const checkInterval = 30 * 24 * 60 * 60 * 1000;
-
-    // Upgrade legacy format
-    if (typeof accData === 'number') {
-      accData = { acceptedAt: accData, lastChecked: 0, length: 0 };
-    }
-
-    if (force || now - accData.lastChecked > checkInterval || accData.length === 0) {
-      try {
-        const checkUrl = touObj.links[Object.keys(touObj.links)[0]];
-        const res = await omFetch({ method: 'GET', url: checkUrl, timeout: 10000 });
-
-        if (res.status !== 200) {
-          callback?.({ status: 'unreachable', httpStatus: res.status, msg: 'HTTP ' + res.status });
-          return;
-        }
-
-        const doc = new DOMParser().parseFromString(res.responseText, "text/html");
-        const el = doc.querySelector(touObj.selector) || doc.body;
-
-        if (!el) {
-          callback?.({ status: 'unreachable', httpStatus: res.status, msg: 'Selector not found' });
-          return;
-        }
-
-        // Clean noise
-        el.querySelectorAll('script, style, svg, nav, footer, header').forEach(n => n.remove());
-        const currentLen = el.textContent.replace(/\s+/g, ' ').trim().length;
-
-        if (accData.length === 0) {
-          accData = { ...accData, length: currentLen, lastChecked: now };
-          s.state.acceptedToUs[touId] = accData;
-          Settings.put(s);
-          window.dispatchEvent(new CustomEvent('om-tou-sync', { detail: { touId, accepted: true } }));
-          callback?.({ status: 'baseline', len: currentLen });
-        } else {
-          const diff = Math.abs(currentLen - accData.length) / accData.length;
-          if (diff > 0.03) {
-            delete s.state.acceptedToUs[touId];
-            Settings.put(s);
-            window.dispatchEvent(new CustomEvent('om-tou-sync', { detail: { touId, accepted: false } }));
-            callback?.({ status: 'revoked', diff });
-          } else {
-            accData.lastChecked = now;
-            s.state.acceptedToUs[touId] = accData;
-            Settings.put(s);
-            window.dispatchEvent(new CustomEvent('om-tou-sync', { detail: { touId, accepted: true } }));
-            callback?.({ status: 'unchanged', len: currentLen, diff });
-          }
-        }
-      } catch (err) {
-        callback?.({ status: 'unreachable', msg: formatTouFetchError(err) });
-      }
-    } else {
-      callback?.({ status: 'skipped' });
-    }
-  }
-  function runToUBackgroundChecks() {
-    var s = Settings.get();
-    if (!s.state.acceptedToUs) return;
-    Object.keys(s.state.acceptedToUs).forEach(function(touId) {
-      performToUCheck(touId, false); // Trigger silent background check
-    });
-  }
 
   var Tooltips = (function() {
     var elements = [];
@@ -5167,7 +5256,6 @@ async function onWmeReady() {
     if (visCount === 0) reasons.push('no visible Map layers sub-row (all folder eyes off or mapLayers empty)');
     if (mapHandle.hidden) reasons.push('Active Maps row hidden (main eye)');
     if (mapHandle.outOfArea) reasons.push('handle.outOfArea');
-    if (!isTouAccepted(mapHandle.map.touId)) reasons.push('Terms of use not accepted for touId=' + String(mapHandle.map.touId));
     if (mapHandle.map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
       reasons.push('Google My Maps integration disabled (localStorage opt-in)');
     }
@@ -5240,7 +5328,6 @@ async function onWmeReady() {
     });
     if (visCount === 0) return false;
     if (mapHandle.hidden || mapHandle.outOfArea) return false;
-    if (!isTouAccepted(mapHandle.map.touId)) return false;
     if (mapHandle.map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) return false;
     return true;
   }
@@ -7666,7 +7753,7 @@ async function onWmeReady() {
         var restBase = openMapsArcgisRestBaseFromWmsUrl(mw.url || '');
         if (!restBase) continue;
         if (hw.wmsArcgisRestViewportProbe === false) continue;
-        if (hw.hidden || hw.outOfArea || !isTouAccepted(mw.touId)) continue;
+        if (hw.hidden || hw.outOfArea) continue;
         if (!hw.mapLayers || !hw.mapLayers.length) continue;
         var mapTitleW = mw.title || String(hw.mapId);
         for (var miw = 0; miw < hw.mapLayers.length; miw++) {
@@ -9550,8 +9637,7 @@ async function onWmeReady() {
     { v: 'all', t: I18n.t('openmaps.active_maps_filter_all') },
     { v: 'favorites', t: I18n.t('openmaps.active_maps_filter_favorites') },
     { v: 'in_view', t: I18n.t('openmaps.active_maps_filter_in_view') },
-    { v: 'visible', t: I18n.t('openmaps.active_maps_filter_visible') },
-    { v: 'tou_pending', t: I18n.t('openmaps.active_maps_filter_tou_pending') }
+    { v: 'visible', t: I18n.t('openmaps.active_maps_filter_visible') }
   ].forEach(function(o) {
     var opt = document.createElement('option');
     opt.value = o.v;
@@ -11273,26 +11359,6 @@ function onMapSort() {
   footer.appendChild(hideTooltips);
   tab.appendChild(footer);
 
-  var resetTermsGlobalBox = document.createElement('div');
-  resetTermsGlobalBox.className = 'open-maps-reset-all-terms-global';
-  resetTermsGlobalBox.style.cssText = 'margin-top: 14px; padding-top: 12px; border-top: 1px dotted #ccc;';
-  var resetTermsGlobalBtn = document.createElement('wz-button');
-  resetTermsGlobalBtn.className = 'openmaps-wz-btn-compact';
-  resetTermsGlobalBtn.setAttribute('color', 'secondary');
-  resetTermsGlobalBtn.setAttribute('size', 'sm');
-  resetTermsGlobalBtn.style.cssText = 'width:100%; text-align:left;';
-  resetTermsGlobalBtn.innerHTML = '<i class="fa fa-history" aria-hidden="true"></i> ' + I18n.t('openmaps.reset_terms_button');
-  resetTermsGlobalBtn.addEventListener('click', function() {
-    if (confirm(I18n.t('openmaps.reset_terms_confirm'))) {
-      var s = Settings.get();
-      s.state.acceptedToUs = {};
-      Settings.put(s);
-      location.reload();
-    }
-  });
-  resetTermsGlobalBox.appendChild(resetTermsGlobalBtn);
-  tab.appendChild(resetTermsGlobalBox);
-
   //#endregion
 
   //#region Implement map query support
@@ -12225,10 +12291,6 @@ function getNotAddedMaps() {
       if (show && mode === 'favorites' && !isMapFavorite(h.mapId)) show = false;
       if (show && mode === 'in_view' && h.outOfArea) show = false;
       if (show && mode === 'visible' && !(h.layer && h.layer.getVisibility())) show = false;
-      if (show && mode === 'tou_pending') {
-        var touPending = map.touId !== 'none' && TOU_REGISTRY[map.touId] && !isTouAccepted(map.touId);
-        if (!touPending) show = false;
-      }
       node.style.display = show ? '' : 'none';
       node.setAttribute('aria-hidden', show ? 'false' : 'true');
       if (show) anyShown = true;
@@ -12254,24 +12316,6 @@ function getNotAddedMaps() {
     }
   }
 
-  function showTouGateNotice(mapTitle) {
-    var touNotice = document.createElement('div');
-    touNotice.className = 'openmaps-sidebar-notice openmaps-sidebar-notice--tou';
-    touNotice.setAttribute('role', 'status');
-    var touNoticeMsg = document.createElement('div');
-    touNoticeMsg.className = 'openmaps-sidebar-notice-message';
-    touNoticeMsg.textContent = I18n.t('openmaps.tou_gate_banner').replace(/\{title\}/g, mapTitle);
-    var touNoticeDismiss = document.createElement('wz-button');
-    touNoticeDismiss.className = 'openmaps-wz-btn-compact';
-    touNoticeDismiss.setAttribute('size', 'sm');
-    touNoticeDismiss.setAttribute('color', 'secondary');
-    touNoticeDismiss.textContent = I18n.t('openmaps.notice_dismiss');
-    touNoticeDismiss.addEventListener('click', function() { touNotice.remove(); });
-    touNotice.appendChild(touNoticeMsg);
-    touNotice.appendChild(touNoticeDismiss);
-    tab.insertBefore(touNotice, tab.firstChild);
-  }
-
 function selectMapToAdd(mapId) {
     var addedMap = maps.get(mapId);
     if (!addedMap && mapId != null && mapId !== '') {
@@ -12295,9 +12339,6 @@ function selectMapToAdd(mapId) {
     handles.push(new MapHandle(addedMap));
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
-    if (addedMap.touId !== 'none' && TOU_REGISTRY[addedMap.touId] && !isTouAccepted(addedMap.touId)) {
-      showTouGateNotice(addedMap.title);
-    }
     saveMapState();
     addMapInput.value = '';
     hideAddMapSuggestions();
@@ -13296,9 +13337,6 @@ function loadTileError(tile, callback) {
     if (!restoredMap || restoredMap.type === 'LOCAL_KML') return true;
     if (restoredMap.type !== 'GOOGLE_MY_MAPS') return true;
     if (!openMapsGoogleMyMapsIntegrationEnabled()) return false;
-    try {
-      if (!isTouAccepted(restoredMap.touId) && persistedActiveRow.hidden) return false;
-    } catch (eTouR) { /* ignore */ }
     return true;
   }
   if (Settings.exists()) {
@@ -13330,9 +13368,6 @@ function loadTileError(tile, callback) {
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
   }
   //#endregion
-
-  // --- NEW: Trigger the Background ToU Engine on boot! ---
-  runToUBackgroundChecks();
 
   // FIX: Force the search list to recalculate AFTER saved maps are restored!
   updateMapSelector();
@@ -13378,8 +13413,7 @@ function loadTileError(tile, callback) {
               if (l && l.visible) visNames.push(l.name);
             });
           }
-          var touOk = isTouAccepted(m.touId);
-          var eligVec = openMapsGoogleMyMapsIntegrationEnabled() && visNames.length > 0 && !h.hidden && !h.outOfArea && touOk;
+          var eligVec = openMapsGoogleMyMapsIntegrationEnabled() && visNames.length > 0 && !h.hidden && !h.outOfArea;
           gmmRows.push({
             mapId: h.mapId,
             title: m.title,
@@ -13387,7 +13421,7 @@ function loadTileError(tile, callback) {
             hidden: !!h.hidden,
             outOfArea: !!h.outOfArea,
             sublayersOn: visNames,
-            touAccepted: touOk,
+            touAccepted: true,
             hasOlVector: !!h.layer,
             eligibleForOlVector: eligVec,
             kmlUrlPrefix: m.url ? String(m.url).slice(0, 96) : null
@@ -13756,11 +13790,6 @@ function MapHandle(map, options) {
     /** 'server' | 'local' | undefined — which i18n string to use for orphan hint */
     this._orphanHintKind = undefined;
     this._layerCatalogAppliedOnce = false;
-    // NEW: Enforce ToU Lock on Boot
-    if (!isTouAccepted(map.touId)) {
-      this.hidden = true; // Force hidden if terms not accepted OR config is broken
-    }
-
     // Bounding Box Math (Safely split to prevent OpenLayers NaN corruption)
     this.area = new OpenLayers.Bounds(map.bbox[0], map.bbox[1], map.bbox[2], map.bbox[3]).transform(new OpenLayers.Projection('EPSG:4326'), W.map.getProjectionObject());
     const currentExtent = getMapExtent();
@@ -13768,7 +13797,7 @@ function MapHandle(map, options) {
     this.outOfArea = kmlVectorOverlay ? false : (currentExtent ? !this.area.intersectsBounds(currentExtent) : true);
 
     // UI Element References
-    var UI = { touDetails: null, mapLayersNoActiveMark: null, mapLayersSubContainer: null, mapLayersDetailsRoot: null, orphanHintEl: null, layerCatalogLoadingEl: null };
+    var UI = { touDetails: null, syncSourceWazeSection: null, mapLayersNoActiveMark: null, mapLayersSubContainer: null, mapLayersDetailsRoot: null, orphanHintEl: null, layerCatalogLoadingEl: null };
 
     function getLayerMeta(name) {
       if (map.layers[name]) {
@@ -14195,16 +14224,6 @@ var handle = document.createElement('div');
       var buttons = document.createElement('div');
       buttons.className = 'buttons';
 
-      UI.touPendingBtn = createOrangeExclaimButton(I18n.t('openmaps.tou_pending_hint'), true);
-      UI.touPendingBtn.style.display = (map.touId !== 'none' && TOU_REGISTRY[map.touId] && !isTouAccepted(map.touId)) ? 'flex' : 'none';
-      UI.touPendingBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        UI.editContainer.style.display = 'block';
-        UI.editBtn.style.transform = 'rotate(180deg)';
-        if (UI.touDetails) UI.touDetails.open = true;
-      });
-      buttons.appendChild(UI.touPendingBtn);
-
       UI.noLayersWarningBtn = createOrangeExclaimButton(I18n.t('openmaps.no_layers_enabled_hint'), true);
       UI.noLayersWarningBtn.style.display = 'none';
       UI.noLayersWarningBtn.addEventListener('click', function(e) {
@@ -14279,24 +14298,11 @@ UI.zoomToBboxBtn.addEventListener('click', function(e) {
       }
 
 // --- SMART VISIBILITY TOGGLE ---
-      var lockIcon = !isTouAccepted(map.touId) ? 'fa-lock' : (self.hidden ? 'fa-eye-slash' : 'fa-eye');
-      UI.visibility = createIconButton(lockIcon, !isTouAccepted(map.touId) ? I18n.t('openmaps.visibility_locked_tou') : I18n.t('openmaps.hideshow_layer'));
-
-      if (!isTouAccepted(map.touId)) {
-        UI.visibility.style.color = '#d93025'; // Make lock red
-      }
+      var visIcon = self.hidden ? 'fa-eye-slash' : 'fa-eye';
+      UI.visibility = createIconButton(visIcon, I18n.t('openmaps.hideshow_layer'));
 
       UI.visibility.addEventListener('click', function(e) {
         if (e) e.stopPropagation();
-
-        if (!isTouAccepted(map.touId)) {
-          // Force open the edit panel AND ensure the ToU section is visible!
-          UI.editContainer.style.display = 'block';
-          if (UI.touDetails) UI.touDetails.open = true;
-          return;
-        }
-
-        // If the map is currently hidden (true), pass 'true' to tell the controller we want it visible!
         self.setManualVisibility(self.hidden);
       });
       buttons.appendChild(UI.visibility);
@@ -14399,20 +14405,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         UI.zoomMetaLine.style.cssText = 'margin-top: 4px; font-size: 10px; color: #70757a; line-height: 1.35; font-family: monospace, monospace;';
         metaBox.appendChild(UI.zoomMetaLine);
         Tooltips.add(UI.zoomMetaLine, I18n.t('openmaps.zoom_meta_tooltip'), true);
-      }
-      if (map.abstract) {
-        var about = document.createElement('details');
-        about.className = 'openmaps-map-about';
-        about.style.cssText = 'margin-top:8px; border:1px solid #e8eaed; border-radius:8px; padding:6px 8px; background:#fff;';
-        var aboutSum = document.createElement('summary');
-        aboutSum.style.cssText = 'cursor:pointer; font-weight:600; color:#3c4043; outline:none;';
-        aboutSum.textContent = I18n.t('openmaps.about');
-        var aboutBody = document.createElement('div');
-        aboutBody.style.cssText = 'margin-top:6px; font-style: italic; color: #70757a; line-height:1.35;';
-        aboutBody.textContent = map.abstract;
-        about.appendChild(aboutSum);
-        about.appendChild(aboutBody);
-        metaBox.appendChild(about);
       }
       UI.editContainer.appendChild(metaBox);
 
@@ -15378,356 +15370,141 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         }
         saveMapState();
       }
-        // --- TERMS OF USE (collapsible section, same pattern as Visual adjustments / Map layers)
-      if (map.touId !== 'none') {
-        var isConfigValid = map.touId && TOU_REGISTRY[map.touId];
-        var touUnlocked = isConfigValid ? isTouAccepted(map.touId) : false;
+        // --- Source & Waze (provider terms links + Waze accreditation; always shown)
+        var sourceDetails = document.createElement('details');
+        sourceDetails.className = 'open-maps-source-waze-details';
+        sourceDetails.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
+        UI.touDetails = sourceDetails;
 
-        var touDetails = document.createElement('details');
-        touDetails.className = 'open-maps-tou-details';
-        touDetails.style.cssText = 'margin-top:10px; border:1px solid #dadce0; border-radius:8px; padding:5px; background:#f8f9fa;';
-        UI.touDetails = touDetails;
+        var sourceSummary = document.createElement('summary');
+        sourceSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none; display:flex; align-items:center; flex-wrap:wrap; gap:6px;';
+        var sourceSummaryIcon = document.createElement('i');
+        sourceSummaryIcon.className = 'fa fa-info-circle';
+        sourceSummaryIcon.style.cssText = 'margin-right:2px; color:#5f6368;';
+        sourceSummaryIcon.setAttribute('aria-hidden', 'true');
+        sourceSummary.appendChild(sourceSummaryIcon);
+        sourceSummary.appendChild(document.createTextNode(I18n.t('openmaps.terms_section_title')));
+        var accBadge = document.createElement('span');
+        accBadge.className = 'open-maps-waze-accred-badge';
+        accBadge.style.cssText = 'font-size:10px; font-weight:600; padding:2px 6px; border-radius:10px; margin-left:4px; white-space:nowrap;';
+        sourceSummary.appendChild(accBadge);
+        sourceDetails.appendChild(sourceSummary);
 
-        var touSummary = document.createElement('summary');
-        touSummary.style.cssText = 'font-weight:600; cursor:pointer; padding:5px; color:#3c4043; outline:none; display:flex; align-items:center; flex-wrap:wrap; gap:4px;';
-        var touSummaryLeadIcon = document.createElement('i');
-        touSummaryLeadIcon.className = 'fa fa-balance-scale';
-        touSummaryLeadIcon.style.cssText = 'margin-right:4px; color:#5f6368;';
-        touSummaryLeadIcon.setAttribute('aria-hidden', 'true');
-        touSummary.appendChild(touSummaryLeadIcon);
-        touSummary.appendChild(document.createTextNode(I18n.t('openmaps.terms_section_title')));
-        var touSummaryStatus = document.createElement('span');
-        touSummaryStatus.className = 'open-maps-tou-summary-status';
-        touSummaryStatus.style.cssText = 'font-weight:600; margin-left:6px;';
-        touSummary.appendChild(touSummaryStatus);
-        touDetails.appendChild(touSummary);
-
-        var touReadTermsProbeStatus = null;
-
-        var touProbeUiState = 'checking';
-        var touProbeVerifiedAt = 0;
-        var touProbeFailDetail = '';
-
-        function syncTouReadTermsProbeIndicator() {
-          if (!touReadTermsProbeStatus) return;
-          Tooltips.remove(touReadTermsProbeStatus);
-          touReadTermsProbeStatus.innerHTML = '';
-          if (!isConfigValid) {
-            touReadTermsProbeStatus.style.display = 'none';
-            return;
-          }
-          var stored = hasStoredTouAcceptance(map.touId);
-          var sessOnly = !!touUnreachableSessionDismissed[map.touId] && !stored;
-          if (stored || sessOnly) {
-            touReadTermsProbeStatus.style.display = 'none';
-            return;
-          }
-          touReadTermsProbeStatus.style.display = 'inline-block';
-          if (touProbeUiState === 'checking') {
-            touReadTermsProbeStatus.innerHTML = '<i class="fa fa-spinner fa-spin" style="color:#80868b;" aria-hidden="true"></i>';
-            Tooltips.add(touReadTermsProbeStatus, I18n.t('openmaps.tou_link_probe_checking'), true);
-          } else if (touProbeUiState === 'ok') {
-            touReadTermsProbeStatus.innerHTML = '<i class="fa fa-check-circle" style="color:#5f8a6e;" aria-hidden="true"></i>';
-            var whenStr = touProbeVerifiedAt ? new Date(touProbeVerifiedAt).toLocaleString() : '';
-            Tooltips.add(touReadTermsProbeStatus, I18n.t('openmaps.tou_link_probe_ok').replace(/\{when\}/g, whenStr), true);
-          } else if (touProbeUiState === 'fail') {
-            touReadTermsProbeStatus.innerHTML = '<i class="fa fa-exclamation-triangle open-maps-tou-probe-fail-icon" aria-hidden="true"></i>';
-            var d = touProbeFailDetail || '—';
-            Tooltips.add(touReadTermsProbeStatus, I18n.t('openmaps.tou_link_probe_fail').replace(/\{detail\}/g, d), true);
-          }
+        function openMapsAccredBadgeStyle(code) {
+          if (code === 'listed') return { bg: '#e6f4ea', fg: '#137333', boxBorder: '#81c995', key: 'openmaps.waze_accred_badge_listed' };
+          if (code === 'partial') return { bg: '#fef7e0', fg: '#b06000', boxBorder: '#e8c066', key: 'openmaps.waze_accred_badge_partial' };
+          if (code === 'not_listed') return { bg: '#fce8e6', fg: '#c5221f', boxBorder: '#ee9a94', key: 'openmaps.waze_accred_badge_not_listed' };
+          if (code === 'n_a_supplier') return { bg: '#f1f3f4', fg: '#5f6368', boxBorder: '#dadce0', key: 'openmaps.waze_accred_badge_n_a' };
+          return { bg: '#e8f0fe', fg: '#1967d2', boxBorder: '#8ab4f8', key: 'openmaps.waze_accred_badge_unknown' };
         }
 
-        var updateLinkText = function() {
-          if (!isConfigValid) {
-            touSummaryStatus.innerHTML = '<i class="fa fa-exclamation-triangle" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_config_error');
-            touSummaryStatus.style.color = '#d93025';
-          } else {
-            var stored = hasStoredTouAcceptance(map.touId);
-            var sessOnly = !!touUnreachableSessionDismissed[map.touId] && !stored;
-            if (stored) {
-              touSummaryStatus.innerHTML = '<i class="fa fa-check-square-o" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_section_status_accepted');
-              touSummaryStatus.style.color = '#0f9d58';
-            } else if (sessOnly) {
-              touSummaryStatus.innerHTML = '<i class="fa fa-exclamation-circle open-maps-orange-fa-inline open-maps-orange-fa-inline--gap" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_section_status_dismissed');
-              touSummaryStatus.style.color = '#e37400';
-            } else {
-              touSummaryStatus.style.color = '';
-              touSummaryStatus.innerHTML = '<i class="fa fa-exclamation-circle open-maps-orange-fa-inline" aria-hidden="true"></i>';
-              Tooltips.add(touSummaryStatus.firstElementChild, I18n.t('openmaps.tou_section_status_required'), true);
-            }
-          }
-          syncTouReadTermsProbeIndicator();
-        };
-        updateLinkText();
+        var innerWrap = document.createElement('div');
+        innerWrap.style.cssText = 'padding:8px 6px 6px; display:flex; flex-direction:column; gap:10px;';
 
-        // 2. The Box Container (body of the Terms of Use section)
-        var touBox = document.createElement('div');
-        touBox.className = 'open-maps-tou-box';
-        touBox.style.cssText = 'padding:10px; border-radius:8px; margin-top:4px; margin-bottom:4px;';
-        touBox.style.background = '#fce8e6';
-        touBox.style.border = '1px solid #fad2cf';
+        if (map.abstract) {
+          var aboutBox = document.createElement('div');
+          aboutBox.className = 'openmaps-map-about';
+          aboutBox.style.cssText = 'padding:10px; border-radius:8px; background:#fff; border:1px solid #dadce0;';
+          var aboutHd = document.createElement('div');
+          aboutHd.style.cssText = 'font-size:12px; font-weight:bold; color:#202124; margin-bottom:6px;';
+          aboutHd.textContent = I18n.t('openmaps.about');
+          var aboutBodyEl = document.createElement('div');
+          aboutBodyEl.style.cssText = 'font-style:italic; color:#70757a; line-height:1.35; font-size:11px;';
+          aboutBodyEl.textContent = map.abstract;
+          aboutBox.appendChild(aboutHd);
+          aboutBox.appendChild(aboutBodyEl);
+          innerWrap.appendChild(aboutBox);
+        }
 
-        var tTitle = document.createElement('div');
-        tTitle.style.cssText = 'color:#333; margin-bottom:5px; font-size:12px; font-weight:bold;';
-        touBox.appendChild(tTitle);
-
-        var tDesc = document.createElement('div');
-        tDesc.style.cssText = 'font-size:11px; color:#3c4043; margin-bottom:8px; line-height:1.3;';
-        touBox.appendChild(tDesc);
-
-        if (!isConfigValid) {
-          // ERROR STATE: Map is missing a ToU definition
-          tTitle.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#d93025;" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_invalid_title');
-          tDesc.textContent = I18n.t('openmaps.tou_invalid_body');
+        var providerBox = document.createElement('div');
+        providerBox.style.cssText = 'padding:10px; border-radius:8px; background:#fff; border:1px solid #dadce0;';
+        var providerTitle = document.createElement('div');
+        providerTitle.style.cssText = 'font-size:12px; font-weight:bold; color:#202124; margin-bottom:6px;';
+        providerTitle.textContent = I18n.t('openmaps.source_provider_terms_box_title');
+        providerBox.appendChild(providerTitle);
+        var providerIntro = document.createElement('div');
+        providerIntro.style.cssText = 'font-size:11px; color:#5f6368; margin-bottom:8px; line-height:1.35;';
+        providerIntro.textContent = I18n.t('openmaps.source_provider_terms_intro');
+        providerBox.appendChild(providerIntro);
+        if (map.touId && map.touId !== 'none' && TOU_REGISTRY[map.touId]) {
+          var pReg = TOU_REGISTRY[map.touId];
+          var pName = document.createElement('div');
+          pName.style.cssText = 'font-size:11px; font-weight:600; color:#3c4043; margin-bottom:6px;';
+          pName.textContent = pReg.name;
+          providerBox.appendChild(pName);
+          var pLinks = document.createElement('div');
+          pLinks.style.cssText = 'font-size:11px; color:#202124;';
+          pLinks.appendChild(document.createTextNode(I18n.t('openmaps.tou_read_terms_in') + ' '));
+          Object.keys(pReg.links).forEach(function(lang) {
+            var pa = document.createElement('a');
+            pa.href = pReg.links[lang];
+            pa.target = '_blank';
+            pa.rel = 'noopener noreferrer';
+            pa.style.cssText = 'margin-left:5px; color:#1a73e8; cursor:pointer; text-decoration:none;';
+            var pi = document.createElement('i');
+            pi.className = 'fa fa-external-link';
+            pi.style.fontSize = '10px';
+            pi.setAttribute('aria-hidden', 'true');
+            pa.appendChild(pi);
+            pa.appendChild(document.createTextNode(' [' + lang.toUpperCase() + ']'));
+            pLinks.appendChild(pa);
+          });
+          providerBox.appendChild(pLinks);
         } else {
-          // NORMAL STATE
-          var touObj = TOU_REGISTRY[map.touId];
-          tTitle.textContent = touObj.name;
-          function refreshTouPanelChrome() {
-            var stored = hasStoredTouAcceptance(map.touId);
-            var sessOnly = !!touUnreachableSessionDismissed[map.touId] && !stored;
-            if (stored) {
-              touBox.style.background = '#e6f4ea';
-              touBox.style.border = '1px solid #ceead6';
-              tDesc.textContent = I18n.t('openmaps.tou_desc_accepted');
-            } else if (sessOnly) {
-              touBox.style.background = '#fff8e1';
-              touBox.style.border = '1px solid #fbc02d';
-              tDesc.textContent = I18n.t('openmaps.tou_desc_dismissed');
-            } else {
-              touBox.style.background = '#fce8e6';
-              touBox.style.border = '1px solid #fad2cf';
-              tDesc.textContent = I18n.t('openmaps.tou_desc_required');
-            }
-            updateLinkText();
-          }
-          refreshTouPanelChrome();
-
-          var touReachWarn = document.createElement('div');
-          touReachWarn.style.cssText = 'display:none; margin-bottom:8px; padding:8px; border-radius:4px; background:#fff8e1; border:1px solid #fbc02d; font-size:11px; color:#5d4037; line-height:1.35;';
-          touBox.appendChild(touReachWarn);
-
-          var tLinkBox = document.createElement('div');
-          tLinkBox.style.cssText = 'font-weight:bold; font-size:11px; margin-bottom:10px; color:#202124;';
-          tLinkBox.appendChild(document.createTextNode(I18n.t('openmaps.tou_read_terms_in') + ' '));
-          touReadTermsProbeStatus = document.createElement('span');
-          touReadTermsProbeStatus.className = 'open-maps-tou-readterms-probe';
-          touReadTermsProbeStatus.style.cssText = 'display:inline-block; margin-right:4px; min-width:14px; text-align:center; vertical-align:middle;';
-          tLinkBox.appendChild(touReadTermsProbeStatus);
-
-          var linksClicked = false;
-          var touProbeUnreachable = false;
-          var acceptBtn = document.createElement('wz-button');
-          acceptBtn.className = 'openmaps-wz-btn-compact';
-          acceptBtn.setAttribute('color', 'secondary');
-          acceptBtn.setAttribute('size', 'sm');
-          acceptBtn.disabled = true;
-          acceptBtn.textContent = I18n.t('openmaps.tou_accept');
-          acceptBtn.style.display = hasStoredTouAcceptance(map.touId) ? 'none' : 'inline-block';
-
-          function refreshAcceptBtnTooltip() {
-            Tooltips.remove(acceptBtn);
-            if (acceptBtn.style.display === 'none') return;
-            if (acceptBtn.disabled) {
-              Tooltips.add(acceptBtn, I18n.t('openmaps.tou_accept_disabled_tooltip'), true, { container: 'body' });
-            }
-          }
-          refreshAcceptBtnTooltip();
-
-          Object.keys(touObj.links).forEach(lang => {
-            var a = document.createElement('a');
-            a.href = touObj.links[lang];
-            a.target = '_blank';
-            a.innerHTML = '<i class="fa fa-external-link" style="font-size:10px;"></i> [' + lang.toUpperCase() + ']';
-            a.style.cssText = 'margin-left:5px; color:#1a73e8; cursor:pointer; text-decoration:none;';
-            a.addEventListener('click', () => {
-              if (!hasStoredTouAcceptance(map.touId) && !touProbeUnreachable) {
-                linksClicked = true;
-                acceptBtn.disabled = false;
-                acceptBtn.setAttribute('color', 'positive');
-                refreshAcceptBtnTooltip();
-              }
-            });
-            tLinkBox.appendChild(a);
-          });
-touBox.appendChild(tLinkBox);
-          syncTouReadTermsProbeIndicator();
-
-          probeToUReachability(map.touId, function(res) {
-            if (res.status === 'ok') {
-              touProbeUiState = 'ok';
-              touProbeVerifiedAt = Date.now();
-              syncTouReadTermsProbeIndicator();
-              return;
-            }
-            if (res.status === 'invalid') {
-              touProbeUiState = 'fail';
-              touProbeFailDetail = '—';
-              syncTouReadTermsProbeIndicator();
-              return;
-            }
-            touProbeUiState = 'fail';
-            touProbeFailDetail = formatTouUnreachableDetail(res);
-            syncTouReadTermsProbeIndicator();
-            if (res.status !== 'unreachable') return;
-            touProbeUnreachable = true;
-            linksClicked = false;
-            acceptBtn.disabled = true;
-            acceptBtn.setAttribute('color', 'secondary');
-            refreshAcceptBtnTooltip();
-            touReachWarn.style.display = 'block';
-            touReachWarn.textContent = '';
-            var wTitle = document.createElement('div');
-            wTitle.style.fontWeight = 'bold';
-            wTitle.textContent = I18n.t('openmaps.tou_unreachable_title');
-            var wDetail = document.createElement('div');
-            wDetail.style.cssText = 'margin-top:4px; font-size:10px; opacity:0.95;';
-            wDetail.textContent = formatTouUnreachableDetail(res) + I18n.t('openmaps.tou_unreachable_detail_suffix');
-            var wHint = document.createElement('div');
-            wHint.style.cssText = 'margin-top:6px; font-size:10px;';
-            wHint.textContent = I18n.t('openmaps.tou_unreachable_hint');
-            var wDismiss = document.createElement('wz-button');
-            wDismiss.className = 'openmaps-wz-btn-compact';
-            wDismiss.setAttribute('size', 'sm');
-            wDismiss.setAttribute('color', 'secondary');
-            wDismiss.textContent = I18n.t('openmaps.tou_dismiss_session');
-            wDismiss.style.cssText = 'margin-top:8px;';
-            wDismiss.addEventListener('click', function() {
-              touReachWarn.style.display = 'none';
-              touUnreachableSessionDismissed[map.touId] = true;
-              window.dispatchEvent(new CustomEvent('om-tou-sync', { detail: { touId: map.touId, accepted: true, sessionUnreachableDismiss: true } }));
-              self.setManualVisibility(true);
-              setTimeout(function() {
-                if (UI.touDetails) UI.touDetails.open = false;
-              }, 1500);
-            });
-            touReachWarn.appendChild(wTitle);
-            touReachWarn.appendChild(wDetail);
-            touReachWarn.appendChild(wHint);
-            touReachWarn.appendChild(wDismiss);
-          });
-
-          // --- 3. LIVE STATUS DASHBOARD ---
-          var statsBox = document.createElement('div');
-          statsBox.style.cssText = 'margin-top: 10px; padding-top: 8px; border-top: 1px solid #ceead6; font-size: 11px; color: #555; display: ' + (hasStoredTouAcceptance(map.touId) ? 'block' : 'none') + ';';
-          touBox.appendChild(statsBox); // <--- ADD THIS MISSING LINE!
-
-            // Listen for background updates to refresh the UI automatically
-          window.addEventListener('openmaps-tou-updated', (e) => {
-            if (e.detail.touId === map.touId) updateStatsUI();
-          });
-
-          function updateStatsUI() {
-             var s = Settings.get();
-             var accData = s.state.acceptedToUs[map.touId];
-             if (!accData) return;
-
-             // Handle legacy timestamp format gracefully for display
-             var isLegacy = (typeof accData === 'number');
-             var acceptedDate = new Date(isLegacy ? accData : accData.acceptedAt).toLocaleDateString();
-             var lastCheckedStr = (isLegacy || !accData.lastChecked) ? I18n.t('openmaps.tou_stats_pending') : new Date(accData.lastChecked).toLocaleString();
-             var nextCheckStr = (isLegacy || !accData.lastChecked) ? I18n.t('openmaps.tou_stats_on_next_reload') : new Date(accData.lastChecked + 30*24*60*60*1000).toLocaleDateString();
-             var lenStr = (isLegacy || !accData.length) ? I18n.t('openmaps.tou_stats_pending') : I18n.t('openmaps.tou_stats_chars').replace(/\{n\}/g, accData.length.toLocaleString());
-
-             statsBox.innerHTML = `
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_accepted')}</span> <strong>${acceptedDate}</strong></div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_baseline_length')}</span> <strong>${lenStr}</strong></div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_last_checked')}</span> <strong>${lastCheckedStr}</strong></div>
-               <div style="display:flex; justify-content:space-between; margin-bottom:3px;"><span>${I18n.t('openmaps.tou_stats_next_check')}</span> <strong>${nextCheckStr}</strong></div>
-             `;
-
-             var forceBtn = document.createElement('wz-button');
-             forceBtn.className = 'openmaps-wz-btn-compact';
-             forceBtn.setAttribute('size', 'sm');
-             forceBtn.setAttribute('color', 'secondary');
-             forceBtn.innerHTML = '<i class="fa fa-refresh" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_force_check');
-             forceBtn.style.cssText = 'margin-top: 6px; width: 100%;';
-
-             forceBtn.addEventListener('click', function() {
-                forceBtn.innerHTML = '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_checking_url');
-                forceBtn.disabled = true;
-
-                performToUCheck(map.touId, true, function(res) {
-                   forceBtn.disabled = false;
-                   if (res.status === 'unreachable') {
-                     forceBtn.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#f9a825;" aria-hidden="true"></i> ' + formatTouUnreachableDetail(res);
-                   } else if (res.status === 'error') {
-                     forceBtn.innerHTML = '<i class="fa fa-exclamation-triangle" style="color:#d93025;" aria-hidden="true"></i> ' + res.msg;
-                   } else if (res.status === 'revoked') {
-                     alert(I18n.t('openmaps.tou_revoked').replace(/\{percent\}/g, (res.diff*100).toFixed(1)));
-                     if (UI.touDetails) UI.touDetails.open = false;
-                     UI.editContainer.style.display = 'none';
-                     updateLinkText();
-                   } else if (res.status === 'baseline') {
-                     forceBtn.innerHTML = '<i class="fa fa-check" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_baseline_saved');
-                     setTimeout(updateStatsUI, 1500);
-                   } else if (res.status === 'unchanged') {
-                     forceBtn.innerHTML = '<i class="fa fa-check" aria-hidden="true"></i> ' + I18n.t('openmaps.tou_unchanged').replace(/\{variance\}/g, (res.diff*100).toFixed(2) + '%');
-                     setTimeout(updateStatsUI, 2500);
-                   }
-                });
-             });
-             statsBox.appendChild(forceBtn);
-          }
-// --- REAL-TIME UI SYNC LISTENER ---
-          window.addEventListener('om-tou-sync', (e) => {
-            if (e.detail.touId === map.touId) {
-              if (e.detail.accepted) {
-                acceptBtn.style.display = 'none';
-                if (e.detail.sessionUnreachableDismiss) {
-                  statsBox.style.display = 'none';
-                  refreshTouPanelChrome();
-                } else {
-                  statsBox.style.display = 'block';
-                  refreshTouPanelChrome();
-                  setTimeout(() => {
-                    updateStatsUI();
-                  }, 800);
-                }
-
-                if (self.updateVisibility) self.updateVisibility();
-                applyActiveMapsFilter();
-              } else {
-                // If terms are revoked by another map's check, reload to enforce the lock!
-                location.reload();
-              }
-            }
-          });
-
-          if (hasStoredTouAcceptance(map.touId)) {
-            updateStatsUI();
-          }
-          // --------------------------------
-
-acceptBtn.addEventListener('click', () => {
-            if (!linksClicked || touProbeUnreachable) return;
-
-            var s = Settings.get();
-            s.state.acceptedToUs[map.touId] = { acceptedAt: Date.now(), lastChecked: 0, length: 0 };
-            Settings.put(s);
-
-            // 1. Broadcast to unlock all other maps with this ToU ID
-            window.dispatchEvent(new CustomEvent('om-tou-sync', { detail: { touId: map.touId, accepted: true } }));
-
-            // 2. Start the background check
-            performToUCheck(map.touId, true, function() {
-                updateStatsUI();
-            });
-
-            // 3. Unlock the current map
-            self.setManualVisibility(true);
-
-            setTimeout(() => { if (UI.touDetails) UI.touDetails.open = false; }, 1500);
-          });
-
-          touBox.appendChild(acceptBtn);
+          var noTou = document.createElement('div');
+          noTou.style.cssText = 'font-size:11px; color:#5f6368; line-height:1.35;';
+          noTou.textContent = I18n.t('openmaps.source_provider_no_tou_catalog');
+          providerBox.appendChild(noTou);
         }
+        innerWrap.appendChild(providerBox);
 
-        touDetails.appendChild(touBox);
-        touDetails.open = !touUnlocked;
-        UI.editContainer.appendChild(touDetails);
-      }
-      // -----------------------------------------------------------
+        var wazeBox = document.createElement('div');
+        wazeBox.style.cssText = 'padding:10px; border-radius:8px; background:#e8f0fe; border:1px solid #8ab4f8;';
+        var wazeTitle = document.createElement('div');
+        wazeTitle.style.cssText = 'font-size:12px; font-weight:bold; color:#174ea6; margin-bottom:6px;';
+        wazeTitle.textContent = I18n.t('openmaps.source_waze_accred_box_title');
+        wazeBox.appendChild(wazeTitle);
+
+        var statusP = document.createElement('div');
+        statusP.style.cssText = 'font-size:11px; color:#202124; line-height:1.4; margin-bottom:10px;';
+        wazeBox.appendChild(statusP);
+
+        var helpA = document.createElement('a');
+        helpA.href = OPEN_MAPS_WAZE_MAP_DATA_ATTRIBUTION_HELP_URL;
+        helpA.target = '_blank';
+        helpA.rel = 'noopener noreferrer';
+        helpA.style.cssText = 'display:inline-block; font-size:11px; color:#1a73e8; margin-bottom:8px; text-decoration:none;';
+        helpA.textContent = I18n.t('openmaps.waze_map_data_attribution_link');
+        wazeBox.appendChild(helpA);
+        wazeBox.appendChild(document.createElement('br'));
+
+        var formA = document.createElement('a');
+        formA.href = openMapsBuildLayerRequestFormUrl(map);
+        formA.target = '_blank';
+        formA.rel = 'noopener noreferrer';
+        formA.style.cssText = 'display:inline-block; font-size:11px; font-weight:600; color:#1a73e8; text-decoration:none;';
+        formA.textContent = I18n.t('openmaps.waze_layer_request_form_link');
+        wazeBox.appendChild(formA);
+
+        innerWrap.appendChild(wazeBox);
+        sourceDetails.appendChild(innerWrap);
+
+        function syncSourceWazeSection() {
+          var st = openMapsWazeAccreditationStatus(map);
+          var bs = openMapsAccredBadgeStyle(st.code);
+          accBadge.style.backgroundColor = bs.bg;
+          accBadge.style.color = bs.fg;
+          accBadge.textContent = I18n.t(bs.key);
+          wazeBox.style.backgroundColor = bs.bg;
+          wazeBox.style.border = '1px solid ' + bs.boxBorder;
+          wazeTitle.style.color = bs.fg;
+          statusP.textContent = I18n.t('openmaps.waze_accred_expl_' + st.code);
+          formA.href = openMapsBuildLayerRequestFormUrl(map);
+        }
+        UI.syncSourceWazeSection = syncSourceWazeSection;
+        syncSourceWazeSection();
+
+        UI.editContainer.appendChild(sourceDetails);
 
       var rmBox = document.createElement('div'); rmBox.className = 'open-maps-remove-container';
       var rmLeft = document.createElement('div');
@@ -15974,13 +15751,6 @@ acceptBtn.addEventListener('click', () => {
     // --- 4. ENGINE CORE ---
 // --- UNIFIED VISIBILITY CONTROLLER ---
     this.setManualVisibility = function(wantsVisible) {
-      // BLOCK ENABLE IF TOU NOT ACCEPTED OR CONFIG BROKEN
-      if (wantsVisible && !isTouAccepted(map.touId)) {
-        UI.editContainer.style.display = 'block';
-        if (UI.touDetails) UI.touDetails.open = true;
-        return;
-      }
-
       self.hidden = !wantsVisible;
       // Enforce Bounding Box
       if (self.layer) {
@@ -16126,23 +15896,15 @@ this.updateVisibility = function() {
         UI.zoomMetaLine.textContent = zmParts.join(' · ');
       }
 
-// 3. Eye Icon (Manual State & ToU Lock)
+// 3. Eye Icon (manual visibility)
       UI.visibility.classList.remove('fa-eye', 'fa-eye-slash', 'fa-lock');
-      if (!isTouAccepted(map.touId)) {
-        UI.visibility.classList.add('fa-lock');
-        UI.visibility.style.color = '#d93025';
-      } else {
-        UI.visibility.classList.add(self.hidden ? 'fa-eye-slash' : 'fa-eye');
-        UI.visibility.style.color = '';
-      }
+      UI.visibility.classList.add(self.hidden ? 'fa-eye-slash' : 'fa-eye');
+      UI.visibility.style.color = '';
 
-      if (UI.touPendingBtn) {
-        var showTouPending = map.touId !== 'none' && TOU_REGISTRY[map.touId] && !isTouAccepted(map.touId);
-        UI.touPendingBtn.style.display = showTouPending ? 'flex' : 'none';
-      }
+      if (UI.syncSourceWazeSection) UI.syncSourceWazeSection();
 
       var visibleLayerCount = self.mapLayers.filter(function(l) { return l.visible; }).length;
-      var showNoLayers = !self.hidden && !self.outOfArea && isTouAccepted(map.touId) && self.mapLayers.length > 0 && visibleLayerCount === 0 && ['WMS', 'ESRI', 'XYZ'].indexOf(map.type) !== -1;
+      var showNoLayers = !self.hidden && !self.outOfArea && self.mapLayers.length > 0 && visibleLayerCount === 0 && ['WMS', 'ESRI', 'XYZ'].indexOf(map.type) !== -1;
       if (UI.noLayersWarningBtn) {
         UI.noLayersWarningBtn.style.display = showNoLayers ? 'flex' : 'none';
       }
@@ -16192,8 +15954,8 @@ this.updateVisibility = function() {
       // which correlated with WME satellite tiles stopping even though KML never loaded.
       var kmlVectorEligibleForOlLayer = !openMapsMapTypeIsKmlVectorOverlay(map.type) ||
         (map.type === 'LOCAL_KML'
-          ? (visibleLayers.length > 0 && !self.hidden && !self.outOfArea && (map.touId === 'none' || isTouAccepted(map.touId)))
-          : (openMapsGoogleMyMapsIntegrationEnabled() && visibleLayers.length > 0 && !self.hidden && !self.outOfArea && isTouAccepted(map.touId)));
+          ? (visibleLayers.length > 0 && !self.hidden && !self.outOfArea)
+          : (openMapsGoogleMyMapsIntegrationEnabled() && visibleLayers.length > 0 && !self.hidden && !self.outOfArea));
       if (openMapsMapTypeIsKmlVectorOverlay(map.type) && self.layer && !kmlVectorEligibleForOlLayer) {
         try {
           if (self.layer.removeAllFeatures) self.layer.removeAllFeatures();
@@ -16421,7 +16183,7 @@ this.updateVisibility = function() {
                     if (!olMapLive || typeof getMapExtent !== 'function') return;
                     if (!self.layer) return;
                     // Do not rely only on layer.getVisibility(): it is often false until after W.map.addLayer + setVisibility in the same updateLayers pass.
-                    if (self.hidden || self.outOfArea || !isTouAccepted(map.touId)) return;
+                    if (self.hidden || self.outOfArea) return;
                     if (!self.layer.getVisibility()) return;
                     var z = (typeof olMapLive.getZoom === 'function') ? olMapLive.getZoom() : null;
                     if (minZoom != null && z != null && z < minZoom) {
@@ -16917,10 +16679,6 @@ this.updateVisibility = function() {
                       });
                       return;
                     }
-                    if (!isTouAccepted(map.touId)) {
-                      openMapsKmlDiagLog('fetchKmlNow: skip', { reason: 'ToU not accepted', mapId: map.id, touId: map.touId });
-                      return;
-                    }
                     // OL / WME can report visibility false briefly after re-attach; nudge once before bailing.
                     if (!self.layer.getVisibility()) {
                       try { self.layer.setVisibility(true); } catch (eVis0) { /* ignore */ }
@@ -17164,7 +16922,7 @@ this.updateVisibility = function() {
         self.layer.setVisibility(!self.hidden && !self.outOfArea);
       }
       if (openMapsMapTypeIsKmlVectorOverlay(map.type) && self.layer) {
-        var gmmShow = visibleLayers.length > 0 && !self.hidden && !self.outOfArea && isTouAccepted(map.touId);
+        var gmmShow = visibleLayers.length > 0 && !self.hidden && !self.outOfArea;
         if (map.type === 'GOOGLE_MY_MAPS') {
           gmmShow = gmmShow && openMapsGoogleMyMapsIntegrationEnabled();
         }
