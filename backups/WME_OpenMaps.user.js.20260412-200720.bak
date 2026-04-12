@@ -76,7 +76,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.12.1
+// @version     2026.04.11.2
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -89,7 +89,7 @@
 
 var styleElement;
 
-var OPEN_MAPS_VERSION = '2026.04.12.1';
+var OPEN_MAPS_VERSION = '2026.04.11.2';
 
 // Trusted Types / CSP hardening: avoid `innerHTML` where feasible.
 function openMapsClearEl(el) {
@@ -658,15 +658,6 @@ async function onWmeReady() {
       active_maps_filter_tou_pending: 'ToU pending',
       active_maps_filter_no_match: 'No maps match these filters.',
       active_maps_filter_mode_aria: 'Filter active maps list',
-      active_maps_title_hint: 'Active maps — seven quick taps here toggles developer mode',
-      waze_accred_tag_not_accredited: 'Not accredited',
-      waze_not_listed_i_agree: 'I agree (this session)',
-      waze_not_listed_eye_locked: 'Locked: this catalog map is not on Waze’s Map Data Attribution list. Use developer mode and confirm under Source & Waze.',
-      developer_mode_enabled_log: 'Developer mode ON — catalog maps not on Waze’s list can be added; confirm each under Source & Waze for this session.',
-      developer_mode_disabled_log: 'Developer mode OFF.',
-      exit_developer_mode: 'Exit developer mode',
-      exit_developer_mode_confirm: 'Turn off developer mode?\n\nSession confirmations (I agree) will be cleared. Maps not on Waze’s Map Data Attribution list will lock again until developer mode is re-enabled.',
-      dev_not_listed_add_blocked: 'This map is not on Waze’s Map Data Attribution list. Enable developer mode (seven quick taps on the Active maps title) to add it.',
       reset_terms_button: 'Revoke all map terms (reload)',
       reset_terms_confirm: 'Revoke all saved Terms of Use? Affected maps stay locked until you accept again. The page will reload.',
       query_window_close: 'Close query results',
@@ -954,8 +945,7 @@ async function onWmeReady() {
         v2026_04_08_02: '- **KML + layer styles:** KML vector layers are included in map hit-testing (`pointer-events: none` capture path). Click/hover use the same `stableFeatureId` segment as Map Inspector (`kml_<folder>`), not `main`. "Use layer-specific styles" appears for **WMS**, **ESRI** (MapServer), **ESRI_FEATURE**, and KML; changing it calls **`notifyHandlesChanged`**. Single inner-ring ratio (**OPENMAPS_POINT_INNER_RADIUS_FRAC**) for list avatars, map points, and inspector lift symbols; ESRI_FEATURE hover/selection uses outer map color + inner layer hash when enabled; KML point/line highlights respect the checkbox (map-only stroke when off).',
         v2026_04_08_03: '- **KML inner color parity:** Map symbols and inner rings use **`openMapsKmlResolvedFolderFillHex`** — same rule as Map Inspector (prefer folder **`openMapsKmlColorHex`** from KML Style when set, else title+folder hash). Fixes teal list vs green map when My Maps / KML defines an explicit folder color.',
         v2026_04_11_01: '- **Waze accreditation:** Replaced mandatory Terms-of-Use acceptance with a per-map **Source & Waze** section (provider terms links are informational only). Shows accreditation vs Waze’s **Map Data Attribution** help page, link to that page, and a prefilled **Open Source Data Layer Request** Google Form. Catalog attribution status is driven by **`OPEN_MAPS_WAZE_ACCREDITATION_BY_ATTRIBUTION`** (see `OPENMAPS_WAZE_ATTRIBUTION_VERIFICATION.md`). Removed ToU lock UI, sidebar notice, active-maps “ToU pending” filter, reset-all-terms control, and background ToU fetch/revoke logic.',
-        v2026_04_11_02: '- **Source & Waze:** Layer-request Google Form username prefill reads the editor name from **`unsafeWindow.W.loginManager`** / SDK **`User`** (Backbone-style models included). **Waze** box background and border track the same colors as the summary **accreditation** pill. **`Not on Waze list`** explanation now states what that means for using the overlay in WME (informal context vs treating it as an approved Waze-named source).',
-        v2026_04_12_01: '- **Developer mode & Waze `not_listed`:** Seven taps on **Active maps** toggles persisted developer mode. Catalog maps **not on Waze’s list** are hidden from **Maps to add** unless developer mode is on. With developer mode, those rows stay locked until **I agree** under **Source & Waze** (session-scoped; cleared when developer mode turns off). Padlock + disabled Waze checkbox and sub-layer controls while locked; **rebuildMapLayersUI** exposed for correct sub-layer list after gate changes; session keys align string/numeric map ids.'
+        v2026_04_11_02: '- **Source & Waze:** Layer-request Google Form username prefill reads the editor name from **`unsafeWindow.W.loginManager`** / SDK **`User`** (Backbone-style models included). **Waze** box background and border track the same colors as the summary **accreditation** pill. **`Not on Waze list`** explanation now states what that means for using the overlay in WME (informal context vs treating it as an approved Waze-named source).'
       }
     },
     nl: {
@@ -1170,15 +1160,6 @@ async function onWmeReady() {
       active_maps_filter_tou_pending: 'Gebruiksvoorwaarden open',
       active_maps_filter_no_match: 'Geen kaarten voldoen aan deze filters.',
       active_maps_filter_mode_aria: 'Lijst actieve kaarten filteren',
-      active_maps_title_hint: 'Actieve kaarten — tik hier snel zeven keer om de ontwikkelaarsmodus aan of uit te zetten',
-      waze_accred_tag_not_accredited: 'Niet geaccrediteerd',
-      waze_not_listed_i_agree: 'Ik ga akkoord (deze sessie)',
-      waze_not_listed_eye_locked: 'Vergrendeld: deze cataloguskaart staat niet op de Waze-pagina Map Data Attribution. Schakel de ontwikkelaarsmodus in en bevestig onder Bron & Waze.',
-      developer_mode_enabled_log: 'Ontwikkelaarsmodus AAN — cataloguskaarten die niet op de Waze-lijst staan, kunnen worden toegevoegd; bevestig elke kaart onder Bron & Waze voor deze sessie.',
-      developer_mode_disabled_log: 'Ontwikkelaarsmodus UIT.',
-      exit_developer_mode: 'Ontwikkelaarsmodus afsluiten',
-      exit_developer_mode_confirm: 'Ontwikkelaarsmodus uitzetten?\n\nSessiebevestigingen (Ik ga akkoord) worden gewist. Kaarten die niet op Map Data Attribution staan, worden weer vergrendeld tot de ontwikkelaarsmodus weer aan staat.',
-      dev_not_listed_add_blocked: 'Deze kaart staat niet op Map Data Attribution van Waze. Schakel de ontwikkelaarsmodus in (zeven snelle tikken op de titel Actieve kaarten) om toe te voegen.',
       reset_terms_button: 'Alle kaartvoorwaarden intrekken (herladen)',
       reset_terms_confirm: 'Alle opgeslagen gebruiksvoorwaarden intrekken? Getroffen kaarten blijven geblokkeerd tot je opnieuw accepteert. De pagina wordt herladen.',
       query_window_close: 'Queryresultaten sluiten',
@@ -1466,8 +1447,7 @@ async function onWmeReady() {
         v2026_04_08_02: '- **KML + stijlen:** KML-vectorlagen tellen mee bij kaart-hit-testing; klik/hover gebruiken dezelfde laagsleutel als Map Inspector (`kml_<folder>`). Vinkje ook voor **WMS**, **ESRI** en KML; wijziging roept **`notifyHandlesChanged`** aan. Eén binnenring-verhouding voor lijst-, kaart- en highlight-symbolen; ESRI_FEATURE-hover volgt laaghashes als aan; KML-lijn/highlight respecteert uitgeschakelde laagstijlen.',
         v2026_04_08_03: '- **KML binnenkleur:** Kaart en binnenring gebruiken dezelfde kleurkeuze als Map Inspector (KML-**Style**-hex indien aanwezig, anders hash).',
         v2026_04_11_01: '- **Waze-accreditatie:** Verplichte acceptatie van gebruiksvoorwaarden vervangen door **Bron & Waze** per kaart (aanbiederslinks alleen informatief). Toont status t.o.v. Waze **Map Data Attribution**, link en vooringevuld Google Formulier. ToU-slot, zijbalkmelding, filter «Gebruiksvoorwaarden open», reset-knop en achtergrond-ToU-logica verwijderd.',
-        v2026_04_11_02: '- **Bron & Waze:** Voorinvullen van de editornaam in het Google Formulier via **`unsafeWindow.W.loginManager`** / SDK **User** (o.a. Backbone-modellen). Achtergrond en rand van het **Waze**-vak volgen de kleuren van de accreditatie-pill. **Niet op de Waze-lijst** legt nu uit wat dat betekent voor gebruik in WME (informele context vs. goedgekeurde bron).',
-        v2026_04_12_01: '- **Ontwikkelaarsmodus & Waze `not_listed`:** zeven tikken op **Actieve kaarten** schakelt de bewaarde ontwikkelaarsmodus. Cataloguskaarten **niet op de Waze-lijst** ontbreken in **Toe te voegen kaarten** tenzij de modus aan staat. Met modus aan blijven rijen vergrendeld tot **Ik ga akkoord** onder **Bron & Waze** (sessie; gewist bij uit). Hangslot + uitgeschakelde Waze-checkbox en sublaagknoppen; **`rebuildMapLayersUI`** beschikbaar voor juiste sublaaglijst; sessiesleutels voor string/numerieke map-id’s.'
+        v2026_04_11_02: '- **Bron & Waze:** Voorinvullen van de editornaam in het Google Formulier via **`unsafeWindow.W.loginManager`** / SDK **User** (o.a. Backbone-modellen). Achtergrond en rand van het **Waze**-vak volgen de kleuren van de accreditatie-pill. **Niet op de Waze-lijst** legt nu uit wat dat betekent voor gebruik in WME (informele context vs. goedgekeurde bron).'
       }
     },
     fr: {
@@ -1495,15 +1475,6 @@ async function onWmeReady() {
       waze_accred_expl_not_listed: 'Non accrédité Waze : cette attribution catalogue n’apparaît pas sur la page Map Data Attribution de Waze. Utilisation comme référence cartographique approuvée dans WME non autorisée. Demande d’accréditation : lien du formulaire ci-dessous. Sources cartographiques tierces accréditées : lien Map Data Attribution ci-dessous.',
       waze_accred_expl_n_a_supplier: 'Les couches Waze/Google sont des données du fournisseur de carte, pas des entrées « tiers » sur cette liste d’attribution.',
       waze_accred_expl_unknown: 'Pas de statut script (carte utilisateur, attribution manquante ou nouvelle source). Vérifiez vous-même avec Map Data Attribution et les consignes locales.',
-      active_maps_title_hint: 'Cartes actives — sept appuis rapides ici activent ou désactivent le mode développeur',
-      waze_accred_tag_not_accredited: 'Non accrédité',
-      waze_not_listed_i_agree: 'J’accepte (cette session)',
-      waze_not_listed_eye_locked: 'Verrouillé : cette carte catalogue n’est pas sur la page Map Data Attribution de Waze. Activez le mode développeur et confirmez sous Source et Waze.',
-      developer_mode_enabled_log: 'Mode développeur ACTIF — les cartes catalogue absentes de la liste Waze peuvent être ajoutées ; confirmez chaque carte sous Source et Waze pour cette session.',
-      developer_mode_disabled_log: 'Mode développeur désactivé.',
-      exit_developer_mode: 'Quitter le mode développeur',
-      exit_developer_mode_confirm: 'Désactiver le mode développeur ?\n\nLes confirmations de session (J’accepte) seront effacées. Les cartes absentes de Map Data Attribution seront verrouillées jusqu’à réactivation du mode développeur.',
-      dev_not_listed_add_blocked: 'Cette carte n’est pas sur Map Data Attribution de Waze. Activez le mode développeur (sept appuis rapides sur le titre Cartes actives) pour l’ajouter.',
       user_maps_hint: 'Utilisez la même URL que dans la barre d’adresse sur google.com/maps/d/… (ex. …/edit?mid=… ou …/viewer?mid=…). OpenMaps charge la géométrie depuis Google. Consultez au besoin les conditions sous Source et Waze dans les détails de la carte.',
       tou_section_status_accepted: 'Accepté',
       tou_section_status_required: 'Action requise',
@@ -1575,8 +1546,7 @@ async function onWmeReady() {
         v2026_04_08_02: '- **KML + styles :** les couches KML participent au test de collision sur la carte ; clic/survol utilisent la même clé **`kml_<dossier>`** que l’inspecteur. La case est aussi proposée pour **WMS**, **ESRI** (tuiles) et KML ; changement → **`notifyHandlesChanged`**. Rayon intérieur unifié pour pastilles liste / points carte / surbrillance ; surbrillance ESRI_FEATURE avec anneau intérieur par sous-couche si l’option est cochée ; lignes KML en couleur carte si l’option est décochée.',
         v2026_04_08_03: '- **KML couleur intérieure :** carte et anneau intérieur utilisent la même règle que l’inspecteur (hex **Style** KML du dossier si présent, sinon hachage).',
         v2026_04_11_01: '- **Accréditation Waze :** acceptation obligatoire des CGU remplacée par la section **Source et Waze** (liens fournisseur informatifs). Statut vs **Map Data Attribution**, lien et formulaire Google prérempli. Suppression du verrou ToU, de la bannière, du filtre « ToU en attente », du reset global et des contrôles réseau ToU.',
-        v2026_04_11_02: '- **Source et Waze :** préremplissage du nom d’éditeur du formulaire Google via **`unsafeWindow.W.loginManager`** / SDK **User** (modèles Backbone inclus). Fond et bordure du bloc **Waze** alignés sur la pillule d’**accréditation**. **Absent de la liste Waze** explique désormais la conséquence pour l’usage dans WME (contexte informel vs source approuvée).',
-        v2026_04_12_01: '- **Mode développeur & Waze `not_listed` :** sept appuis sur **Cartes actives** bascule le mode développeur enregistré. Les cartes catalogue **absentes de la liste Waze** sont masquées dans **Cartes à ajouter** sauf si le mode est actif. Avec le mode, les lignes restent verrouillées jusqu’à **J’accepte** sous **Source et Waze** (session ; effacé à la désactivation). Cadenas + case Waze et sous-couches désactivés ; **`rebuildMapLayersUI`** exposé pour la liste des sous-couches ; clés de session alignées id chaîne/numérique.'
+        v2026_04_11_02: '- **Source et Waze :** préremplissage du nom d’éditeur du formulaire Google via **`unsafeWindow.W.loginManager`** / SDK **User** (modèles Backbone inclus). Fond et bordure du bloc **Waze** alignés sur la pillule d’**accréditation**. **Absent de la liste Waze** explique désormais la conséquence pour l’usage dans WME (contexte informel vs source approuvée).'
       }
     },
     'pt-BR': {
@@ -1647,15 +1617,6 @@ async function onWmeReady() {
       waze_accred_expl_not_listed: 'Sem credenciação Waze: esta atribuição de catálogo não consta na página Map Data Attribution da Waze. Não é permitido usá-la como referência de mapa aprovada no WME. Para pedir credenciação, use a ligação do formulário abaixo. Para as fontes de mapa de terceiros credenciadas pela Waze, use a ligação Map Data Attribution abaixo.',
       waze_accred_expl_n_a_supplier: 'Camadas Waze/Google são dados do fornecedor do mapa, não entradas de terceiros nessa lista de atribuição.',
       waze_accred_expl_unknown: 'Sem estado no script (mapa do utilizador, atribuição em falta ou fonte nova). Verifique com Map Data Attribution e orientação local.',
-      active_maps_title_hint: 'Mapas ativos — sete toques rápidos aqui alternam o modo de programador',
-      waze_accred_tag_not_accredited: 'Não credenciado',
-      waze_not_listed_i_agree: 'Concordo (esta sessão)',
-      waze_not_listed_eye_locked: 'Bloqueado: este mapa de catálogo não está em Map Data Attribution da Waze. Ative o modo de programador e confirme em Fonte e Waze.',
-      developer_mode_enabled_log: 'Modo de programador LIGADO — mapas de catálogo fora da lista Waze podem ser adicionados; confirme cada um em Fonte e Waze nesta sessão.',
-      developer_mode_disabled_log: 'Modo de programador DESLIGADO.',
-      exit_developer_mode: 'Sair do modo de programador',
-      exit_developer_mode_confirm: 'Desligar o modo de programador?\n\nAs confirmações de sessão (Concordo) serão limpas. Mapas fora de Map Data Attribution voltam a ficar bloqueados até voltar a ligar o modo de programador.',
-      dev_not_listed_add_blocked: 'Este mapa não está em Map Data Attribution da Waze. Ative o modo de programador (sete toques rápidos no título Mapas ativos) para o adicionar.',
       user_maps_hint: 'Use o mesmo URL da barra de endereço em google.com/maps/d/… (ex. …/edit?mid=… ou …/viewer?mid=…). O OpenMaps carrega a geometria a partir do Google. Se precisar, veja termos do fornecedor em Fonte e Waze nos detalhes do mapa.',
       tou_section_status_accepted: 'Aceito',
       tou_section_status_required: 'Ação necessária',
@@ -1778,8 +1739,7 @@ async function onWmeReady() {
         v2026_04_08_02: '- **KML + estilos:** vetores KML entram no teste de clique no mapa; clique/hover usam a mesma chave **`kml_<pasta>`** que o Map Inspector. A caixa também aparece para **WMS**, **ESRI** (mosaico) e KML; ao mudar chama-se **`notifyHandlesChanged`**. Proporção única do anel interno para avatares da lista, pontos no mapa e realces; realce ESRI_FEATURE com cor interna por subcamada quando ativo; linhas KML com cor do mapa quando desligado.',
         v2026_04_08_03: '- **KML cor interna:** mapa e anel interno usam a mesma regra que o inspector (hex **Style** da pasta KML se existir, senão hash).',
         v2026_04_11_01: '- **Credenciação Waze:** aceitação obrigatória de termos substituída pela secção **Fonte e Waze** (links do fornecedor só informativos). Mostra estado face a **Map Data Attribution**, ligação e formulário Google pré-preenchido. Removidos bloqueio ToU, aviso na barra lateral, filtro «ToU pendente», reset global e motor ToU em segundo plano.',
-        v2026_04_11_02: '- **Fonte e Waze:** pré-preenchimento do nome do editor no formulário Google via **`unsafeWindow.W.loginManager`** / SDK **User** (incl. modelos Backbone). Fundo e contorno da caixa **Waze** alinhados com a pill de **credenciação**. **Não consta na lista Waze** explica agora o que isso implica para uso no WME (contexto informal vs. fonte aprovada).',
-        v2026_04_12_01: '- **Modo de programador & Waze `not_listed`:** sete toques em **Mapas ativos** alterna o modo de programador guardado. Mapas de catálogo **fora da lista Waze** não aparecem em **Mapas a adicionar** sem o modo. Com o modo, as linhas ficam bloqueadas até **Concordo** em **Fonte e Waze** (sessão; limpo ao desligar). Cadeado + caixa Waze e subcamadas desativados ; **`rebuildMapLayersUI`** exposto para a lista de subcamadas ; chaves de sessão alinham id string/número.'
+        v2026_04_11_02: '- **Fonte e Waze:** pré-preenchimento do nome do editor no formulário Google via **`unsafeWindow.W.loginManager`** / SDK **User** (incl. modelos Backbone). Fundo e contorno da caixa **Waze** alinhados com a pill de **credenciação**. **Não consta na lista Waze** explica agora o que isso implica para uso no WME (contexto informal vs. fonte aprovada).'
       }
     }
   };
@@ -4677,78 +4637,6 @@ async function onWmeReady() {
     return { code: 'not_listed' };
   }
 
-  /** Catalog map whose Waze accreditation status is `not_listed` (user maps never qualify). */
-  function openMapsIsCatalogWazeNotListedMap(map) {
-    return !!(map && openMapsWazeAccreditationStatus(map).code === 'not_listed');
-  }
-
-  var OPEN_MAPS_WAZE_NOT_LISTED_SESSION_STORAGE_KEY = 'openmaps-waze-not-listed-agreed';
-
-  function openMapsWazeNotListedSessionIdKeys(id) {
-    if (id == null || id === '') return [];
-    var s = String(id);
-    var keys = [s];
-    var n = Number(id);
-    if (typeof n === 'number' && !isNaN(n) && isFinite(n)) {
-      var ns = String(n);
-      if (keys.indexOf(ns) === -1) keys.push(ns);
-    }
-    return keys;
-  }
-
-  function openMapsWazeNotListedSessionReadObj() {
-    try {
-      var raw = sessionStorage.getItem(OPEN_MAPS_WAZE_NOT_LISTED_SESSION_STORAGE_KEY);
-      if (!raw) return {};
-      var o = JSON.parse(raw);
-      return o && typeof o === 'object' ? o : {};
-    } catch (eRead) {
-      return {};
-    }
-  }
-
-  function openMapsWazeNotListedSessionWriteObj(obj) {
-    try {
-      sessionStorage.setItem(OPEN_MAPS_WAZE_NOT_LISTED_SESSION_STORAGE_KEY, JSON.stringify(obj || {}));
-    } catch (eWr) { /* ignore */ }
-  }
-
-  function openMapsWazeNotListedSessionHasAgreed(id) {
-    var o = openMapsWazeNotListedSessionReadObj();
-    var keys = openMapsWazeNotListedSessionIdKeys(id);
-    for (var hi = 0; hi < keys.length; hi++) {
-      if (o[keys[hi]] === true || o[keys[hi]] === 1) return true;
-    }
-    return false;
-  }
-
-  function openMapsWazeNotListedSessionSetAgreed(id) {
-    if (id == null || id === '') return;
-    var o = openMapsWazeNotListedSessionReadObj();
-    var keys = openMapsWazeNotListedSessionIdKeys(id);
-    for (var si = 0; si < keys.length; si++) {
-      o[keys[si]] = true;
-    }
-    openMapsWazeNotListedSessionWriteObj(o);
-  }
-
-  function openMapsWazeNotListedSessionClearAll() {
-    try {
-      sessionStorage.removeItem(OPEN_MAPS_WAZE_NOT_LISTED_SESSION_STORAGE_KEY);
-    } catch (eClr) { /* ignore */ }
-  }
-
-  /**
-   * Runtime gate: catalog `not_listed` maps are unusable until developer mode + per-session I agree.
-   * @param {*} handleMapId Prefer MapHandle.mapId (string/number parity vs catalog map.id).
-   */
-  function openMapsWazeNotListedLayerUseBlocked(map, handleMapId) {
-    if (!openMapsIsCatalogWazeNotListedMap(map)) return false;
-    if (!Settings.get().developerMode) return true;
-    var mid = (handleMapId != null && handleMapId !== '') ? handleMapId : (map && map.id);
-    return !openMapsWazeNotListedSessionHasAgreed(mid);
-  }
-
   function openMapsEncodeGoogleFormParam(str) {
     if (str == null) return '';
     return encodeURIComponent(String(str));
@@ -4915,9 +4803,6 @@ async function onWmeReady() {
       }
       if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
         settings.inspectorAutoWmsGetFeatureInfo = true;
-      }
-      if (typeof settings.developerMode === 'undefined') {
-        settings.developerMode = false;
       }
       return settings;
     },
@@ -5121,16 +5006,6 @@ async function onWmeReady() {
 
   // List of map handles
   var handles = [];
-
-  function openMapsRefreshAllWazeNotListedGates() {
-    handles.forEach(function(h) {
-      if (h && typeof h.applyWazeNotListedGate === 'function') {
-        try {
-          h.applyWazeNotListedGate();
-        } catch (eG) { /* ignore */ }
-      }
-    });
-  }
 
   /** Set by initOpenMapsInspector: ingest query results, refresh sources, etc. */
   var openMapsInspectorApi = null;
@@ -9706,53 +9581,10 @@ async function onWmeReady() {
   // ----------------------------------------
 
   // Implement tab content
-  var exitDevBtn = null;
-  var syncExitDevFooterVisibility = function() {};
   var activeMapsHeader = document.createElement('div');
   activeMapsHeader.className = 'openmaps-active-maps-header';
   var title = document.createElement('h4');
   title.textContent = I18n.t('openmaps.maps_title');
-  title.style.cursor = 'default';
-  title.title = I18n.t('openmaps.active_maps_title_hint');
-  var openMapsDevModeTapCount = 0;
-  var openMapsDevModeTapTimer = null;
-  var OPEN_MAPS_DEV_MODE_TAP_WINDOW_MS = 2800;
-  title.addEventListener('click', function(ev) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    openMapsDevModeTapCount++;
-    if (openMapsDevModeTapTimer) clearTimeout(openMapsDevModeTapTimer);
-    openMapsDevModeTapTimer = setTimeout(function() {
-      openMapsDevModeTapCount = 0;
-      openMapsDevModeTapTimer = null;
-    }, OPEN_MAPS_DEV_MODE_TAP_WINDOW_MS);
-    if (openMapsDevModeTapCount < 7) return;
-    openMapsDevModeTapCount = 0;
-    if (openMapsDevModeTapTimer) {
-      clearTimeout(openMapsDevModeTapTimer);
-      openMapsDevModeTapTimer = null;
-    }
-    var cur = !!Settings.get().developerMode;
-    Settings.set('developerMode', !cur);
-    if (cur) {
-      openMapsWazeNotListedSessionClearAll();
-    }
-    openMapsInvalidateAddListCaches();
-    if (typeof addMapSuggestions !== 'undefined' && addMapSuggestions && addMapSuggestions.style.display === 'block') {
-      try {
-        populateAddMapSuggestions(addMapInput.value);
-      } catch (ePop) { /* ignore */ }
-    }
-    try {
-      openMapsRefreshAllWazeNotListedGates();
-    } catch (eG) { /* ignore */ }
-    try {
-      syncExitDevFooterVisibility();
-    } catch (eF) { /* ignore */ }
-    try {
-      log(!cur ? I18n.t('openmaps.developer_mode_enabled_log') : I18n.t('openmaps.developer_mode_disabled_log'));
-    } catch (eL) { /* ignore */ }
-  });
   activeMapsHeader.appendChild(title);
 
   var activeMapsFilterMode = document.createElement('select');
@@ -11480,38 +11312,7 @@ function onMapSort() {
     Tooltips.toggle();
     hideTooltips.textContent = (Settings.get().tooltips ? I18n.t('openmaps.hide_tooltips') : I18n.t('openmaps.show_tooltips'));
   });
-  exitDevBtn = document.createElement('button');
-  exitDevBtn.type = 'button';
-  exitDevBtn.className = 'openmaps-sidebar-footer-exit-dev openmaps-wz-btn-compact';
-  exitDevBtn.textContent = I18n.t('openmaps.exit_developer_mode');
-  exitDevBtn.style.cssText = 'display:none;flex:0 0 auto;padding:4px 10px;height:32px;font-size:12px;border:1px solid #dadce0;border-radius:6px;background:#fff;color:#1a73e8;cursor:pointer;font-family:inherit;';
-  exitDevBtn.addEventListener('click', function(ev) {
-    ev.preventDefault();
-    ev.stopPropagation();
-    if (!Settings.get().developerMode) return;
-    if (!confirm(I18n.t('openmaps.exit_developer_mode_confirm'))) return;
-    Settings.set('developerMode', false);
-    openMapsWazeNotListedSessionClearAll();
-    openMapsInvalidateAddListCaches();
-    if (typeof addMapSuggestions !== 'undefined' && addMapSuggestions && addMapSuggestions.style.display === 'block') {
-      try {
-        populateAddMapSuggestions(addMapInput.value);
-      } catch (ePop2) { /* ignore */ }
-    }
-    try {
-      openMapsRefreshAllWazeNotListedGates();
-    } catch (eG2) { /* ignore */ }
-    syncExitDevFooterVisibility();
-    try {
-      log(I18n.t('openmaps.developer_mode_disabled_log'));
-    } catch (eL2) { /* ignore */ }
-  });
-  syncExitDevFooterVisibility = function() {
-    if (exitDevBtn) exitDevBtn.style.display = Settings.get().developerMode ? 'inline-flex' : 'none';
-  };
-  syncExitDevFooterVisibility();
   footer.appendChild(footerVersion);
-  footer.appendChild(exitDevBtn);
   footer.appendChild(hideTooltips);
   tab.appendChild(footer);
 
@@ -12357,10 +12158,8 @@ var layerItem = document.createElement('li');
 
 function getNotAddedMaps() {
     var out = [];
-    var devOn = !!Settings.get().developerMode;
     maps.forEach(function(map) {
       if (map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) return;
-      if (!devOn && openMapsIsCatalogWazeNotListedMap(map)) return;
       if (!handles.some(function(h) { return map.id == h.mapId; })) out.push(map);
     });
     return out;
@@ -12452,20 +12251,17 @@ function getNotAddedMaps() {
 function selectMapToAdd(mapId) {
     var addedMap = maps.get(mapId);
     if (!addedMap && mapId != null && mapId !== '') {
-      var n0 = Number(mapId);
-      if (!isNaN(n0)) addedMap = maps.get(n0);
+      var n = Number(mapId);
+      if (!isNaN(n)) addedMap = maps.get(n);
+    }
+    var addedMap = maps.get(mapId);
+    if (!addedMap && mapId != null && mapId !== '') {
+      var n = Number(mapId);
+      if (!isNaN(n)) addedMap = maps.get(n);
     }
     if (!addedMap) return;
     var idNorm = String(addedMap.id != null ? addedMap.id : mapId);
     if (handles.some(function(h) { return h && String(h.mapId) === idNorm; })) {
-      return;
-    }
-    if (!Settings.get().developerMode && openMapsIsCatalogWazeNotListedMap(addedMap)) {
-      try {
-        log(I18n.t('openmaps.dev_not_listed_add_blocked'));
-      } catch (eLog) {
-        console.info('[OpenMaps] ' + (addedMap.title || mapId));
-      }
       return;
     }
     if (addedMap.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
@@ -12473,6 +12269,7 @@ function selectMapToAdd(mapId) {
       return;
     }
     handles.push(new MapHandle(addedMap));
+    if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
     saveMapState();
     addMapInput.value = '';
@@ -13501,9 +13298,6 @@ function loadTileError(tile, callback) {
     openMapsDedupeActiveHandlesByMapId();
     saveMapState();
     if (openMapsInspectorApi) openMapsInspectorApi.notifyHandlesChanged();
-    try {
-      openMapsRefreshAllWazeNotListedGates();
-    } catch (eBootG) { /* ignore */ }
   }
   //#endregion
 
@@ -14342,51 +14136,13 @@ var handle = document.createElement('div');
       textContainer.className = 'open-maps-text-container';
       textContainer.style.cssText = 'display:flex; flex-direction:column; align-items:flex-start; justify-content:center; min-width:0; flex:1;';
 
-      var titleRow = document.createElement('div');
-      titleRow.style.cssText = 'display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; width:100%;';
-
       UI.title = document.createElement('div');
       UI.title.className = 'open-maps-title';
-      UI.title.style.cssText = 'cursor:pointer; font-weight:normal; font-size:13px; color:var(--content_primary, #3c4043); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.2; flex:1; min-width:0;';
+      UI.title.style.cssText = 'cursor:pointer; font-weight:normal; font-size:13px; color:var(--content_primary, #3c4043); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.2;';
       UI.title.textContent = map.title;
-      UI.title.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (openMapsWazeNotListedLayerUseBlocked(map, self.mapId)) {
-          if (UI.touDetails) {
-            UI.editContainer.style.display = 'block';
-            if (UI.editBtn) UI.editBtn.style.transform = 'rotate(180deg)';
-            UI.touDetails.open = true;
-            try {
-              UI.touDetails.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } catch (eSc) { /* ignore */ }
-          }
-          return;
-        }
-        UI.visibility.dispatchEvent(new MouseEvent('click'));
-      });
+      UI.title.addEventListener('click', () => { UI.visibility.dispatchEvent(new MouseEvent('click')); });
 
-      UI.notAccreditedPill = document.createElement('button');
-      UI.notAccreditedPill.type = 'button';
-      UI.notAccreditedPill.className = 'openmaps-not-accredited-pill';
-      UI.notAccreditedPill.style.cssText = 'display:none;flex-shrink:0;font-size:9px;font-weight:600;padding:1px 6px;border-radius:10px;border:1px solid #ee9a94;background:#fce8e6;color:#c5221f;cursor:pointer;line-height:1.3;font-family:inherit;';
-      UI.notAccreditedPill.textContent = I18n.t('openmaps.waze_accred_tag_not_accredited');
-      UI.notAccreditedPill.setAttribute('aria-label', I18n.t('openmaps.waze_accred_tag_not_accredited'));
-      UI.notAccreditedPill.addEventListener('click', function(ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (UI.touDetails) {
-          UI.editContainer.style.display = 'block';
-          if (UI.editBtn) UI.editBtn.style.transform = 'rotate(180deg)';
-          UI.touDetails.open = true;
-          try {
-            UI.touDetails.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          } catch (eSc2) { /* ignore */ }
-        }
-      });
-
-      titleRow.appendChild(UI.title);
-      titleRow.appendChild(UI.notAccreditedPill);
-      textContainer.appendChild(titleRow);
+      textContainer.appendChild(UI.title);
       if (map.type === 'GOOGLE_MY_MAPS' && !openMapsGoogleMyMapsIntegrationEnabled()) {
         var gmmOffHint = document.createElement('div');
         gmmOffHint.className = 'openmaps-gmm-disabled-hint';
@@ -15011,7 +14767,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         actionsBtn.innerHTML = '<i class="fa fa-ellipsis-v" aria-hidden="true"></i>';
         actionsBtn.addEventListener('mouseenter', function() { actionsBtn.style.background = '#e8eaed'; });
         actionsBtn.addEventListener('mouseleave', function() { actionsBtn.style.background = 'transparent'; });
-        UI.mapLayersActionsBtn = actionsBtn;
 
         var menuRoot = document.createElement('div');
         menuRoot.style.cssText = 'position:relative; display:inline-block;';
@@ -15091,7 +14846,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           e.preventDefault();
           e.stopPropagation();
           closeMenu();
-          if (openMapsWazeNotListedLayerUseBlocked(map, self.mapId)) return;
           if (!self.mapLayers) return;
           var changed = false;
           self.mapLayers.forEach(function(l) {
@@ -15108,7 +14862,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           e.preventDefault();
           e.stopPropagation();
           closeMenu();
-          if (openMapsWazeNotListedLayerUseBlocked(map, self.mapId)) return;
           if (!self.mapLayers) return;
           var changed = false;
           self.mapLayers.forEach(function(l) {
@@ -15257,7 +15010,7 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         });
 
         self.layerUI.push({
-          item: layerItem, badge: lBadge, title: lTitle, desc: lDesc, queryBtn: lQuery, eyeBtn: lVis,
+          item: layerItem, badge: lBadge, title: lTitle, desc: lDesc, queryBtn: lQuery,
           activeColor: activeColor, inactiveColor: inactiveColor
         });
 
@@ -15648,32 +15401,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         statusP.style.cssText = 'font-size:11px; color:#202124; line-height:1.4; margin-bottom:10px;';
         wazeBox.appendChild(statusP);
 
-        var wazeAgreeBtn = document.createElement('button');
-        wazeAgreeBtn.type = 'button';
-        wazeAgreeBtn.className = 'openmaps-waze-not-listed-agree-btn';
-        wazeAgreeBtn.style.cssText = 'display:none;margin-bottom:10px;padding:6px 12px;font-size:12px;border-radius:6px;border:1px solid #dadce0;background:#fff;color:#202124;cursor:pointer;font-family:inherit;font-weight:600;';
-        wazeAgreeBtn.textContent = I18n.t('openmaps.waze_not_listed_i_agree');
-        wazeAgreeBtn.addEventListener('click', function(ev) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          openMapsWazeNotListedSessionSetAgreed(self.mapId);
-          if (map.id != null && map.id !== '') openMapsWazeNotListedSessionSetAgreed(map.id);
-          if (typeof self.applyWazeNotListedGate === 'function') {
-            self.applyWazeNotListedGate();
-            setTimeout(function() {
-              try {
-                self.applyWazeNotListedGate();
-              } catch (eAg1) { /* ignore */ }
-            }, 0);
-            requestAnimationFrame(function() {
-              try {
-                self.applyWazeNotListedGate();
-              } catch (eAg2) { /* ignore */ }
-            });
-          }
-        });
-        wazeBox.appendChild(wazeAgreeBtn);
-
         var helpA = document.createElement('a');
         helpA.href = OPEN_MAPS_WAZE_MAP_DATA_ATTRIBUTION_HELP_URL;
         helpA.target = '_blank';
@@ -15705,13 +15432,6 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           wazeTitle.style.color = bs.fg;
           statusP.textContent = I18n.t('openmaps.waze_accred_expl_' + st.code);
           formA.href = openMapsBuildLayerRequestFormUrl(map);
-          var devOn = !!Settings.get().developerMode;
-          var agreed = openMapsWazeNotListedSessionHasAgreed(self.mapId) || openMapsWazeNotListedSessionHasAgreed(map.id);
-          if (st.code === 'not_listed' && devOn && !agreed) {
-            wazeAgreeBtn.style.display = 'block';
-          } else {
-            wazeAgreeBtn.style.display = 'none';
-          }
         }
         UI.syncSourceWazeSection = syncSourceWazeSection;
         syncSourceWazeSection();
@@ -15866,99 +15586,11 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
       UI.editContainer.appendChild(rmBox);
 
       UI.container.appendChild(UI.editContainer);
-
-      self.__openmapsRebuildMapLayersUI = rebuildMapLayersUI;
     }
-
-    this.applyWazeNotListedGate = function() {
-      var blocked = openMapsWazeNotListedLayerUseBlocked(map, self.mapId);
-      if (!openMapsIsCatalogWazeNotListedMap(map)) {
-        self.__openmapsWazeNotListedGateBlocked = false;
-        self.__openmapsWazeNotListedStash = null;
-        var cbx0 = layerToggler.querySelector('wz-checkbox');
-        if (cbx0) cbx0.disabled = false;
-        try {
-          if (typeof self.__openmapsRebuildMapLayersUI === 'function') self.__openmapsRebuildMapLayersUI();
-        } catch (eRb0) { /* ignore */ }
-        if (typeof self.updateVisibility === 'function') self.updateVisibility();
-        return;
-      }
-
-      var wasBlocked = !!self.__openmapsWazeNotListedGateBlocked;
-
-      if (blocked && !wasBlocked) {
-        self.__openmapsWazeNotListedStash = {
-          hidden: self.hidden,
-          mapLayers: self.mapLayers.map(function(l) { return { name: l.name, visible: !!l.visible }; })
-        };
-        self.hidden = true;
-        self.mapLayers.forEach(function(l) { l.visible = false; });
-        self.__openmapsWazeNotListedGateBlocked = true;
-        if (typeof self.updateLayers === 'function') self.updateLayers();
-      } else if (!blocked && wasBlocked && self.__openmapsWazeNotListedStash) {
-        var st = self.__openmapsWazeNotListedStash;
-        self.hidden = !!st.hidden;
-        var byName = {};
-        st.mapLayers.forEach(function(x) { byName[x.name] = !!x.visible; });
-        self.mapLayers.forEach(function(l) {
-          if (Object.prototype.hasOwnProperty.call(byName, l.name)) l.visible = byName[l.name];
-        });
-        self.__openmapsWazeNotListedStash = null;
-        self.__openmapsWazeNotListedGateBlocked = false;
-        if (typeof self.updateLayers === 'function') self.updateLayers();
-        try {
-          saveMapState();
-        } catch (eSvG) { /* ignore */ }
-        try {
-          applyActiveMapsFilter();
-        } catch (eAmG) { /* ignore */ }
-      } else if (blocked && wasBlocked) {
-        var ch = false;
-        if (!self.hidden) {
-          self.hidden = true;
-          ch = true;
-        }
-        self.mapLayers.forEach(function(l) {
-          if (l.visible) {
-            l.visible = false;
-            ch = true;
-          }
-        });
-        if (ch && typeof self.updateLayers === 'function') self.updateLayers();
-        self.__openmapsWazeNotListedGateBlocked = true;
-      } else {
-        self.__openmapsWazeNotListedGateBlocked = blocked;
-      }
-
-      var cbxM = layerToggler.querySelector('wz-checkbox');
-      if (cbxM) {
-        cbxM.disabled = !!blocked;
-        if (blocked) {
-          cbxM.checked = false;
-          cbxM.removeAttribute('checked');
-        }
-      }
-
-      try {
-        if (typeof self.__openmapsRebuildMapLayersUI === 'function') self.__openmapsRebuildMapLayersUI();
-      } catch (eRb1) { /* ignore */ }
-      if (typeof self.updateVisibility === 'function') self.updateVisibility();
-    };
 
     // --- 4. ENGINE CORE ---
 // --- UNIFIED VISIBILITY CONTROLLER ---
     this.setManualVisibility = function(wantsVisible) {
-      if (openMapsWazeNotListedLayerUseBlocked(map, self.mapId)) {
-        if (wantsVisible) {
-          var checkboxBlock = layerToggler.querySelector('wz-checkbox');
-          if (checkboxBlock) {
-            checkboxBlock.checked = false;
-            checkboxBlock.removeAttribute('checked');
-          }
-          if (self.updateVisibility) self.updateVisibility();
-        }
-        return;
-      }
       self.hidden = !wantsVisible;
       // Enforce Bounding Box
       if (self.layer) {
@@ -16044,7 +15676,6 @@ this.updateVisibility = function() {
 
       // The map is only physically rendering if it is enabled AND in bounds!
       var isActuallyVisible = self.layer && self.layer.getVisibility();
-      var gateBlocked = openMapsWazeNotListedLayerUseBlocked(map, self.mapId);
 
     // Toggle the modern blue "Active" UX state on the card container
       UI.container.classList.toggle('is-active-map', !!isActuallyVisible);
@@ -16105,34 +15736,12 @@ this.updateVisibility = function() {
         UI.zoomMetaLine.textContent = zmParts.join(' · ');
       }
 
-// 3. Eye Icon (manual visibility) + Waze not_listed gate (padlock)
+// 3. Eye Icon (manual visibility)
       UI.visibility.classList.remove('fa-eye', 'fa-eye-slash', 'fa-lock');
-      if (gateBlocked) {
-        UI.visibility.classList.add('fa-lock');
-        UI.visibility.style.color = '#5f6368';
-        UI.visibility.style.cursor = 'not-allowed';
-        UI.visibility.style.pointerEvents = 'none';
-        Tooltips.add(UI.visibility, I18n.t('openmaps.waze_not_listed_eye_locked'), true);
-      } else {
-        UI.visibility.style.pointerEvents = '';
-        UI.visibility.classList.add(self.hidden ? 'fa-eye-slash' : 'fa-eye');
-        UI.visibility.style.color = '';
-      }
+      UI.visibility.classList.add(self.hidden ? 'fa-eye-slash' : 'fa-eye');
+      UI.visibility.style.color = '';
 
       if (UI.syncSourceWazeSection) UI.syncSourceWazeSection();
-
-      if (UI.notAccreditedPill) {
-        var showPill = openMapsIsCatalogWazeNotListedMap(map) && Settings.get().developerMode &&
-          !openMapsWazeNotListedSessionHasAgreed(self.mapId) &&
-          !openMapsWazeNotListedSessionHasAgreed(map.id);
-        UI.notAccreditedPill.style.display = showPill ? 'inline-flex' : 'none';
-      }
-
-      if (UI.mapLayersActionsBtn) {
-        UI.mapLayersActionsBtn.disabled = !!gateBlocked;
-        UI.mapLayersActionsBtn.style.opacity = gateBlocked ? '0.45' : '';
-        UI.mapLayersActionsBtn.style.pointerEvents = gateBlocked ? 'none' : '';
-      }
 
       var visibleLayerCount = self.mapLayers.filter(function(l) { return l.visible; }).length;
       var showNoLayers = !self.hidden && !self.outOfArea && self.mapLayers.length > 0 && visibleLayerCount === 0 && ['WMS', 'ESRI', 'XYZ'].indexOf(map.type) !== -1;
@@ -16144,17 +15753,15 @@ this.updateVisibility = function() {
       }
 
 // 4. Bounding Box (Blocked State & UI Toggles)
-      if (!gateBlocked) {
-        UI.visibility.style.color = (self.outOfArea ? '#999' : '');
-        UI.visibility.style.cursor = 'pointer';
+      UI.visibility.style.color = (self.outOfArea ? '#999' : '');
+      UI.visibility.style.cursor = 'pointer';
 
-        if (self.outOfArea) {
-          Tooltips.add(UI.visibility, 'Viewport out of Boundary Bbox: ' + map.bbox.join(', '), true);
-          if (UI.zoomToBboxBtn) UI.zoomToBboxBtn.style.display = ''; // Show zoom button
-        } else {
-          Tooltips.add(UI.visibility, I18n.t('openmaps.hideshow_layer'), true);
-          if (UI.zoomToBboxBtn) UI.zoomToBboxBtn.style.display = 'none'; // Hide zoom button
-        }
+      if (self.outOfArea) {
+        Tooltips.add(UI.visibility, 'Viewport out of Boundary Bbox: ' + map.bbox.join(', '), true);
+        if (UI.zoomToBboxBtn) UI.zoomToBboxBtn.style.display = ''; // Show zoom button
+      } else {
+        Tooltips.add(UI.visibility, I18n.t('openmaps.hideshow_layer'), true);
+        if (UI.zoomToBboxBtn) UI.zoomToBboxBtn.style.display = 'none'; // Hide zoom button
       }
 
       // Hide the Query (Hand) button if the map is manually hidden, locked, or out of bounds!
@@ -16176,12 +15783,6 @@ this.updateVisibility = function() {
           if (lUI.queryBtn) {
             lUI.queryBtn.style.display = self.outOfArea ? 'none' : '';
           }
-
-          if (lUI.eyeBtn) {
-            lUI.eyeBtn.style.opacity = gateBlocked ? '0.45' : '';
-            lUI.eyeBtn.style.pointerEvents = gateBlocked ? 'none' : '';
-          }
-          lUI.title.style.pointerEvents = gateBlocked ? 'none' : '';
         });
       }
     };
@@ -17234,7 +16835,7 @@ this.updateVisibility = function() {
     this.updateLayers();
     this.updateBboxLayer();
     this.applyFilters(); // Trigger filters on boot
-    this.applyWazeNotListedGate();
+    this.updateVisibility();
   }
 
   //#region Add style
