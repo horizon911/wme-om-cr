@@ -21,6 +21,10 @@ The **Candy Remix** focuses on aligning the script with modern WME SDK standards
 
 ## Changelog
 
+### 2026.04.15
+
+- **XYZ overzoom (`2026.04.15.1`):** **XYZ** tile requests clamp `${z}` (and x/y tile indices) to the catalog **zoom band**. Zooming beyond the band had been building URLs with the **viewport** zoom (e.g. z19 on a 1–18 service), which returns **no tiles** from many ArcGIS MapServer endpoints — the overlay looked empty instead of **overzoomed** (stretched z18 tiles).
+
 ### 2026.04.12
 
 - **Developer mode (`2026.04.12.1`–`2026.04.12.3`):** Seven quick taps on the **Active maps** title (within a few seconds) toggles persisted **developer mode** (toast/log feedback). **Exit developer mode** in the OpenMaps sidebar footer clears session acknowledgements and re-applies locks on **not_listed** catalog rows; seven-tap to turn developer mode off does the same session clear.

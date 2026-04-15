@@ -76,7 +76,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.12.3
+// @version     2026.04.15.1
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -89,7 +89,7 @@
 
 var styleElement;
 
-var OPEN_MAPS_VERSION = '2026.04.12.3';
+var OPEN_MAPS_VERSION = '2026.04.15.1';
 
 // Trusted Types / CSP hardening: avoid `innerHTML` where feasible.
 function openMapsClearEl(el) {
@@ -957,7 +957,8 @@ async function onWmeReady() {
         v2026_04_11_02: '- **Source & Waze:** Layer-request Google Form username prefill reads the editor name from **`unsafeWindow.W.loginManager`** / SDK **`User`** (Backbone-style models included). **Waze** box background and border track the same colors as the summary **accreditation** pill. **`Not on Waze list`** explanation now states what that means for using the overlay in WME (informal context vs treating it as an approved Waze-named source).',
         v2026_04_12_01: '- **Developer mode & Waze `not_listed`:** Seven taps on **Active maps** toggles persisted developer mode. Catalog maps **not on Waze’s list** are hidden from **Maps to add** unless developer mode is on. With developer mode, those rows stay locked until **I agree** under **Source & Waze** (session-scoped; cleared when developer mode turns off). Padlock + disabled Waze checkbox and sub-layer controls while locked; **rebuildMapLayersUI** exposed for correct sub-layer list after gate changes; session keys align string/numeric map ids.',
         v2026_04_12_02: '- **Waze `not_listed` polish (`2026.04.12.2`):** **Active maps** hides those catalog rows when developer mode is off (same rule as **Maps to add**). **Not Accredited** pill matches **Source & Waze** summary (compact label + colors); pill sits on its own row under the title; summary badge opens **Source & Waze** when locked (keyboard-accessible).',
-        v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Not Accredited** uses tighter chip styling (UA **button** reset, smaller radius). **I agree** hides the **Source & Waze** summary badge as well as the map-card control; the pill row stays collapsed when nothing to show.'
+        v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Not Accredited** uses tighter chip styling (UA **button** reset, smaller radius). **I agree** hides the **Source & Waze** summary badge as well as the map-card control; the pill row stays collapsed when nothing to show.',
+        v2026_04_15_01: '- **XYZ overzoom (`2026.04.15.1`):** Tile URLs use the catalog **zoom band** for `${z}` and matching x/y math. Zooming past the band no longer requests non-existent tile levels (e.g. ArcGIS MapServer) that left the overlay blank; tiles from the max band level stretch as intended.'
       }
     },
     nl: {
@@ -1471,7 +1472,8 @@ async function onWmeReady() {
         v2026_04_11_02: '- **Bron & Waze:** Voorinvullen van de editornaam in het Google Formulier via **`unsafeWindow.W.loginManager`** / SDK **User** (o.a. Backbone-modellen). Achtergrond en rand van het **Waze**-vak volgen de kleuren van de accreditatie-pill. **Niet op de Waze-lijst** legt nu uit wat dat betekent voor gebruik in WME (informele context vs. goedgekeurde bron).',
         v2026_04_12_01: '- **Ontwikkelaarsmodus & Waze `not_listed`:** zeven tikken op **Actieve kaarten** schakelt de bewaarde ontwikkelaarsmodus. Cataloguskaarten **niet op de Waze-lijst** ontbreken in **Toe te voegen kaarten** tenzij de modus aan staat. Met modus aan blijven rijen vergrendeld tot **Ik ga akkoord** onder **Bron & Waze** (sessie; gewist bij uit). Hangslot + uitgeschakelde Waze-checkbox en sublaagknoppen; **`rebuildMapLayersUI`** beschikbaar voor juiste sublaaglijst; sessiesleutels voor string/numerieke map-id’s.',
         v2026_04_12_02: '- **Waze `not_listed` verfijning (`2026.04.12.2`):** **Actieve kaarten** verbergt die catalogusrijen zonder ontwikkelaarsmodus (zelfde regel als **Toe te voegen kaarten**). **Niet geaccrediteerd**-pill komt overeen met **Bron & Waze**-samenvatting (compact label + kleuren); pill op eigen rij onder de titel; samenvattingsbadge opent **Bron & Waze** bij vergrendeling (toetsenbord).',
-        v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Niet geaccrediteerd** is compacter als chip (UA **knop**-reset, kleinere hoekradius). **Ik ga akkoord** verbergt ook de **Bron & Waze**-samenvattingsbadge naast de kaartregel; de pill-rij blijft dichtgeklapt als er niets te tonen is.'
+        v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Niet geaccrediteerd** is compacter als chip (UA **knop**-reset, kleinere hoekradius). **Ik ga akkoord** verbergt ook de **Bron & Waze**-samenvattingsbadge naast de kaartregel; de pill-rij blijft dichtgeklapt als er niets te tonen is.',
+        v2026_04_15_01: '- **XYZ-overzoom (`2026.04.15.1`):** Tegel-URL’s gebruiken het catalogus-**zoombereik** voor `${z}` en passende x/y. Inzoomen voorbij de band vraagt geen niet-bestaande tegelniveaus meer (o.a. ArcGIS MapServer) die de overlay leeg lieten; tegels van het maximum in de band worden opgerekt zoals bedoeld.'
       }
     },
     fr: {
@@ -1787,7 +1789,8 @@ async function onWmeReady() {
         v2026_04_11_02: '- **Fonte e Waze:** pré-preenchimento do nome do editor no formulário Google via **`unsafeWindow.W.loginManager`** / SDK **User** (incl. modelos Backbone). Fundo e contorno da caixa **Waze** alinhados com a pill de **credenciação**. **Não consta na lista Waze** explica agora o que isso implica para uso no WME (contexto informal vs. fonte aprovada).',
         v2026_04_12_01: '- **Modo de programador & Waze `not_listed`:** sete toques em **Mapas ativos** alterna o modo de programador guardado. Mapas de catálogo **fora da lista Waze** não aparecem em **Mapas a adicionar** sem o modo. Com o modo, as linhas ficam bloqueadas até **Concordo** em **Fonte e Waze** (sessão; limpo ao desligar). Cadeado + caixa Waze e subcamadas desativados ; **`rebuildMapLayersUI`** exposto para a lista de subcamadas ; chaves de sessão alinham id string/número.',
         v2026_04_12_02: '- **Refino Waze `not_listed` (`2026.04.12.2`):** **Mapas ativos** oculta essas linhas de catálogo sem modo de programador (mesma regra que **Mapas a adicionar**). Pastilha **Não credenciado** alinhada ao resumo **Fonte e Waze** (rótulo compacto + cores); pastilha numa linha própria sob o título; o badge abre **Fonte e Waze** quando bloqueado (teclado).',
-        v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`):** **Não credenciado** mais compacto estilo chip (reset de **botão** do navegador, cantos menores). **Concordo** oculta também o badge do resumo **Fonte e Waze** como o controlo do cartão; a linha da pastilha fica fechada quando não há nada a mostrar.'
+        v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`):** **Não credenciado** mais compacto estilo chip (reset de **botão** do navegador, cantos menores). **Concordo** oculta também o badge do resumo **Fonte e Waze** como o controlo do cartão; a linha da pastilha fica fechada quando não há nada a mostrar.',
+        v2026_04_15_01: '- **Sobrezoom XYZ (`2026.04.15.1`):** URLs de mosaico usam a **faixa de zoom** do catálogo em `${z}` e x/y coerentes. Além da faixa, deixa de pedir níveis inexistentes (ex.: ArcGIS MapServer) que deixavam a sobreposição em branco; os mosaicos do nível máximo da faixa são esticados como previsto.'
       }
     }
   };
@@ -4768,6 +4771,92 @@ async function onWmeReady() {
     if (!Settings.get().developerMode) return true;
     var mid = (handleMapId != null && handleMapId !== '') ? handleMapId : (map && map.id);
     return !openMapsWazeNotListedSessionHasAgreed(mid);
+  }
+
+  /** True if `layerName` matches an entry in `map.default_layers` (exact or case-insensitive). */
+  function openMapsMapLayerNameMatchesDefaultLayers(map, layerName) {
+    if (!map || layerName == null || layerName === '') return false;
+    var defs = map.default_layers;
+    if (!defs || !defs.length) return false;
+    var s = String(layerName);
+    var sl = s.toLowerCase();
+    for (var i = 0; i < defs.length; i++) {
+      var d = defs[i];
+      if (d == null || d === '') continue;
+      if (d === layerName) return true;
+      try {
+        if (String(d).toLowerCase() === sl) return true;
+      } catch (eCi) { /* ignore */ }
+    }
+    return false;
+  }
+
+  /**
+   * After unlocking the Waze `not_listed` gate, ensure at least catalog defaults (or last-stash intent) are on
+   * when name mismatches left every sub-layer off (common after GetCapabilities merge vs curated ids).
+   */
+  function openMapsEnsureMapLayersVisibleAfterWazeNotListedUnlock(self, map, stash) {
+    if (!self || !map || !openMapsIsCatalogWazeNotListedMap(map)) return;
+    if (!self.mapLayers || self.mapLayers.length === 0) return;
+    var visCount = 0;
+    for (var ci = 0; ci < self.mapLayers.length; ci++) {
+      if (self.mapLayers[ci].visible) visCount++;
+    }
+    if (visCount > 0) return;
+    var applied = false;
+    for (var ai = 0; ai < self.mapLayers.length; ai++) {
+      var lm = self.mapLayers[ai];
+      if (openMapsMapLayerNameMatchesDefaultLayers(map, lm.name)) {
+        lm.visible = true;
+        applied = true;
+      }
+    }
+    if (applied) return;
+    if (stash && Array.isArray(stash.mapLayers)) {
+      var want = {};
+      for (var si = 0; si < stash.mapLayers.length; si++) {
+        var sx = stash.mapLayers[si];
+        if (!sx || !sx.name || !sx.visible) continue;
+        want[String(sx.name).toLowerCase()] = true;
+      }
+      for (var bi = 0; bi < self.mapLayers.length; bi++) {
+        var bk = self.mapLayers[bi];
+        if (want[String(bk.name).toLowerCase()]) {
+          bk.visible = true;
+          applied = true;
+        }
+      }
+    }
+    if (applied) return;
+    if (self.mapLayers.length === 1) self.mapLayers[0].visible = true;
+  }
+
+  /**
+   * True when the edit panel shows Map layers / sub-layer toggles — must match {@code showLayerList} in buildEditPanel.
+   * When false (e.g. XYZ with one logical layer), users have no UI to turn sub-layers on; we keep them all visible.
+   */
+  function openMapsMapSurfacesLayerManagementUI(map, self) {
+    if (!map || !self || !self.mapLayers) return false;
+    var n = self.mapLayers.length;
+    if (map.type === 'WMS' || map.type === 'ESRI' || openMapsMapTypeIsKmlVectorOverlay(map.type)) return n >= 1;
+    return n > 1;
+  }
+
+  /**
+   * @returns {boolean} true if any sub-layer visibility was changed
+   */
+  function openMapsRefreshMapLayersVisibleWhenNoLayerManagementUI(map, self) {
+    if (!map || !self || !self.mapLayers || !self.mapLayers.length) return false;
+    if (openMapsWazeNotListedLayerUseBlocked(map, self.mapId)) return false;
+    if (openMapsMapSurfacesLayerManagementUI(map, self)) return false;
+    var changed = false;
+    for (var i = 0; i < self.mapLayers.length; i++) {
+      if (!self.mapLayers[i].visible) {
+        self.mapLayers[i].visible = true;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   function openMapsEncodeGoogleFormParam(str) {
@@ -14682,11 +14771,8 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         bboxRow.appendChild(bboxCheck);
 
         if (map.bbox) {
-          var bboxCopyBtn = document.createElement('button');
-          bboxCopyBtn.type = 'button';
-          bboxCopyBtn.className = 'openmaps-bbox-copy-btn';
-          bboxCopyBtn.style.cssText = 'flex:0 0 auto; padding:2px 8px; font-size:11px; border:1px solid #dadce0; border-radius:999px; background:#fff; color:#3c4043; cursor:pointer;';
-          bboxCopyBtn.textContent = I18n.t('openmaps.copy_bbox');
+          var bboxCopyBtn = createIconButton('fa-copy', I18n.t('openmaps.copy_bbox'), true);
+          bboxCopyBtn.style.flex = '0 0 auto';
           bboxCopyBtn.addEventListener('click', function(ev) {
             if (ev) ev.preventDefault();
             try {
@@ -14708,8 +14794,13 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
                 try { document.execCommand('copy'); } catch (e) {}
                 ta.remove();
               }
-              bboxCopyBtn.textContent = I18n.t('openmaps.copy_done') || 'Copied';
-              setTimeout(function() { bboxCopyBtn.textContent = I18n.t('openmaps.copy_bbox'); }, 900);
+              var prevCls = bboxCopyBtn.className;
+              bboxCopyBtn.className = 'fa fa-check open-maps-icon-button';
+              bboxCopyBtn.setAttribute('aria-label', I18n.t('openmaps.copy_done') || 'Copied');
+              setTimeout(function() {
+                bboxCopyBtn.className = prevCls;
+                bboxCopyBtn.setAttribute('aria-label', I18n.t('openmaps.copy_bbox'));
+              }, 900);
             } catch (eC) { /* ignore */ }
           });
           bboxRow.appendChild(bboxCopyBtn);
@@ -15370,20 +15461,23 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         var extra = cloud.filter(function(c) { return curatedKeys.indexOf(c.name) === -1; })
           .sort(function(a, b) { return (a.title || a.name).localeCompare(b.title || b.name); });
         extra.forEach(function(c) { mergedNames.push(c.name); });
-        var catalogMergeGateBlocked = openMapsWazeNotListedLayerUseBlocked(map, self.mapId);
         self.mapLayers = mergedNames.map(function(name) {
           var v;
           if (Object.prototype.hasOwnProperty.call(vis, name)) v = vis[name];
           else {
             var prev = prevMapLayers.find(function(m) { return m.name === name; });
-            if (catalogMergeGateBlocked) {
-              v = map.default_layers.indexOf(name) !== -1;
-            } else {
-              v = prev ? prev.visible : (map.default_layers.indexOf(name) !== -1);
-            }
+            var inDef = openMapsMapLayerNameMatchesDefaultLayers(map, name);
+            v = prev ? prev.visible : inDef;
           }
           return { name: name, visible: v };
         });
+        if (openMapsWazeNotListedLayerUseBlocked(map, self.mapId) && self.__openmapsWazeNotListedStash) {
+          try {
+            self.__openmapsWazeNotListedStash.mapLayers = self.mapLayers.map(function(l) {
+              return { name: l.name, visible: !!l.visible };
+            });
+          } catch (eStashSync) { /* ignore */ }
+        }
         rebuildMapLayersUI();
         saveMapState();
         try {
@@ -15990,17 +16084,27 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         if (st) {
           self.hidden = !!st.hidden;
           var byName = {};
-          (st.mapLayers || []).forEach(function(x) { byName[x.name] = !!x.visible; });
+          var byNameLower = {};
+          (st.mapLayers || []).forEach(function(x) {
+            if (!x || x.name == null) return;
+            byName[x.name] = !!x.visible;
+            try {
+              byNameLower[String(x.name).toLowerCase()] = !!x.visible;
+            } catch (eBn) { /* ignore */ }
+          });
           self.mapLayers.forEach(function(l) {
+            var keyLow = String(l.name).toLowerCase();
             if (Object.prototype.hasOwnProperty.call(byName, l.name)) l.visible = byName[l.name];
-            else l.visible = map.default_layers.indexOf(l.name) !== -1;
+            else if (Object.prototype.hasOwnProperty.call(byNameLower, keyLow)) l.visible = byNameLower[keyLow];
+            else l.visible = openMapsMapLayerNameMatchesDefaultLayers(map, l.name);
           });
         } else {
           self.hidden = false;
           self.mapLayers.forEach(function(l) {
-            l.visible = map.default_layers.indexOf(l.name) !== -1;
+            l.visible = openMapsMapLayerNameMatchesDefaultLayers(map, l.name);
           });
         }
+        openMapsEnsureMapLayersVisibleAfterWazeNotListedUnlock(self, map, st);
         self.__openmapsWazeNotListedStash = null;
         self.__openmapsWazeNotListedGateBlocked = false;
         if (typeof self.updateLayers === 'function') self.updateLayers();
@@ -16034,6 +16138,10 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
         if (blocked) {
           cbxM.checked = false;
           cbxM.removeAttribute('checked');
+        } else {
+          cbxM.checked = !self.hidden;
+          if (!self.hidden) cbxM.setAttribute('checked', '');
+          else cbxM.removeAttribute('checked');
         }
       }
 
@@ -16288,6 +16396,9 @@ this.updateVisibility = function() {
     };
 
     this.updateLayers = function() {
+      try {
+        if (openMapsRefreshMapLayersVisibleWhenNoLayerManagementUI(map, self)) layerRedrawNeeded = true;
+      } catch (eLmUi) { /* ignore */ }
       var visibleLayers = self.mapLayers.filter(l => l.visible).map(l => l.name);
       // Google My Maps / local KML: do not instantiate OpenLayers.Layer.Vector until the row can actually show on the map.
       // A My Map row in Active Maps (hidden, ToU pending, or eye off) used to still create the vector + run sync,
@@ -17115,14 +17226,41 @@ this.updateVisibility = function() {
                     if (this.__openmapsXYZRecursionGuard) return '';
                     this.__openmapsXYZRecursionGuard = true;
                     try {
-                      var z = (this.map && typeof this.map.getZoom === 'function') ? this.map.getZoom() : null;
+                      var olMap = this.map;
+                      var zViewport = (olMap && typeof olMap.getZoom === 'function') ? olMap.getZoom() : null;
+                      if (zViewport == null) return '';
+
+                      // `${z}` must match the tile matrix the server publishes. Using viewport zoom in
+                      // …/tile/${z}/… while zoomed past zoomRange[1] requests non-existent levels (blank tiles).
+                      // Clamp to the catalog band and compute x,y at that level; OpenLayers stretches tiles
+                      // when serverResolutions is capped (overzoom).
+                      var tileZ = Math.floor(Number(zViewport));
+                      if (isNaN(tileZ)) return '';
+                      if (map.zoomRange && map.zoomRange.length >= 2) {
+                        var rz0 = map.zoomRange[0];
+                        var rz1 = map.zoomRange[1];
+                        if (rz0 != null && rz1 != null) {
+                          var minZ = Math.floor(Number(rz0));
+                          var maxZ = Math.floor(Number(rz1));
+                          if (!isNaN(minZ) && !isNaN(maxZ) && maxZ >= minZ) {
+                            tileZ = Math.max(minZ, Math.min(tileZ, maxZ));
+                          }
+                        }
+                      }
+
                       var resolution = null;
-                      if (typeof this.getResolution === 'function') resolution = this.getResolution();
-                      if (resolution == null && this.map && typeof this.map.getResolution === 'function') resolution = this.map.getResolution();
-                      if (z == null || resolution == null) return '';
+                      var resolutions = olMap && (olMap.resolutions || (olMap.baseLayer && olMap.baseLayer.resolutions));
+                      if (resolutions && resolutions.length && tileZ >= 0 && tileZ < resolutions.length) {
+                        resolution = resolutions[tileZ];
+                      }
+                      if (resolution == null) {
+                        if (typeof this.getResolution === 'function') resolution = this.getResolution();
+                        if (resolution == null && olMap && typeof olMap.getResolution === 'function') resolution = olMap.getResolution();
+                      }
+                      if (resolution == null || resolution === 0) return '';
 
                       // Prefer the layer grid origin OpenLayers uses for tile math.
-                      var origin = this.gridOrigin || (this.map && this.map.baseLayer && this.map.baseLayer.gridOrigin) ||
+                      var origin = this.gridOrigin || (olMap && olMap.baseLayer && olMap.baseLayer.gridOrigin) ||
                         { lon: -20037508.342789244, lat: 20037508.342789244 }; // WebMercator
 
                       var tileSize = this.tileSize || new OpenLayers.Size(256, 256);
@@ -17134,7 +17272,7 @@ this.updateVisibility = function() {
                       var y = Math.floor((origin.lat - bounds.top) / (resolution * tileH));
 
                       return map.url
-                        .replace('${z}', z)
+                        .replace('${z}', tileZ)
                         .replace('${y}', y)
                         .replace('${x}', x);
                     } finally {
