@@ -21,13 +21,17 @@ The script adds [Waze Map Editor](https://www.waze.com/editor) overlays for open
 
 Major user-visible changes only (at most one section per calendar day). Full version history: [Greasy Fork](https://greasyfork.org/scripts/570591-wme-openmaps-candy-remix/versions) and git commits.
 
+### 2026.04.18
+
+- **JSON catalogs:** Subscribe to a portable map list from an **HTTPS URL** (refreshed when you load WME) or load a **local JSON file** (up to **5 MB** and **2000** maps). Imported maps use collision-free ids; sub-layer tags show **JSON catalog** where relevant.
+- **Export:** In **Manage your maps**, use **Export catalog** to pick **Active** and **Library** rows (with an origin column so duplicates are clear) and download a JSON bundle you can share or re-import.
+
 ### 2026.04.15
 
 - **XYZ overlays:** Zooming past a layer's catalog max zoom no longer builds broken tile URLs (empty map). Tile level and indices clamp to the layer's zoom band so the last good zoom **overzooms** instead of failing.
 
 ### 2026.04.12
 
-- **Developer mode:** Seven quick taps on the **Active maps** title (within a few seconds) toggles developer mode (toast/log feedback). Use **Exit developer mode** in the sidebar footer to clear session state and re-apply locks on catalog rows that are not on Waze's public list.
 - **Maps not on Waze's attribution list:** Those catalog entries stay out of **Maps to add** (and **Active maps** restore) unless developer mode is on, or you add them under the stricter **Source & Waze** rules (locked until you agree per map).
 - **UI:** Clearer **Not accredited** / **Source & Waze** flow for locked rows (compact chip, keyboard-friendly).
 

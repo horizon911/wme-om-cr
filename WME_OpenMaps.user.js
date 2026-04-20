@@ -4,7 +4,7 @@
 // @namespace      https://github.com/horizon911/
 // @contributor  Glodenox
 // @contributor  petrjanik, d2-mac, MajkiiTelini (Czech WMS layers — ČÚZK definitions)
-// @description This userscript augments the Waze Map Editor by allowing editors to overlay external maps (open-data cadasters, orthophotos, boundaries, plus your own KML from a file or Google My Maps) directly onto the editing canvas.
+// @description This userscript augments the Waze Map Editor by allowing editors to overlay external maps (open-data cadasters, orthophotos, boundaries, optional JSON map catalogs from HTTPS or a file, plus your own KML from a file or Google My Maps) directly onto the editing canvas.
 // @include     https://www.waze.com/editor*
 // @include     https://www.waze.com/*/editor*
 // @include     https://beta.waze.com/editor*
@@ -76,7 +76,7 @@
 // @updateURL   https://update.greasyfork.org/scripts/570591/WME%20OpenMaps%20%28Candy%20Remix%29.user.js
 // @supportURL  https://github.com/horizon911/wme-om-cr/issues
 // @tag         Candy
-// @version     2026.04.15.1
+// @version     2026.04.18.1
 // @require     https://bowercdn.net/c/html.sortable-0.4.4/dist/html.sortable.js
 // @grant       GM_xmlhttpRequest
 // @license     GPL v2
@@ -89,7 +89,7 @@
 
 var styleElement;
 
-var OPEN_MAPS_VERSION = '2026.04.15.1';
+var OPEN_MAPS_VERSION = '2026.04.18.1';
 
 // Trusted Types / CSP hardening: avoid `innerHTML` where feasible.
 function openMapsClearEl(el) {
@@ -685,6 +685,61 @@ async function onWmeReady() {
       layer_tag_default: 'Default',
       layer_tag_user_upload: 'Upload',
       layer_tag_google_mymaps: 'My Maps',
+      layer_tag_json_catalog: 'JSON catalog',
+      json_catalog_section_title: 'JSON catalogs',
+      json_catalog_url_placeholder: 'Paste HTTPS URL to a JSON catalog…',
+      json_catalog_add_url: 'Add URL catalog',
+      json_catalog_load_file: 'Load JSON file…',
+      json_catalog_empty: 'No JSON catalogs yet.',
+      json_catalog_untitled: 'JSON catalog',
+      json_catalog_default_title: 'JSON catalog',
+      json_catalog_synced: 'Synced',
+      json_catalog_error_label: 'Error:',
+      json_catalog_map_count: '{n} maps',
+      json_catalog_source_file: 'File',
+      json_catalog_source_url: 'URL',
+      json_catalog_disabled: 'Disabled',
+      json_catalog_enabled: 'Enabled',
+      json_catalog_enable: 'Enable',
+      json_catalog_disable: 'Disable',
+      json_catalog_refresh: 'Refresh',
+      json_catalog_remove: 'Remove',
+      json_catalog_url_https_only: 'Catalog URL must start with https://',
+      json_catalog_sync_failed: 'Sync failed: {detail}',
+      json_catalog_file_read_error: 'Could not read the JSON file.',
+      json_catalog_file_enable_hint: 'Choose “Load JSON file…” and pick the same catalog file again to restore maps after enabling.',
+      json_catalog_error_empty: 'Catalog file is empty.',
+      json_catalog_error_too_large: 'Catalog exceeds the 5 MB limit.',
+      json_catalog_error_json: 'Catalog is not valid JSON.',
+      json_catalog_error_shape: 'Catalog must be a JSON object.',
+      json_catalog_error_no_maps: 'Catalog must include a “maps” array.',
+      json_catalog_error_too_many_maps: 'Catalog lists more than 2000 maps.',
+      json_catalog_error_no_valid_maps: 'No valid map entries were found in this catalog.',
+      json_catalog_error_network: 'Network error while fetching catalog.',
+      json_catalog_error_timeout: 'Timed out while fetching catalog.',
+      manager_tab_manage: 'Manage',
+      manager_tab_export: 'Export catalog',
+      export_select_all: 'Select all',
+      export_select_none: 'Select none',
+      export_download_json: 'Export checked (JSON)',
+      export_col_title: 'Title',
+      export_col_map_id: 'Map id',
+      export_col_provenance: 'Origin',
+      export_col_context: 'Context',
+      export_context_active: 'Active',
+      export_context_library: 'Library',
+      export_none_checked: 'Select at least one row to export.',
+      export_stringify_error: 'Could not build JSON for export.',
+      export_too_large: 'Export exceeds the 5 MB limit. Uncheck large KML rows or export fewer maps.',
+      export_download_failed: 'Download could not start in this browser.',
+      map_provenance_unknown: 'Unknown',
+      map_provenance_json_catalog: 'JSON catalog',
+      map_provenance_sheet_repo: 'Sheet repo',
+      map_provenance_my_maps: 'My Maps',
+      map_provenance_upload: 'Upload (KML)',
+      map_provenance_remote_kml: 'Remote KML',
+      map_provenance_user: 'Your maps',
+      map_provenance_builtin: 'Built-in catalog',
       copy_map_definition_tooltip: 'Copy map definition',
       copy_map_definition_menu_all_keep_defaults: 'Copy (All layers, keep defaults)',
       copy_map_definition_menu_all_make_enabled_default: 'Copy (All layers, make enabled layers default)',
@@ -958,7 +1013,8 @@ async function onWmeReady() {
         v2026_04_12_01: '- **Developer mode & Waze `not_listed`:** Seven taps on **Active maps** toggles persisted developer mode. Catalog maps **not on Waze’s list** are hidden from **Maps to add** unless developer mode is on. With developer mode, those rows stay locked until **I agree** under **Source & Waze** (session-scoped; cleared when developer mode turns off). Padlock + disabled Waze checkbox and sub-layer controls while locked; **rebuildMapLayersUI** exposed for correct sub-layer list after gate changes; session keys align string/numeric map ids.',
         v2026_04_12_02: '- **Waze `not_listed` polish (`2026.04.12.2`):** **Active maps** hides those catalog rows when developer mode is off (same rule as **Maps to add**). **Not Accredited** pill matches **Source & Waze** summary (compact label + colors); pill sits on its own row under the title; summary badge opens **Source & Waze** when locked (keyboard-accessible).',
         v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Not Accredited** uses tighter chip styling (UA **button** reset, smaller radius). **I agree** hides the **Source & Waze** summary badge as well as the map-card control; the pill row stays collapsed when nothing to show.',
-        v2026_04_15_01: '- **XYZ overzoom (`2026.04.15.1`):** Tile URLs use the catalog **zoom band** for `${z}` and matching x/y math. Zooming past the band no longer requests non-existent tile levels (e.g. ArcGIS MapServer) that left the overlay blank; tiles from the max band level stretch as intended.'
+        v2026_04_15_01: '- **XYZ overzoom (`2026.04.15.1`):** Tile URLs use the catalog **zoom band** for `${z}` and matching x/y math. Zooming past the band no longer requests non-existent tile levels (e.g. ArcGIS MapServer) that left the overlay blank; tiles from the max band level stretch as intended.',
+        v2026_04_18_01: '- **JSON catalogs & export (`2026.04.18.1`):** Add **JSON catalogs** from an **HTTPS URL** (refreshed on load) or a **local JSON file** (up to **5 MB**, max **2000** maps per file). Imported maps get collision-free ids and appear alongside built-in layers; sub-layer tags show **JSON catalog**. **Manage your maps** gains an **Export catalog** tab with a checklist of **Active** and **Library** rows (origin column distinguishes duplicates) to download a portable JSON bundle.'
       }
     },
     nl: {
@@ -1200,6 +1256,61 @@ async function onWmeReady() {
       layer_tag_default: 'Standaard',
       layer_tag_user_upload: 'Upload',
       layer_tag_google_mymaps: 'My Maps',
+      layer_tag_json_catalog: 'JSON-catalogus',
+      json_catalog_section_title: 'JSON-catalogi',
+      json_catalog_url_placeholder: 'Plak HTTPS-URL naar een JSON-catalogus…',
+      json_catalog_add_url: 'URL-catalogus toevoegen',
+      json_catalog_load_file: 'JSON-bestand laden…',
+      json_catalog_empty: 'Nog geen JSON-catalogi.',
+      json_catalog_untitled: 'JSON-catalogus',
+      json_catalog_default_title: 'JSON-catalogus',
+      json_catalog_synced: 'Gesynchroniseerd',
+      json_catalog_error_label: 'Fout:',
+      json_catalog_map_count: '{n} kaarten',
+      json_catalog_source_file: 'Bestand',
+      json_catalog_source_url: 'URL',
+      json_catalog_disabled: 'Uit',
+      json_catalog_enabled: 'Aan',
+      json_catalog_enable: 'Inschakelen',
+      json_catalog_disable: 'Uitschakelen',
+      json_catalog_refresh: 'Vernieuwen',
+      json_catalog_remove: 'Verwijderen',
+      json_catalog_url_https_only: 'Catalogus-URL moet met https:// beginnen',
+      json_catalog_sync_failed: 'Synchronisatie mislukt: {detail}',
+      json_catalog_file_read_error: 'Het JSON-bestand kon niet worden gelezen.',
+      json_catalog_file_enable_hint: 'Kies opnieuw “JSON-bestand laden…” en selecteer hetzelfde catalogusbestand om kaarten te herstellen na inschakelen.',
+      json_catalog_error_empty: 'Catalogusbestand is leeg.',
+      json_catalog_error_too_large: 'Catalogus overschrijdt de limiet van 5 MB.',
+      json_catalog_error_json: 'Catalogus is geen geldige JSON.',
+      json_catalog_error_shape: 'Catalogus moet een JSON-object zijn.',
+      json_catalog_error_no_maps: 'Catalogus moet een “maps”-array bevatten.',
+      json_catalog_error_too_many_maps: 'Catalogus bevat meer dan 2000 kaarten.',
+      json_catalog_error_no_valid_maps: 'Geen geldige kaartitems in deze catalogus.',
+      json_catalog_error_network: 'Netwerkfout bij ophalen van de catalogus.',
+      json_catalog_error_timeout: 'Time-out bij ophalen van de catalogus.',
+      manager_tab_manage: 'Beheren',
+      manager_tab_export: 'Catalogus exporteren',
+      export_select_all: 'Alles selecteren',
+      export_select_none: 'Selectie wissen',
+      export_download_json: 'Selectie exporteren (JSON)',
+      export_col_title: 'Titel',
+      export_col_map_id: 'Kaart-id',
+      export_col_provenance: 'Herkomst',
+      export_col_context: 'Context',
+      export_context_active: 'Actief',
+      export_context_library: 'Bibliotheek',
+      export_none_checked: 'Selecteer minstens één rij om te exporteren.',
+      export_stringify_error: 'Kon geen JSON voor export bouwen.',
+      export_too_large: 'Export overschrijdt de limiet van 5 MB. Vink grote KML-regels uit of exporteer minder kaarten.',
+      export_download_failed: 'Download kon in deze browser niet starten.',
+      map_provenance_unknown: 'Onbekend',
+      map_provenance_json_catalog: 'JSON-catalogus',
+      map_provenance_sheet_repo: 'Spreadsheet-repo',
+      map_provenance_my_maps: 'My Maps',
+      map_provenance_upload: 'Upload (KML)',
+      map_provenance_remote_kml: 'Externe KML',
+      map_provenance_user: 'Jouw kaarten',
+      map_provenance_builtin: 'Ingebouwde catalogus',
       copy_map_definition_tooltip: 'Kaartdefinitie kopiëren',
       copy_map_definition_menu_all_keep_defaults: 'Kopiëren (alle lagen, standaarden behouden)',
       copy_map_definition_menu_all_make_enabled_default: 'Kopiëren (alle lagen, ingeschakelde lagen als standaard)',
@@ -1473,7 +1584,8 @@ async function onWmeReady() {
         v2026_04_12_01: '- **Ontwikkelaarsmodus & Waze `not_listed`:** zeven tikken op **Actieve kaarten** schakelt de bewaarde ontwikkelaarsmodus. Cataloguskaarten **niet op de Waze-lijst** ontbreken in **Toe te voegen kaarten** tenzij de modus aan staat. Met modus aan blijven rijen vergrendeld tot **Ik ga akkoord** onder **Bron & Waze** (sessie; gewist bij uit). Hangslot + uitgeschakelde Waze-checkbox en sublaagknoppen; **`rebuildMapLayersUI`** beschikbaar voor juiste sublaaglijst; sessiesleutels voor string/numerieke map-id’s.',
         v2026_04_12_02: '- **Waze `not_listed` verfijning (`2026.04.12.2`):** **Actieve kaarten** verbergt die catalogusrijen zonder ontwikkelaarsmodus (zelfde regel als **Toe te voegen kaarten**). **Niet geaccrediteerd**-pill komt overeen met **Bron & Waze**-samenvatting (compact label + kleuren); pill op eigen rij onder de titel; samenvattingsbadge opent **Bron & Waze** bij vergrendeling (toetsenbord).',
         v2026_04_12_03: '- **Waze `not_listed` UI (`2026.04.12.3`):** **Niet geaccrediteerd** is compacter als chip (UA **knop**-reset, kleinere hoekradius). **Ik ga akkoord** verbergt ook de **Bron & Waze**-samenvattingsbadge naast de kaartregel; de pill-rij blijft dichtgeklapt als er niets te tonen is.',
-        v2026_04_15_01: '- **XYZ-overzoom (`2026.04.15.1`):** Tegel-URL’s gebruiken het catalogus-**zoombereik** voor `${z}` en passende x/y. Inzoomen voorbij de band vraagt geen niet-bestaande tegelniveaus meer (o.a. ArcGIS MapServer) die de overlay leeg lieten; tegels van het maximum in de band worden opgerekt zoals bedoeld.'
+        v2026_04_15_01: '- **XYZ-overzoom (`2026.04.15.1`):** Tegel-URL’s gebruiken het catalogus-**zoombereik** voor `${z}` en passende x/y. Inzoomen voorbij de band vraagt geen niet-bestaande tegelniveaus meer (o.a. ArcGIS MapServer) die de overlay leeg lieten; tegels van het maximum in de band worden opgerekt zoals bedoeld.',
+        v2026_04_18_01: '- **JSON-catalogi & export (`2026.04.18.1`):** Voeg **JSON-catalogi** toe via een **HTTPS-URL** (vernieuwd bij start) of een **lokaal JSON-bestand** (max. **5 MB**, max. **2000** kaarten). Geïmporteerde kaarten krijgen botsingvrije id’s en verschijnen naast ingebouwde lagen; sublaagtags tonen **JSON-catalogus**. **Je kaarten beheren** heeft een tab **Catalogus exporteren** met een checklist van **Actief** en **Bibliotheek** (herkomstkolom onderscheidt duplicaten) om een draagbaar JSON-pakket te downloaden.'
       }
     },
     fr: {
@@ -1531,6 +1643,61 @@ async function onWmeReady() {
       layer_tag_default: 'Défaut',
       layer_tag_user_upload: 'Import',
       layer_tag_google_mymaps: 'My Maps',
+      layer_tag_json_catalog: 'Catalogue JSON',
+      json_catalog_section_title: 'Catalogues JSON',
+      json_catalog_url_placeholder: 'Collez l’URL HTTPS d’un catalogue JSON…',
+      json_catalog_add_url: 'Ajouter un catalogue URL',
+      json_catalog_load_file: 'Charger un fichier JSON…',
+      json_catalog_empty: 'Aucun catalogue JSON pour l’instant.',
+      json_catalog_untitled: 'Catalogue JSON',
+      json_catalog_default_title: 'Catalogue JSON',
+      json_catalog_synced: 'Synchronisé',
+      json_catalog_error_label: 'Erreur :',
+      json_catalog_map_count: '{n} cartes',
+      json_catalog_source_file: 'Fichier',
+      json_catalog_source_url: 'URL',
+      json_catalog_disabled: 'Désactivé',
+      json_catalog_enabled: 'Activé',
+      json_catalog_enable: 'Activer',
+      json_catalog_disable: 'Désactiver',
+      json_catalog_refresh: 'Actualiser',
+      json_catalog_remove: 'Supprimer',
+      json_catalog_url_https_only: 'L’URL du catalogue doit commencer par https://',
+      json_catalog_sync_failed: 'Échec de synchronisation : {detail}',
+      json_catalog_file_read_error: 'Impossible de lire le fichier JSON.',
+      json_catalog_file_enable_hint: 'Après activation, choisissez à nouveau « Charger un fichier JSON… » et sélectionnez le même fichier pour restaurer les cartes.',
+      json_catalog_error_empty: 'Le fichier catalogue est vide.',
+      json_catalog_error_too_large: 'Le catalogue dépasse la limite de 5 Mo.',
+      json_catalog_error_json: 'Le catalogue n’est pas du JSON valide.',
+      json_catalog_error_shape: 'Le catalogue doit être un objet JSON.',
+      json_catalog_error_no_maps: 'Le catalogue doit inclure un tableau « maps ».',
+      json_catalog_error_too_many_maps: 'Le catalogue répertorie plus de 2000 cartes.',
+      json_catalog_error_no_valid_maps: 'Aucune entrée de carte valide dans ce catalogue.',
+      json_catalog_error_network: 'Erreur réseau lors du téléchargement du catalogue.',
+      json_catalog_error_timeout: 'Délai dépassé lors du téléchargement du catalogue.',
+      manager_tab_manage: 'Gérer',
+      manager_tab_export: 'Exporter le catalogue',
+      export_select_all: 'Tout sélectionner',
+      export_select_none: 'Tout désélectionner',
+      export_download_json: 'Exporter la sélection (JSON)',
+      export_col_title: 'Titre',
+      export_col_map_id: 'Id carte',
+      export_col_provenance: 'Origine',
+      export_col_context: 'Contexte',
+      export_context_active: 'Actif',
+      export_context_library: 'Bibliothèque',
+      export_none_checked: 'Sélectionnez au moins une ligne à exporter.',
+      export_stringify_error: 'Impossible de construire le JSON d’export.',
+      export_too_large: 'L’export dépasse la limite de 5 Mo. Décochez les lignes KML volumineuses ou exportez moins de cartes.',
+      export_download_failed: 'Le téléchargement n’a pas pu démarrer dans ce navigateur.',
+      map_provenance_unknown: 'Inconnu',
+      map_provenance_json_catalog: 'Catalogue JSON',
+      map_provenance_sheet_repo: 'Dépôt tableur',
+      map_provenance_my_maps: 'My Maps',
+      map_provenance_upload: 'Import (KML)',
+      map_provenance_remote_kml: 'KML distant',
+      map_provenance_user: 'Vos cartes',
+      map_provenance_builtin: 'Catalogue intégré',
       inspector_kml_folder_feature_counts: '{inView} / {total} · dans la vue / chargées',
       copy_map_definition_tooltip: 'Copier la définition de la carte',
       copy_map_definition_menu_all_keep_defaults: 'Copier (toutes les couches, conserver les valeurs par défaut)',
@@ -1584,7 +1751,9 @@ async function onWmeReady() {
         v2026_04_11_02: '- **Source et Waze :** préremplissage du nom d’éditeur du formulaire Google via **`unsafeWindow.W.loginManager`** / SDK **User** (modèles Backbone inclus). Fond et bordure du bloc **Waze** alignés sur la pillule d’**accréditation**. **Absent de la liste Waze** explique désormais la conséquence pour l’usage dans WME (contexte informel vs source approuvée).',
         v2026_04_12_01: '- **Mode développeur & Waze `not_listed` :** sept appuis sur **Cartes actives** bascule le mode développeur enregistré. Les cartes catalogue **absentes de la liste Waze** sont masquées dans **Cartes à ajouter** sauf si le mode est actif. Avec le mode, les lignes restent verrouillées jusqu’à **J’accepte** sous **Source et Waze** (session ; effacé à la désactivation). Cadenas + case Waze et sous-couches désactivés ; **`rebuildMapLayersUI`** exposé pour la liste des sous-couches ; clés de session alignées id chaîne/numérique.',
         v2026_04_12_02: '- **Finition Waze `not_listed` (`2026.04.12.2`) :** **Cartes actives** masque ces lignes catalogue sans mode développeur (même règle que **Cartes à ajouter**). Pastille **Non accrédité** alignée sur le résumé **Source et Waze** (libellé compact + couleurs) ; pastille sur sa propre ligne sous le titre ; le badge ouvre **Source et Waze** si verrouillé (clavier).',
-        v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`) :** **Non accrédité** en chip plus serrée (reset **bouton** navigateur, coins plus petits). **J’accepte** masque aussi le badge du résumé **Source et Waze** comme la pastille de la carte ; la ligne de pastille reste repliée s’il n’y a rien à afficher.'
+        v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`) :** **Non accrédité** en chip plus serrée (reset **bouton** navigateur, coins plus petits). **J’accepte** masque aussi le badge du résumé **Source et Waze** comme la pastille de la carte ; la ligne de pastille reste repliée s’il n’y a rien à afficher.',
+        v2026_04_15_01: '- **Sobrezoom XYZ (`2026.04.15.1`) :** les URL de tuiles utilisent la **plage de zoom** du catalogue pour `${z}` et le calcul x/y assorti. Au-delà de la plage, le script ne demande plus de niveaux de tuiles inexistants (p. ex. ArcGIS MapServer) qui laissaient la superposition vide ; les tuiles du niveau max de la plage s’étirent comme prévu.',
+        v2026_04_18_01: '- **Catalogues JSON & export (`2026.04.18.1`) :** ajoutez des **catalogues JSON** via une **URL HTTPS** (actualisée au chargement) ou un **fichier JSON local** (max. **5 Mo**, max. **2000** cartes). Les cartes importées reçoivent des identifiants sans collision et apparaissent avec les couches intégrées ; les sous-couches portent la pastille **Catalogue JSON**. **Gérer vos cartes** inclut un onglet **Exporter le catalogue** avec une liste à cocher **Actif** / **Bibliothèque** (colonne origine pour distinguer les doublons) pour télécharger un paquet JSON portable.'
       }
     },
     'pt-BR': {
@@ -1738,6 +1907,61 @@ async function onWmeReady() {
       layer_tag_default: 'Padrão',
       layer_tag_user_upload: 'Envio',
       layer_tag_google_mymaps: 'My Maps',
+      layer_tag_json_catalog: 'Catálogo JSON',
+      json_catalog_section_title: 'Catálogos JSON',
+      json_catalog_url_placeholder: 'Cole o URL HTTPS de um catálogo JSON…',
+      json_catalog_add_url: 'Adicionar catálogo por URL',
+      json_catalog_load_file: 'Carregar ficheiro JSON…',
+      json_catalog_empty: 'Ainda não há catálogos JSON.',
+      json_catalog_untitled: 'Catálogo JSON',
+      json_catalog_default_title: 'Catálogo JSON',
+      json_catalog_synced: 'Sincronizado',
+      json_catalog_error_label: 'Erro:',
+      json_catalog_map_count: '{n} mapas',
+      json_catalog_source_file: 'Ficheiro',
+      json_catalog_source_url: 'URL',
+      json_catalog_disabled: 'Desativado',
+      json_catalog_enabled: 'Ativado',
+      json_catalog_enable: 'Ativar',
+      json_catalog_disable: 'Desativar',
+      json_catalog_refresh: 'Atualizar',
+      json_catalog_remove: 'Remover',
+      json_catalog_url_https_only: 'O URL do catálogo deve começar por https://',
+      json_catalog_sync_failed: 'Falha na sincronização: {detail}',
+      json_catalog_file_read_error: 'Não foi possível ler o ficheiro JSON.',
+      json_catalog_file_enable_hint: 'Depois de ativar, escolha novamente « Carregar ficheiro JSON… » e selecione o mesmo ficheiro para restaurar os mapas.',
+      json_catalog_error_empty: 'O ficheiro de catálogo está vazio.',
+      json_catalog_error_too_large: 'O catálogo excede o limite de 5 MB.',
+      json_catalog_error_json: 'O catálogo não é JSON válido.',
+      json_catalog_error_shape: 'O catálogo tem de ser um objeto JSON.',
+      json_catalog_error_no_maps: 'O catálogo tem de incluir um array « maps ».',
+      json_catalog_error_too_many_maps: 'O catálogo lista mais de 2000 mapas.',
+      json_catalog_error_no_valid_maps: 'Não foram encontradas entradas de mapa válidas neste catálogo.',
+      json_catalog_error_network: 'Erro de rede ao obter o catálogo.',
+      json_catalog_error_timeout: 'Tempo esgotado ao obter o catálogo.',
+      manager_tab_manage: 'Gerir',
+      manager_tab_export: 'Exportar catálogo',
+      export_select_all: 'Selecionar tudo',
+      export_select_none: 'Limpar seleção',
+      export_download_json: 'Exportar seleção (JSON)',
+      export_col_title: 'Título',
+      export_col_map_id: 'Id do mapa',
+      export_col_provenance: 'Origem',
+      export_col_context: 'Contexto',
+      export_context_active: 'Ativo',
+      export_context_library: 'Biblioteca',
+      export_none_checked: 'Selecione pelo menos uma linha para exportar.',
+      export_stringify_error: 'Não foi possível construir o JSON de exportação.',
+      export_too_large: 'A exportação excede o limite de 5 MB. Desmarque linhas KML grandes ou exporte menos mapas.',
+      export_download_failed: 'O download não pôde iniciar neste navegador.',
+      map_provenance_unknown: 'Desconhecido',
+      map_provenance_json_catalog: 'Catálogo JSON',
+      map_provenance_sheet_repo: 'Repositório de folha',
+      map_provenance_my_maps: 'My Maps',
+      map_provenance_upload: 'Envio (KML)',
+      map_provenance_remote_kml: 'KML remoto',
+      map_provenance_user: 'Os seus mapas',
+      map_provenance_builtin: 'Catálogo integrado',
       inspector_kml_folder_feature_counts: '{inView} / {total} · na vista / carregadas',
       copy_map_definition_tooltip: 'Copiar definição do mapa',
       copy_map_definition_menu_all_keep_defaults: 'Copiar (todas as camadas, manter padrões)',
@@ -1790,7 +2014,8 @@ async function onWmeReady() {
         v2026_04_12_01: '- **Modo de programador & Waze `not_listed`:** sete toques em **Mapas ativos** alterna o modo de programador guardado. Mapas de catálogo **fora da lista Waze** não aparecem em **Mapas a adicionar** sem o modo. Com o modo, as linhas ficam bloqueadas até **Concordo** em **Fonte e Waze** (sessão; limpo ao desligar). Cadeado + caixa Waze e subcamadas desativados ; **`rebuildMapLayersUI`** exposto para a lista de subcamadas ; chaves de sessão alinham id string/número.',
         v2026_04_12_02: '- **Refino Waze `not_listed` (`2026.04.12.2`):** **Mapas ativos** oculta essas linhas de catálogo sem modo de programador (mesma regra que **Mapas a adicionar**). Pastilha **Não credenciado** alinhada ao resumo **Fonte e Waze** (rótulo compacto + cores); pastilha numa linha própria sob o título; o badge abre **Fonte e Waze** quando bloqueado (teclado).',
         v2026_04_12_03: '- **UI Waze `not_listed` (`2026.04.12.3`):** **Não credenciado** mais compacto estilo chip (reset de **botão** do navegador, cantos menores). **Concordo** oculta também o badge do resumo **Fonte e Waze** como o controlo do cartão; a linha da pastilha fica fechada quando não há nada a mostrar.',
-        v2026_04_15_01: '- **Sobrezoom XYZ (`2026.04.15.1`):** URLs de mosaico usam a **faixa de zoom** do catálogo em `${z}` e x/y coerentes. Além da faixa, deixa de pedir níveis inexistentes (ex.: ArcGIS MapServer) que deixavam a sobreposição em branco; os mosaicos do nível máximo da faixa são esticados como previsto.'
+        v2026_04_15_01: '- **Sobrezoom XYZ (`2026.04.15.1`):** URLs de mosaico usam a **faixa de zoom** do catálogo em `${z}` e x/y coerentes. Além da faixa, deixa de pedir níveis inexistentes (ex.: ArcGIS MapServer) que deixavam a sobreposição em branco; os mosaicos do nível máximo da faixa são esticados como previsto.',
+        v2026_04_18_01: '- **Catálogos JSON e exportação (`2026.04.18.1`):** Adicione **catálogos JSON** por **URL HTTPS** (atualizada ao iniciar) ou **ficheiro JSON local** (máx. **5 MB**, máx. **2000** mapas). Os mapas importados recebem identificadores sem colisões e aparecem junto das camadas integradas; as subcamadas mostram **Catálogo JSON**. **Gerir os seus mapas** ganha o separador **Exportar catálogo** com uma lista de **Ativo** e **Biblioteca** (coluna de origem distingue duplicados) para descarregar um pacote JSON portátil.'
       }
     }
   };
@@ -5022,6 +5247,12 @@ async function onWmeReady() {
       }
       if (!settings.state.userMaps) {
         settings.state.userMaps = [];
+      }
+      if (!settings.state.jsonCatalogs) {
+        settings.state.jsonCatalogs = [];
+      }
+      if (!Array.isArray(settings.state.jsonCatalogs)) {
+        settings.state.jsonCatalogs = [];
       }
       if (typeof settings.inspectorAutoWmsGetFeatureInfo === 'undefined') {
         settings.inspectorAutoWmsGetFeatureInfo = true;
@@ -11321,6 +11552,271 @@ function onMapSort() {
   userMapsSection.appendChild(userMapsReposMsg);
   userMapsSection.appendChild(userMapsReposList);
 
+  // --- JSON catalogs (portable map list; URL subscription or local file) ---
+  var userMapsJcatTitleEl = document.createElement('div');
+  userMapsJcatTitleEl.className = 'openmaps-user-maps-subtitle';
+  userMapsJcatTitleEl.style.cssText = 'margin:12px 0 6px 0;font-size:12px;font-weight:600;color:#3c4043;';
+  userMapsJcatTitleEl.textContent = I18n.t('openmaps.json_catalog_section_title');
+  var userMapsJcatUrlRow = document.createElement('div');
+  userMapsJcatUrlRow.style.cssText = 'display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;';
+  var userMapsJcatUrlInput = document.createElement('input');
+  userMapsJcatUrlInput.type = 'text';
+  userMapsJcatUrlInput.className = 'form-control openmaps-json-catalog-url';
+  userMapsJcatUrlInput.placeholder = I18n.t('openmaps.json_catalog_url_placeholder');
+  userMapsJcatUrlInput.style.cssText = 'flex:1 1 220px;min-width:160px;';
+  var userMapsJcatUrlAddBtn = document.createElement('wz-button');
+  userMapsJcatUrlAddBtn.setAttribute('size', 'sm');
+  userMapsJcatUrlAddBtn.setAttribute('color', 'secondary');
+  userMapsJcatUrlAddBtn.className = 'openmaps-wz-btn-compact';
+  userMapsJcatUrlAddBtn.textContent = I18n.t('openmaps.json_catalog_add_url');
+  userMapsJcatUrlRow.appendChild(userMapsJcatUrlInput);
+  userMapsJcatUrlRow.appendChild(userMapsJcatUrlAddBtn);
+  var userMapsJcatFileInput = document.createElement('input');
+  userMapsJcatFileInput.type = 'file';
+  userMapsJcatFileInput.accept = '.json,application/json';
+  userMapsJcatFileInput.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+  var openMapsJcatPendingReloadCatalogId = null;
+  var userMapsJcatFileRow = document.createElement('div');
+  userMapsJcatFileRow.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;';
+  var userMapsJcatFileBtn = document.createElement('wz-button');
+  userMapsJcatFileBtn.setAttribute('size', 'sm');
+  userMapsJcatFileBtn.setAttribute('color', 'secondary');
+  userMapsJcatFileBtn.className = 'openmaps-wz-btn-compact';
+  userMapsJcatFileBtn.textContent = I18n.t('openmaps.json_catalog_load_file');
+  userMapsJcatFileRow.appendChild(userMapsJcatFileBtn);
+  userMapsJcatFileRow.appendChild(userMapsJcatFileInput);
+  var userMapsJcatMsg = document.createElement('div');
+  userMapsJcatMsg.style.cssText = 'display:none;font-size:11px;color:#c5221f;margin-top:6px;line-height:1.35;';
+  function showJcatMsg(t) {
+    userMapsJcatMsg.textContent = t || '';
+    userMapsJcatMsg.style.display = t ? 'block' : 'none';
+  }
+  var userMapsJcatList = document.createElement('div');
+  userMapsJcatList.style.cssText = 'margin-top:6px;display:flex;flex-direction:column;gap:6px;';
+
+  function openMapsRemoveJsonCatalogRow(catalogId) {
+    try {
+      openMapsWipeJsonCatalogMapsFromRegistry(catalogId);
+    } catch (eW) { /* ignore */ }
+    var sR = openMapsGetJsonCatalogSettings();
+    sR.state.jsonCatalogs = sR.state.jsonCatalogs.filter(function(x) { return !x || String(x.id) !== String(catalogId); });
+    Settings.put(sR);
+    try { openMapsInvalidateAddListCaches(); } catch (eI) { /* ignore */ }
+    try { updateMapSelector(); } catch (eS) { /* ignore */ }
+    try { renderJsonCatalogList(); } catch (eR) { /* ignore */ }
+  }
+
+  function renderJsonCatalogList() {
+    while (userMapsJcatList.firstChild) userMapsJcatList.removeChild(userMapsJcatList.firstChild);
+    var sJ = openMapsGetJsonCatalogSettings();
+    var arrJ = (sJ.state.jsonCatalogs || []).slice();
+    if (!arrJ.length) {
+      var emptyJ = document.createElement('div');
+      emptyJ.style.cssText = 'font-size:11px;color:#5f6368;padding:6px 2px;';
+      emptyJ.textContent = I18n.t('openmaps.json_catalog_empty');
+      userMapsJcatList.appendChild(emptyJ);
+      return;
+    }
+    arrJ.forEach(function(c) {
+      if (!c || !c.id) return;
+      var cardJ = document.createElement('div');
+      cardJ.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--border_subtle,#dadce0);border-radius:8px;background:var(--background_default,#fff);';
+      var textJ = document.createElement('div');
+      textJ.style.cssText = 'flex:1 1 auto;min-width:0;';
+      var t1j = document.createElement('div');
+      t1j.style.cssText = 'font-size:12px;font-weight:600;color:#202124;line-height:1.25;word-break:break-word;';
+      t1j.textContent = c.title || I18n.t('openmaps.json_catalog_untitled');
+      var t2j = document.createElement('div');
+      t2j.style.cssText = 'margin-top:2px;font-size:11px;color:#5f6368;line-height:1.25;word-break:break-word;';
+      var whenJ = c.lastFetchAt ? (' • ' + I18n.t('openmaps.json_catalog_synced') + ' ' + new Date(c.lastFetchAt).toLocaleString()) : '';
+      var errJ = c.lastError ? (' • ' + I18n.t('openmaps.json_catalog_error_label') + ' ' + String(c.lastError)) : '';
+      var cntJ = typeof c.lastMapCount === 'number' ? (' • ' + I18n.t('openmaps.json_catalog_map_count').replace(/\{n\}/g, String(c.lastMapCount))) : '';
+      var srcL = String(c.sourceType || 'url') === 'file' ? I18n.t('openmaps.json_catalog_source_file') : I18n.t('openmaps.json_catalog_source_url');
+      t2j.textContent = srcL + (c.enabled === false ? ' • ' + I18n.t('openmaps.json_catalog_disabled') : ' • ' + I18n.t('openmaps.json_catalog_enabled')) + whenJ + errJ + cntJ;
+      textJ.appendChild(t1j);
+      textJ.appendChild(t2j);
+      cardJ.appendChild(textJ);
+      var actJ = document.createElement('div');
+      actJ.style.cssText = 'flex:0 0 auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+      var togJ = document.createElement('wz-button');
+      togJ.setAttribute('size', 'sm');
+      togJ.setAttribute('color', 'secondary');
+      togJ.className = 'openmaps-wz-btn-compact';
+      togJ.textContent = (c.enabled === false) ? I18n.t('openmaps.json_catalog_enable') : I18n.t('openmaps.json_catalog_disable');
+      togJ.addEventListener('click', function(cid) {
+        return function() {
+          var s2 = openMapsGetJsonCatalogSettings();
+          var rowT = null;
+          for (var ij = 0; ij < s2.state.jsonCatalogs.length; ij++) {
+            if (s2.state.jsonCatalogs[ij] && String(s2.state.jsonCatalogs[ij].id) === cid) {
+              rowT = s2.state.jsonCatalogs[ij];
+              rowT.enabled = !(rowT.enabled === false);
+              break;
+            }
+          }
+          Settings.put(s2);
+          if (!rowT) { renderJsonCatalogList(); return; }
+          if (rowT.enabled !== false) {
+            if (String(rowT.sourceType || 'url') === 'url' && String(rowT.url || '').trim()) {
+              openMapsSyncJsonCatalogOnce(rowT, function() {
+                try { openMapsInvalidateAddListCaches(); } catch (e1) {}
+                try { updateMapSelector(); } catch (e2) {}
+                renderJsonCatalogList();
+              });
+            } else if (String(rowT.sourceType || '') === 'file') {
+              showJcatMsg(I18n.t('openmaps.json_catalog_file_enable_hint'));
+            }
+          } else {
+            try { openMapsWipeJsonCatalogMapsFromRegistry(cid); } catch (eW2) { /* ignore */ }
+            try { openMapsInvalidateAddListCaches(); } catch (e3) {}
+            try { updateMapSelector(); } catch (e4) {}
+          }
+          renderJsonCatalogList();
+        };
+      }(String(c.id)));
+      actJ.appendChild(togJ);
+      var refJ = document.createElement('wz-button');
+      refJ.setAttribute('size', 'sm');
+      refJ.setAttribute('color', 'secondary');
+      refJ.className = 'openmaps-wz-btn-compact';
+      refJ.textContent = I18n.t('openmaps.json_catalog_refresh');
+      refJ.addEventListener('click', function(row) {
+        return function() {
+          showJcatMsg('');
+          if (String(row.sourceType || 'url') === 'file') {
+            openMapsJcatPendingReloadCatalogId = String(row.id);
+            userMapsJcatFileInput.value = '';
+            userMapsJcatFileInput.click();
+            return;
+          }
+          openMapsSyncJsonCatalogOnce(row, function(err) {
+            if (err) showJcatMsg(I18n.t('openmaps.json_catalog_sync_failed').replace(/\{detail\}/g, String(err.message || err)));
+            renderJsonCatalogList();
+            try { openMapsInvalidateAddListCaches(); } catch (e5) {}
+            try { updateMapSelector(); } catch (e6) {}
+          });
+        };
+      }(c));
+      actJ.appendChild(refJ);
+      var delJ = document.createElement('wz-button');
+      delJ.setAttribute('size', 'sm');
+      delJ.setAttribute('color', 'secondary');
+      delJ.className = 'openmaps-wz-btn-compact';
+      delJ.textContent = I18n.t('openmaps.json_catalog_remove');
+      delJ.addEventListener('click', function(cid) {
+        return function() {
+          openMapsRemoveJsonCatalogRow(cid);
+        };
+      }(String(c.id)));
+      actJ.appendChild(delJ);
+      cardJ.appendChild(actJ);
+      userMapsJcatList.appendChild(cardJ);
+    });
+  }
+  try { window.__openMapsRenderJsonCatalogList = renderJsonCatalogList; } catch (eJexp) { /* ignore */ }
+
+  userMapsJcatUrlAddBtn.addEventListener('click', function(evJ) {
+    if (evJ) evJ.preventDefault();
+    showJcatMsg('');
+    var urlJ = String(userMapsJcatUrlInput.value || '').trim();
+    if (!/^https:\/\//i.test(urlJ)) {
+      showJcatMsg(I18n.t('openmaps.json_catalog_url_https_only'));
+      return;
+    }
+    var sJa = openMapsGetJsonCatalogSettings();
+    var jid = 'om-jcat-' + openMapsHash32(urlJ + '|' + Date.now());
+    sJa.state.jsonCatalogs.push({
+      id: jid,
+      title: I18n.t('openmaps.json_catalog_default_title'),
+      sourceType: 'url',
+      url: urlJ,
+      enabled: true,
+      lastFetchAt: null,
+      lastError: null,
+      lastHttpStatus: null,
+      lastMapCount: null
+    });
+    Settings.put(sJa);
+    userMapsJcatUrlInput.value = '';
+    renderJsonCatalogList();
+    openMapsSyncJsonCatalogOnce(sJa.state.jsonCatalogs[sJa.state.jsonCatalogs.length - 1], function(err) {
+      if (err) showJcatMsg(I18n.t('openmaps.json_catalog_sync_failed').replace(/\{detail\}/g, String(err.message || err)));
+      renderJsonCatalogList();
+      try { openMapsInvalidateAddListCaches(); } catch (e7) {}
+      try { updateMapSelector(); } catch (e8) {}
+    });
+  });
+
+  userMapsJcatFileBtn.addEventListener('click', function(evF) {
+    if (evF) evF.preventDefault();
+    showJcatMsg('');
+    try { userMapsJcatFileInput.value = ''; } catch (eC) { /* ignore */ }
+    userMapsJcatFileInput.click();
+  });
+  userMapsJcatFileInput.addEventListener('change', function() {
+    var f = userMapsJcatFileInput.files && userMapsJcatFileInput.files[0];
+    if (!f) return;
+    showJcatMsg('');
+    var reader = new FileReader();
+    reader.onload = function() {
+      var txt = typeof reader.result === 'string' ? reader.result : '';
+      var sJf = openMapsGetJsonCatalogSettings();
+      var reloadId = openMapsJcatPendingReloadCatalogId;
+      openMapsJcatPendingReloadCatalogId = null;
+      var fid = 'om-jcat-' + openMapsHash32(f.name + '|' + Date.now());
+      var existingIdx = -1;
+      if (reloadId) {
+        for (var fri = 0; fri < sJf.state.jsonCatalogs.length; fri++) {
+          if (sJf.state.jsonCatalogs[fri] && String(sJf.state.jsonCatalogs[fri].id) === String(reloadId)) {
+            existingIdx = fri;
+            break;
+          }
+        }
+      }
+      if (existingIdx === -1) {
+        for (var fi = 0; fi < sJf.state.jsonCatalogs.length; fi++) {
+          var ec = sJf.state.jsonCatalogs[fi];
+          if (ec && String(ec.sourceType || '') === 'file' && ec.fileLabel === f.name) { existingIdx = fi; break; }
+        }
+      }
+      var rowObj = {
+        id: existingIdx === -1 ? fid : sJf.state.jsonCatalogs[existingIdx].id,
+        title: f.name || I18n.t('openmaps.json_catalog_default_title'),
+        sourceType: 'file',
+        fileLabel: f.name,
+        enabled: true,
+        lastFetchAt: null,
+        lastError: null,
+        lastHttpStatus: null,
+        lastMapCount: null
+      };
+      var appliedF = openMapsApplyJsonCatalogTextToInstance(rowObj.id, txt);
+      if (appliedF.errorKey) {
+        showJcatMsg(I18n.t(appliedF.errorKey) + (appliedF.detail ? ' (' + appliedF.detail + ')' : ''));
+        try { userMapsJcatFileInput.value = ''; } catch (eV) { /* ignore */ }
+        return;
+      }
+      if (existingIdx === -1) sJf.state.jsonCatalogs.push(rowObj);
+      else sJf.state.jsonCatalogs[existingIdx] = Object.assign({}, sJf.state.jsonCatalogs[existingIdx], rowObj);
+      openMapsJsonCatalogPersistRowFields(rowObj.id, { lastFetchAt: Date.now(), lastError: null, lastHttpStatus: 200, lastMapCount: appliedF.count });
+      Settings.put(sJf);
+      try { userMapsJcatFileInput.value = ''; } catch (eV2) { /* ignore */ }
+      renderJsonCatalogList();
+      try { openMapsInvalidateAddListCaches(); } catch (e9) {}
+      try { updateMapSelector(); } catch (e10) {}
+    };
+    reader.onerror = function() {
+      showJcatMsg(I18n.t('openmaps.json_catalog_file_read_error'));
+    };
+    reader.readAsText(f);
+  });
+
+  userMapsSection.appendChild(userMapsJcatTitleEl);
+  userMapsSection.appendChild(userMapsJcatUrlRow);
+  userMapsSection.appendChild(userMapsJcatFileRow);
+  userMapsSection.appendChild(userMapsJcatMsg);
+  userMapsSection.appendChild(userMapsJcatList);
+
   function openMapsGetUserMapsManagerUiState() {
     var s = Settings.get();
     if (!s.state.userMapsManagerUI || typeof s.state.userMapsManagerUI !== 'object') {
@@ -11355,11 +11851,232 @@ function onMapSort() {
   userMapsManagerHeader.appendChild(userMapsManagerHeaderTitle);
   userMapsManagerHeader.appendChild(userMapsManagerHeaderBtns);
 
+  var userMapsManagerTabRow = document.createElement('div');
+  userMapsManagerTabRow.style.cssText = 'display:flex;gap:6px;padding:0 10px 8px 10px;border-bottom:1px solid var(--border_subtle,#dadce0);flex-wrap:wrap;';
+  var userMapsTabManageBtn = document.createElement('wz-button');
+  userMapsTabManageBtn.setAttribute('size', 'sm');
+  userMapsTabManageBtn.setAttribute('color', 'primary');
+  userMapsTabManageBtn.className = 'openmaps-wz-btn-compact';
+  userMapsTabManageBtn.textContent = I18n.t('openmaps.manager_tab_manage');
+  var userMapsTabExportBtn = document.createElement('wz-button');
+  userMapsTabExportBtn.setAttribute('size', 'sm');
+  userMapsTabExportBtn.setAttribute('color', 'secondary');
+  userMapsTabExportBtn.className = 'openmaps-wz-btn-compact';
+  userMapsTabExportBtn.textContent = I18n.t('openmaps.manager_tab_export');
+  userMapsManagerTabRow.appendChild(userMapsTabManageBtn);
+  userMapsManagerTabRow.appendChild(userMapsTabExportBtn);
+
+  var userMapsManageTabPanel = document.createElement('div');
+  userMapsManageTabPanel.className = 'openmaps-user-maps-manage-tab-panel';
+  userMapsManageTabPanel.appendChild(userMapsSection);
+
+  var userMapsExportTabPanel = document.createElement('div');
+  userMapsExportTabPanel.className = 'openmaps-user-maps-export-tab-panel';
+  userMapsExportTabPanel.style.cssText = 'display:none;padding:4px 0 0 0;';
+  var userMapsExportToolbar = document.createElement('div');
+  userMapsExportToolbar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;';
+  var userMapsExportSelectAll = document.createElement('wz-button');
+  userMapsExportSelectAll.setAttribute('size', 'sm');
+  userMapsExportSelectAll.setAttribute('color', 'secondary');
+  userMapsExportSelectAll.className = 'openmaps-wz-btn-compact';
+  userMapsExportSelectAll.textContent = I18n.t('openmaps.export_select_all');
+  var userMapsExportSelectNone = document.createElement('wz-button');
+  userMapsExportSelectNone.setAttribute('size', 'sm');
+  userMapsExportSelectNone.setAttribute('color', 'secondary');
+  userMapsExportSelectNone.className = 'openmaps-wz-btn-compact';
+  userMapsExportSelectNone.textContent = I18n.t('openmaps.export_select_none');
+  var userMapsExportDoBtn = document.createElement('wz-button');
+  userMapsExportDoBtn.setAttribute('size', 'sm');
+  userMapsExportDoBtn.setAttribute('color', 'primary');
+  userMapsExportDoBtn.className = 'openmaps-wz-btn-compact';
+  userMapsExportDoBtn.textContent = I18n.t('openmaps.export_download_json');
+  userMapsExportToolbar.appendChild(userMapsExportSelectAll);
+  userMapsExportToolbar.appendChild(userMapsExportSelectNone);
+  userMapsExportToolbar.appendChild(userMapsExportDoBtn);
+  var userMapsExportMsg = document.createElement('div');
+  userMapsExportMsg.style.cssText = 'display:none;font-size:11px;color:#c5221f;margin:0 0 8px 0;line-height:1.35;';
+  var userMapsExportTableWrap = document.createElement('div');
+  userMapsExportTableWrap.style.cssText = 'max-height:52vh;overflow:auto;border:1px solid var(--border_subtle,#dadce0);border-radius:8px;';
+
+  function openMapsShowExportMsg(t) {
+    userMapsExportMsg.textContent = t || '';
+    userMapsExportMsg.style.display = t ? 'block' : 'none';
+  }
+
+  function openMapsRenderExportCatalogTable() {
+    while (userMapsExportTableWrap.firstChild) userMapsExportTableWrap.removeChild(userMapsExportTableWrap.firstChild);
+    var tbl = document.createElement('table');
+    tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:11px;';
+    var thead = document.createElement('thead');
+    var trh = document.createElement('tr');
+    trh.style.cssText = 'background:var(--background_variant,#f8f9fa);';
+    ['', I18n.t('openmaps.export_col_title'), I18n.t('openmaps.export_col_map_id'), I18n.t('openmaps.export_col_provenance'), I18n.t('openmaps.export_col_context')].forEach(function(h, hi) {
+      var th = document.createElement('th');
+      th.style.cssText = 'text-align:left;padding:6px 8px;border-bottom:1px solid var(--border_subtle,#dadce0);font-weight:600;';
+      if (hi === 0) {
+        var cball = document.createElement('input');
+        cball.type = 'checkbox';
+        cball.title = I18n.t('openmaps.export_select_all');
+        th.appendChild(cball);
+        cball.addEventListener('change', function() {
+          var on = !!cball.checked;
+          var allRowCb = tbl.querySelectorAll('input.openmaps-export-row-cb');
+          for (var aci = 0; aci < allRowCb.length; aci++) allRowCb[aci].checked = on;
+        });
+      } else {
+        th.textContent = h;
+      }
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    tbl.appendChild(thead);
+    var tbody = document.createElement('tbody');
+    var rowId = 0;
+    function addRow(map, handleOpt, context) {
+      if (!map) return;
+      var tr = document.createElement('tr');
+      tr.style.cssText = 'border-bottom:1px solid var(--border_subtle,#eee);';
+      var td0 = document.createElement('td');
+      td0.style.cssText = 'padding:6px 8px;vertical-align:top;';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'openmaps-export-row-cb';
+      cb.dataset.rowKey = 'r' + (rowId++);
+      cb.dataset.mapId = String(map.id != null ? map.id : '');
+      cb.dataset.context = context;
+      td0.appendChild(cb);
+      var td1 = document.createElement('td');
+      td1.style.cssText = 'padding:6px 8px;vertical-align:top;word-break:break-word;';
+      td1.textContent = map.title || '(untitled)';
+      var td2 = document.createElement('td');
+      td2.style.cssText = 'padding:6px 8px;vertical-align:top;word-break:break-all;color:#5f6368;';
+      td2.textContent = String(map.id != null ? map.id : '');
+      var td3 = document.createElement('td');
+      td3.style.cssText = 'padding:6px 8px;vertical-align:top;';
+      td3.textContent = I18n.t(openMapsMapProvenanceI18nKey(map));
+      var td4 = document.createElement('td');
+      td4.style.cssText = 'padding:6px 8px;vertical-align:top;';
+      td4.textContent = context === 'library' ? I18n.t('openmaps.export_context_library') : I18n.t('openmaps.export_context_active');
+      tr.appendChild(td0);
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      tr.appendChild(td3);
+      tr.appendChild(td4);
+      tbody.appendChild(tr);
+      cb._openMapsExportMap = map;
+      cb._openMapsExportHandle = handleOpt || null;
+      cb._openMapsExportContext = context;
+    }
+    for (var hi = 0; hi < handles.length; hi++) {
+      var hx = handles[hi];
+      if (!hx) continue;
+      var mx = maps.get(hx.mapId);
+      addRow(mx, hx, 'active');
+    }
+    var sEx = Settings.get();
+    var lib = (sEx && sEx.state && Array.isArray(sEx.state.userMaps)) ? sEx.state.userMaps : [];
+    for (var li = 0; li < lib.length; li++) {
+      var um = lib[li];
+      if (!um || um.id == null) continue;
+      addRow(um, null, 'library');
+    }
+    tbl.appendChild(tbody);
+    userMapsExportTableWrap.appendChild(tbl);
+  }
+
+  userMapsExportSelectAll.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    var allE = userMapsExportTableWrap.querySelectorAll('input.openmaps-export-row-cb');
+    for (var ei = 0; ei < allE.length; ei++) allE[ei].checked = true;
+  });
+  userMapsExportSelectNone.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    var allN = userMapsExportTableWrap.querySelectorAll('input.openmaps-export-row-cb');
+    for (var ni = 0; ni < allN.length; ni++) allN[ni].checked = false;
+  });
+  userMapsExportDoBtn.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    openMapsShowExportMsg('');
+    var cbs = userMapsExportTableWrap.querySelectorAll('input.openmaps-export-row-cb:checked');
+    var mapsOut = [];
+    for (var ci = 0; ci < cbs.length; ci++) {
+      var cbx = cbs[ci];
+      var mm = cbx._openMapsExportMap;
+      var hh = cbx._openMapsExportHandle;
+      var ctx = cbx._openMapsExportContext || 'active';
+      var ser = openMapsSerializeMapRowForCatalogExport(mm, hh, ctx);
+      if (ser) mapsOut.push(ser);
+    }
+    if (!mapsOut.length) {
+      openMapsShowExportMsg(I18n.t('openmaps.export_none_checked'));
+      return;
+    }
+    var wrap = {
+      openMapsCatalog: 1,
+      schemaVersion: OPEN_MAPS_JSON_CATALOG_SCHEMA_VERSION,
+      generatedAt: new Date().toISOString(),
+      maps: mapsOut
+    };
+    var jsonStr;
+    try {
+      jsonStr = JSON.stringify(wrap, null, 2);
+    } catch (eJ) {
+      openMapsShowExportMsg(I18n.t('openmaps.export_stringify_error'));
+      return;
+    }
+    if (jsonStr.length > OPEN_MAPS_JSON_CATALOG_MAX_BYTES) {
+      openMapsShowExportMsg(I18n.t('openmaps.export_too_large'));
+      return;
+    }
+    try {
+      var blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'openmaps-catalog-export.json';
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        try {
+          URL.revokeObjectURL(a.href);
+        } catch (eR) { /* ignore */ }
+        try {
+          if (a.parentNode) a.parentNode.removeChild(a);
+        } catch (eRm) { /* ignore */ }
+      }, 2500);
+    } catch (eDl) {
+      openMapsShowExportMsg(I18n.t('openmaps.export_download_failed'));
+    }
+  });
+
+  userMapsExportTabPanel.appendChild(userMapsExportToolbar);
+  userMapsExportTabPanel.appendChild(userMapsExportMsg);
+  userMapsExportTabPanel.appendChild(userMapsExportTableWrap);
+
+  function openMapsSetUserMapsManagerTab(which) {
+    var isEx = which === 'export';
+    userMapsManageTabPanel.style.display = isEx ? 'none' : 'block';
+    userMapsExportTabPanel.style.display = isEx ? 'block' : 'none';
+    userMapsTabManageBtn.setAttribute('color', isEx ? 'secondary' : 'primary');
+    userMapsTabExportBtn.setAttribute('color', isEx ? 'primary' : 'secondary');
+    if (isEx) openMapsRenderExportCatalogTable();
+  }
+  userMapsTabManageBtn.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    openMapsSetUserMapsManagerTab('manage');
+  });
+  userMapsTabExportBtn.addEventListener('click', function(ev) {
+    if (ev) ev.preventDefault();
+    openMapsSetUserMapsManagerTab('export');
+  });
+
   var userMapsManagerBody = document.createElement('div');
   userMapsManagerBody.style.cssText = 'padding:10px;overflow:auto;resize:both;min-width:360px;min-height:320px;max-width:92vw;max-height:92vh;';
-  userMapsManagerBody.appendChild(userMapsSection);
+  userMapsManagerBody.appendChild(userMapsManageTabPanel);
+  userMapsManagerBody.appendChild(userMapsExportTabPanel);
 
   userMapsManagerWin.appendChild(userMapsManagerHeader);
+  userMapsManagerWin.appendChild(userMapsManagerTabRow);
   userMapsManagerWin.appendChild(userMapsManagerBody);
   document.body.appendChild(userMapsManagerWin);
 
@@ -11381,8 +12098,10 @@ function onMapSort() {
     applyUserMapsManagerUiGeometry();
     userMapsManagerWin.style.display = 'block';
     openMapsPutUserMapsManagerUiState({ open: true });
+    try { openMapsSetUserMapsManagerTab('manage'); } catch (eTab) { /* ignore */ }
     try { renderUserMapsLibrary(); } catch (eR1) {}
     try { renderReposList(); } catch (eR2) {}
+    try { renderJsonCatalogList(); } catch (eR3) {}
   }
   function closeUserMapsManager() {
     userMapsManagerWin.style.display = 'none';
@@ -13522,6 +14241,341 @@ function loadTileError(tile, callback) {
     } catch (eSync) { /* ignore */ }
   }
 
+  var OPEN_MAPS_JSON_CATALOG_MAX_BYTES = 5 * 1024 * 1024;
+  var OPEN_MAPS_JSON_CATALOG_MAX_MAPS = 2000;
+  var OPEN_MAPS_JSON_CATALOG_SCHEMA_VERSION = 1;
+  /** Keys allowed when importing a portable map from JSON (unknown keys dropped). */
+  var OPEN_MAPS_JSON_CATALOG_IMPORT_MAP_KEYS = {
+    id: 1, title: 1, touId: 1, favicon: 1, icon: 1, type: 1, url: 1, queryUrl: 1, crs: 1, bbox: 1, zoomRange: 1,
+    format: 1, transparent: 1, area: 1, tile_size: 1, abstract: 1, attribution: 1, pixelManipulations: 1,
+    queryable: 1, query_filters: 1, default_layers: 1, layers: 1, mid: 1, maxFeatures: 1, kmlText: 1,
+    kmlFileName: 1, name: 1, highlight: 1, useViewport: 1
+  };
+
+  function openMapsGetJsonCatalogSettings() {
+    var s = Settings.get();
+    if (!s.state.jsonCatalogs) s.state.jsonCatalogs = [];
+    if (!Array.isArray(s.state.jsonCatalogs)) s.state.jsonCatalogs = [];
+    return s;
+  }
+
+  function openMapsWipeJsonCatalogMapsFromRegistry(catalogInstanceId) {
+    var cid = String(catalogInstanceId || '');
+    var toDel = [];
+    maps.forEach(function(m, id) {
+      if (m && m.origin && m.origin.kind === 'jsonCatalog' && String(m.origin.catalogId) === cid) toDel.push(id);
+    });
+    for (var i = 0; i < toDel.length; i++) {
+      try {
+        if (typeof openMapsDeactivateMapById === 'function') openMapsDeactivateMapById(toDel[i]);
+      } catch (eDa) { /* ignore */ }
+      maps.delete(toDel[i]);
+    }
+  }
+
+  function openMapsJsonCatalogPersistRowFields(catalogId, fields) {
+    try {
+      var s = openMapsGetJsonCatalogSettings();
+      var arr = s.state.jsonCatalogs;
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] && String(arr[i].id) === String(catalogId)) {
+          Object.assign(arr[i], fields || {});
+          Settings.put(s);
+          return;
+        }
+      }
+    } catch (eP) { /* ignore */ }
+  }
+
+  function openMapsSanitizeJsonCatalogLayerObj(rawLayers) {
+    var out = {};
+    if (!rawLayers || typeof rawLayers !== 'object' || Array.isArray(rawLayers)) return out;
+    Object.keys(rawLayers).forEach(function(k) {
+      if (k === '__proto__' || k === 'constructor') return;
+      var v = rawLayers[k];
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return;
+      var lo = {};
+      if (v.title != null) lo.title = String(v.title);
+      if (v.abstract != null) lo.abstract = String(v.abstract);
+      if (v.queryable != null) lo.queryable = !!v.queryable;
+      if (v.openMapsKmlColorHex != null) lo.openMapsKmlColorHex = String(v.openMapsKmlColorHex);
+      out[String(k)] = lo;
+    });
+    return out;
+  }
+
+  function openMapsSanitizeOneJsonCatalogMapImport(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    var o = {};
+    Object.keys(raw).forEach(function(k) {
+      if (k === '__proto__' || k === 'constructor') return;
+      if (k === 'openMapsExportMeta' || k === 'exportMeta') return;
+      if (!OPEN_MAPS_JSON_CATALOG_IMPORT_MAP_KEYS[k]) return;
+      var v = raw[k];
+      if (k === 'layers') {
+        o.layers = openMapsSanitizeJsonCatalogLayerObj(v);
+        return;
+      }
+      if (k === 'default_layers' || k === 'bbox' || k === 'zoomRange' || k === 'query_filters' || k === 'pixelManipulations') {
+        try {
+          o[k] = JSON.parse(JSON.stringify(v));
+        } catch (eJ) { /* ignore */ }
+        return;
+      }
+      if (k === 'favicon' || k === 'transparent' || k === 'queryable' || k === 'highlight' || k === 'useViewport') {
+        o[k] = !!v;
+        return;
+      }
+      if (k === 'maxFeatures' || k === 'tile_size') {
+        var n = Number(v);
+        if (!isNaN(n)) o[k] = n;
+        return;
+      }
+      if (k === 'kmlText') {
+        o[k] = String(v);
+        return;
+      }
+      o[k] = v;
+    });
+    var typ = String(o.type || '').trim();
+    if (!typ) return null;
+    if (!o.title) o.title = '(untitled)';
+    if (typ === 'LOCAL_KML') {
+      if (!o.kmlText || String(o.kmlText).length === 0) return null;
+    } else if (typ === 'GOOGLE_MY_MAPS') {
+      if (!o.mid && !o.url) return null;
+    } else if (typ === 'REMOTE_KML') {
+      if (!o.url) return null;
+    } else {
+      if (!o.url) return null;
+    }
+    if (!o.layers || typeof o.layers !== 'object') {
+      if (typ === 'LOCAL_KML' || typ === 'GOOGLE_MY_MAPS' || typ === 'REMOTE_KML') {
+        o.layers = { main: { title: 'KML', abstract: '', queryable: false } };
+      } else {
+        return null;
+      }
+    }
+    if (!Array.isArray(o.default_layers) || !o.default_layers.length) {
+      o.default_layers = Object.keys(o.layers).slice(0, 1);
+    }
+    return o;
+  }
+
+  function openMapsParseJsonCatalogText(text) {
+    if (text == null) return { errorKey: 'openmaps.json_catalog_error_empty', detail: '' };
+    var str = String(text);
+    if (str.length > OPEN_MAPS_JSON_CATALOG_MAX_BYTES) {
+      return { errorKey: 'openmaps.json_catalog_error_too_large', detail: String(str.length) };
+    }
+    var doc;
+    try {
+      doc = JSON.parse(str);
+    } catch (e) {
+      return { errorKey: 'openmaps.json_catalog_error_json', detail: String(e.message || e) };
+    }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+      return { errorKey: 'openmaps.json_catalog_error_shape', detail: '' };
+    }
+    var mapsArr = doc.maps;
+    if (!Array.isArray(mapsArr)) return { errorKey: 'openmaps.json_catalog_error_no_maps', detail: '' };
+    if (mapsArr.length > OPEN_MAPS_JSON_CATALOG_MAX_MAPS) {
+      return { errorKey: 'openmaps.json_catalog_error_too_many_maps', detail: String(mapsArr.length) };
+    }
+    return { errorKey: null, doc: doc, mapsArr: mapsArr };
+  }
+
+  function openMapsBuildJsonCatalogMapDefs(catalogInstanceId, mapsArr) {
+    var defs = [];
+    var seenEntryKeys = Object.create(null);
+    for (var i = 0; i < mapsArr.length; i++) {
+      var raw = mapsArr[i];
+      var san = openMapsSanitizeOneJsonCatalogMapImport(raw);
+      if (!san) continue;
+      var stableKey = String(san.id != null ? san.id : '') + '|' + String(san.url || '') + '|' + String(san.mid || '') + '|' + String(san.title || '') + '|' + i;
+      if (seenEntryKeys[stableKey]) continue;
+      seenEntryKeys[stableKey] = true;
+      var h = openMapsHash32(stableKey);
+      var newId = String(catalogInstanceId) + '-' + h;
+      var def = Object.assign({}, san, {
+        id: newId,
+        source: 'jsonCatalog',
+        origin: { kind: 'jsonCatalog', catalogId: String(catalogInstanceId), entryKey: stableKey }
+      });
+      delete def.openMapsExportMeta;
+      delete def.exportMeta;
+      defs.push(def);
+    }
+    if (!defs.length) return { errorKey: 'openmaps.json_catalog_error_no_valid_maps', detail: '' };
+    return { errorKey: null, defs: defs };
+  }
+
+  function openMapsApplyJsonCatalogDefs(catalogInstanceId, defs) {
+    openMapsWipeJsonCatalogMapsFromRegistry(catalogInstanceId);
+    for (var i = 0; i < defs.length; i++) {
+      var d = defs[i];
+      if (d && d.id != null) maps.set(d.id, d);
+    }
+  }
+
+  function openMapsApplyJsonCatalogTextToInstance(catalogInstanceId, text) {
+    var p1 = openMapsParseJsonCatalogText(text);
+    if (p1.errorKey) return p1;
+    var p2 = openMapsBuildJsonCatalogMapDefs(catalogInstanceId, p1.mapsArr);
+    if (p2.errorKey) return p2;
+    openMapsApplyJsonCatalogDefs(catalogInstanceId, p2.defs);
+    return { errorKey: null, count: p2.defs.length };
+  }
+
+  function openMapsSyncJsonCatalogOnce(cat, cb) {
+    var c = cat || {};
+    if (c.enabled === false) return cb && cb(null);
+    if (String(c.sourceType || 'url') === 'file') return cb && cb(null);
+    var url = String(c.url || '').trim();
+    if (!url) return cb && cb(new Error('bad_url'));
+    GM_xmlhttpRequest({
+      method: 'GET',
+      url: url + (url.indexOf('?') > -1 ? '&' : '?') + '_omjcts=' + Date.now(),
+      timeout: 40000,
+      onload: function(res) {
+        var st = res && res.status ? res.status : 0;
+        var body = res && res.responseText != null ? String(res.responseText) : '';
+        if (!res || st < 200 || st >= 400) {
+          openMapsJsonCatalogPersistRowFields(c.id, { lastFetchAt: Date.now(), lastError: 'HTTP ' + st, lastHttpStatus: st });
+          return cb && cb(new Error('http' + st));
+        }
+        var applied = openMapsApplyJsonCatalogTextToInstance(c.id, body);
+        if (applied.errorKey) {
+          openMapsJsonCatalogPersistRowFields(c.id, {
+            lastFetchAt: Date.now(),
+            lastError: I18n.t(applied.errorKey) + (applied.detail ? ' (' + applied.detail + ')' : ''),
+            lastHttpStatus: st
+          });
+          return cb && cb(new Error(applied.errorKey));
+        }
+        openMapsJsonCatalogPersistRowFields(c.id, { lastFetchAt: Date.now(), lastError: null, lastHttpStatus: st, lastMapCount: applied.count });
+        cb && cb(null);
+      },
+      onerror: function() {
+        openMapsJsonCatalogPersistRowFields(c.id, { lastFetchAt: Date.now(), lastError: I18n.t('openmaps.json_catalog_error_network'), lastHttpStatus: 0 });
+        cb && cb(new Error('network'));
+      },
+      ontimeout: function() {
+        openMapsJsonCatalogPersistRowFields(c.id, { lastFetchAt: Date.now(), lastError: I18n.t('openmaps.json_catalog_error_timeout'), lastHttpStatus: 0 });
+        cb && cb(new Error('timeout'));
+      }
+    });
+  }
+
+  function openMapsSyncAllJsonCatalogsOnStartup(eachDone) {
+    try {
+      var s = openMapsGetJsonCatalogSettings();
+      var arr = s.state.jsonCatalogs.filter(function(c) {
+        return c && c.enabled !== false && String(c.sourceType || 'url') === 'url' && String(c.url || '').trim();
+      });
+      if (!arr.length) {
+        if (eachDone) eachDone();
+        return;
+      }
+      var remain = arr.length;
+      function tick() {
+        remain--;
+        if (remain <= 0 && eachDone) {
+          try { eachDone(); } catch (eT) { /* ignore */ }
+        }
+      }
+      arr.forEach(function(c) {
+        openMapsSyncJsonCatalogOnce(c, function() {
+          try { openMapsInvalidateAddListCaches(); } catch (eInv) {}
+          try { updateMapSelector(); } catch (eSel) {}
+          try { if (typeof window.__openMapsRenderUserMapsLibrary === 'function') window.__openMapsRenderUserMapsLibrary(); } catch (eLib) {}
+          try { if (typeof window.__openMapsRenderJsonCatalogList === 'function') window.__openMapsRenderJsonCatalogList(); } catch (eJc) {}
+          tick();
+        });
+      });
+    } catch (eSyncJ) {
+      if (eachDone) eachDone();
+    }
+  }
+
+  function openMapsRunJsonCatalogStartupThen(doneCb) {
+    var s = openMapsGetJsonCatalogSettings();
+    var n = 0;
+    try {
+      s.state.jsonCatalogs.forEach(function(c) {
+        if (c && c.enabled !== false && String(c.sourceType || 'url') === 'url' && String(c.url || '').trim()) n++;
+      });
+    } catch (eN) { n = 0; }
+    if (!n) {
+      if (doneCb) doneCb();
+      return;
+    }
+    var called = false;
+    function finish() {
+      if (called) return;
+      called = true;
+      if (doneCb) {
+        try { doneCb(); } catch (eD) { /* ignore */ }
+      }
+    }
+    var t = setTimeout(finish, 60000);
+    openMapsSyncAllJsonCatalogsOnStartup(function() {
+      clearTimeout(t);
+      finish();
+    });
+  }
+
+  function openMapsMapProvenanceI18nKey(map) {
+    if (!map) return 'openmaps.map_provenance_unknown';
+    if (map.origin && map.origin.kind === 'jsonCatalog') return 'openmaps.map_provenance_json_catalog';
+    if (map.origin && map.origin.kind === 'repo') return 'openmaps.map_provenance_sheet_repo';
+    if (map.source === 'jsonCatalog') return 'openmaps.map_provenance_json_catalog';
+    if (map.type === 'GOOGLE_MY_MAPS') return 'openmaps.map_provenance_my_maps';
+    if (map.type === 'LOCAL_KML') return 'openmaps.map_provenance_upload';
+    if (map.type === 'REMOTE_KML') return 'openmaps.map_provenance_remote_kml';
+    if (map.source === 'user') return 'openmaps.map_provenance_user';
+    return 'openmaps.map_provenance_builtin';
+  }
+
+  function openMapsStripVolatileMapFieldsForExport(obj) {
+    var o = obj && typeof obj === 'object' ? JSON.parse(JSON.stringify(obj)) : {};
+    delete o.addedAt;
+    delete o.removedUpstream;
+    delete o.__proto__;
+    return o;
+  }
+
+  function openMapsSerializeMapRowForCatalogExport(map, handleOpt, context) {
+    if (!map) return null;
+    var base = openMapsStripVolatileMapFieldsForExport(map);
+    var provKey = openMapsMapProvenanceI18nKey(map);
+    base.openMapsExportMeta = {
+      provenanceKey: provKey,
+      context: context === 'library' ? 'library' : 'active',
+      originalMapId: map.id != null ? map.id : null
+    };
+    if (handleOpt && handleOpt.getLayersForPersistence) {
+      try {
+        var pl = handleOpt.getLayersForPersistence();
+        var vis = [];
+        for (var i = 0; i < pl.length; i++) {
+          if (pl[i] && pl[i].visible) vis.push(pl[i].name);
+        }
+        if (vis.length) base.default_layers = vis.slice();
+      } catch (eL) { /* ignore */ }
+    }
+    if (map.type === 'LOCAL_KML' && map.kmlText) {
+      var kt = String(map.kmlText);
+      if (kt.length > 120000) {
+        base.kmlText = '';
+        base.openMapsExportMeta.kmlOmitted = true;
+        base.openMapsExportMeta.kmlCharCount = kt.length;
+        if (map.kmlFileName) base.kmlFileName = map.kmlFileName;
+      }
+    }
+    return base;
+  }
+
   function openMapsGoogleMyMapsKmlUrlFromMid(mid) {
     var m = String(mid || '').trim();
     if (!m) return null;
@@ -13588,7 +14642,8 @@ function loadTileError(tile, callback) {
     if (!openMapsGoogleMyMapsIntegrationEnabled()) return false;
     return true;
   }
-  if (Settings.exists()) {
+  function openMapsRestorePersistedActiveHandlesIfNeeded() {
+    if (!Settings.exists()) return;
     var settings = Settings.get();
     settings.state.active.forEach(function(mapHandle) {
       if (!maps.has(mapHandle.mapId)) return;
@@ -13619,11 +14674,17 @@ function loadTileError(tile, callback) {
       openMapsRefreshAllWazeNotListedGates();
     } catch (eBootG) { /* ignore */ }
   }
+  function openMapsFinishBootMapUiAfterCatalogs() {
+    openMapsRestorePersistedActiveHandlesIfNeeded();
+    try {
+      updateMapSelector();
+    } catch (eSel0) { /* ignore */ }
+    try {
+      refreshMapDrag();
+    } catch (eRd0) { /* ignore */ }
+  }
+  openMapsRunJsonCatalogStartupThen(openMapsFinishBootMapUiAfterCatalogs);
   //#endregion
-
-  // FIX: Force the search list to recalculate AFTER saved maps are restored!
-  updateMapSelector();
-  refreshMapDrag(); // Make saved maps draggable on boot!
 
   var OPEN_MAPS_TROUBLESHOOT_STORAGE_KEY = 'openmaps-troubleshoot';
 
@@ -14277,7 +15338,8 @@ function MapHandle(map, options) {
       else if (map.type === 'GOOGLE_MY_MAPS') parts.push(I18n.t('openmaps.layer_tag_google_mymaps'));
       else {
         var kind = getLayerOriginKind(name);
-        if (kind === 'curated') parts.push(I18n.t('openmaps.layer_tag_curated'));
+        if (map.origin && map.origin.kind === 'jsonCatalog') parts.push(I18n.t('openmaps.layer_tag_json_catalog'));
+        else if (kind === 'curated') parts.push(I18n.t('openmaps.layer_tag_curated'));
         else if (kind === 'cloud') parts.push(I18n.t('openmaps.layer_tag_cloud'));
         else parts.push(I18n.t('openmaps.layer_tag_unknown'));
       }
@@ -15334,7 +16396,8 @@ UI.editBtn = createIconButton('fa-chevron-down', I18n.t('openmaps.map_options_to
           appendLayerTag('openmaps.layer_tag_google_mymaps');
         } else {
           var okind = getLayerOriginKind(layerItem.name);
-          if (okind === 'curated') appendLayerTag('openmaps.layer_tag_curated');
+          if (map.origin && map.origin.kind === 'jsonCatalog') appendLayerTag('openmaps.layer_tag_json_catalog');
+          else if (okind === 'curated') appendLayerTag('openmaps.layer_tag_curated');
           else if (okind === 'cloud') appendLayerTag('openmaps.layer_tag_cloud');
           else appendLayerTag('openmaps.layer_tag_unknown');
         }
